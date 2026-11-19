@@ -4,10 +4,13 @@ title: Decide the plugin model and the parser basis for format support
 status: To Do
 assignee: []
 created_date: '2026-11-19 16:28'
+updated_date: '2026-11-19 20:51'
 labels: []
 milestone: m-0
 dependencies:
   - TASK-1
+documentation:
+  - backlog/docs/doc-1 - Prior-art-outline-storage-and-node-addressing.md
 priority: high
 type: spike
 ordinal: 3000
@@ -25,6 +28,7 @@ Format support (Markdown, Rust, HTML) and views (complexity, comments) should co
 - [ ] #2 The decision defines the inputs and outputs of a format plugin and of a view plugin, at the level of a draft interface
 - [ ] #3 The decision chooses tree-sitter grammars, per-format parsers, or a mix, and states the effect on anchors
 - [ ] #4 The decision states how M1 built-in format support maps onto the format-plugin interface
+- [ ] #5 The view-plugin interface treats references as values the host understands, not as private plugin data: a plugin can write references, and a plugin such as a backlink view can list the references that point at a node from any source file. TASK-2 defines the reference format itself
 <!-- AC:END -->
 
 ## Definition of Done

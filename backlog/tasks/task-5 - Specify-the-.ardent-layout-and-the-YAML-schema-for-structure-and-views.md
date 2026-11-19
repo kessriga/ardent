@@ -4,13 +4,15 @@ title: Specify the .ardent/ layout and the YAML schema for structure and views
 status: To Do
 assignee: []
 created_date: '2026-11-19 16:29'
-updated_date: '2026-11-19 16:29'
+updated_date: '2026-11-19 20:51'
 labels: []
 milestone: m-0
 dependencies:
   - TASK-2
   - TASK-3
   - TASK-4
+documentation:
+  - backlog/docs/doc-1 - Prior-art-outline-storage-and-node-addressing.md
 priority: high
 type: spike
 ordinal: 5000
@@ -28,6 +30,7 @@ ordinal: 5000
 - [ ] #2 The schema carries a format version so a later change can migrate old files
 - [ ] #3 The decision covers project-level configuration such as which files are tracked
 - [ ] #4 An OpenSpec change named task-5-<slug> adds a spec for the YAML schema of a structure file and of a view file, with one worked example each for a Markdown file and a Rust file, and is archived into openspec/specs/
+- [ ] #5 The layout states where the project-wide backlink index lives, and that Ardent derives it from views and can rebuild it
 <!-- AC:END -->
 
 ## Definition of Done
