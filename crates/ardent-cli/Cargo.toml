@@ -1,0 +1,15 @@
+[package]
+name = "ardent-cli"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "ardent"
+path = "src/main.rs"
+
+[dependencies]
+ardent-core.workspace = true
+
+[lints]
+workspace = true
