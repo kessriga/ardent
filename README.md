@@ -48,8 +48,9 @@ and an index from each node to the references that point at it.
 
 These questions decide the design. Each one is a spike task in milestone M0.
 
-- How do anchors and references point at a node, in the same source file or another one, so that the link survives
-  edits? Byte offsets, tree paths, content hashes, and stable IDs are all candidates.
+- Decided in decision-1: anchors and references address a node by its node path, such as
+  `docs/spec.md#Sync rules/Renames`, and keep a fingerprint of its content to find it again after a rename or move. A
+  reference in view content has the form `@[docs/spec.md#Sync rules]`.
 - How do the source file and its structure stay in sync when someone edits the source outside Ardent?
 - What is the exact layout of `.ardent/` and the YAML schema for structure and views?
 - What does a plugin export, and which WebAssembly runtime hosts it?
@@ -63,6 +64,8 @@ Use these terms with these meanings in code, specs, and tasks.
 | source file   | A file in the user's project. Ardent reads it; the user owns it.                          |
 | node          | One element of a source file's structure, such as a heading or a function.                |
 | outline       | The tree of nodes for one source file.                                                    |
+| node path     | The address of a node: file path, `#`, and node labels joined by `/`.                     |
+| fingerprint   | A hash of a node's content without its label. It finds a node again after a rename.       |
 | structure     | The stored form of an outline in `.ardent/`.                                              |
 | view          | Extra data attached to nodes of an outline, stored next to the structure.                 |
 | anchor        | The link that attaches a view entry to a node or a range of a source file.                |
