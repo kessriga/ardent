@@ -2,7 +2,8 @@
 
 Ardent is a Rust terminal outliner that derives a tree of nodes from structured source files (Markdown, Rust, HTML) and
 attaches views to those nodes. Read `README.md` for the idea and the glossary. Use the glossary terms exactly: *node*,
-*outline*, *structure*, *view*, *anchor*, *reference*, *backlink*, *format plugin*, *view plugin*.
+*outline*, *node path*, *fingerprint*, *structure*, *view*, *anchor*, *reference*, *backlink*, *format plugin*,
+*view plugin*.
 
 ## Sources of truth
 
