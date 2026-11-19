@@ -51,7 +51,8 @@ These questions decide the design. Each one is a spike task in milestone M0.
 - Decided in decision-1: anchors and references address a node by its node path, such as
   `docs/spec.md#Sync rules/Renames`, and keep a fingerprint of its content to find it again after a rename or move. A
   reference in view content has the form `@[docs/spec.md#Sync rules]`.
-- How do the source file and its structure stay in sync when someone edits the source outside Ardent?
+- Decided in decision-2: every Ardent command first checks the tracked files for changes and re-scans the changed ones.
+  The structure is a local cache; only the views and the project configuration go into git.
 - What is the exact layout of `.ardent/` and the YAML schema for structure and views?
 - What does a plugin export, and which WebAssembly runtime hosts it?
 
@@ -66,7 +67,8 @@ Use these terms with these meanings in code, specs, and tasks.
 | outline       | The tree of nodes for one source file.                                                    |
 | node path     | The address of a node: file path, `#`, and node labels joined by `/`.                     |
 | fingerprint   | A hash of a node's content without its label. It finds a node again after a rename.       |
-| structure     | The stored form of an outline in `.ardent/`.                                              |
+| structure     | The stored form of an outline in `.ardent/`. A local cache that Ardent rebuilds.          |
+| sync          | Re-scans changed source files and re-resolves links. Every command runs it first.         |
 | view          | Extra data attached to nodes of an outline, stored next to the structure.                 |
 | anchor        | The link that attaches a view entry to a node or a range of a source file.                |
 | reference     | A link written inside view content to a node anywhere in the project, such as `@foo`.     |
