@@ -31,12 +31,25 @@ Running `ardent init` in a project creates a `.ardent/` directory. For each trac
 Format support (how to parse Rust, Markdown, and so on) and views (complexity, comments) come from **plugins**.
 WebAssembly is the likely plugin format, because the same plugins could then run in a future web UI.
 
+### Example: comments and backlinks
+
+A developer uses the comment plugin to leave a comment on a Rust function: "This function contradicts @foo and also
+function @bar."
+
+- The comment is a view entry. Its anchor attaches it to the function.
+- `@foo` is a reference to one section of a Markdown spec document.
+- `@bar` is a reference to a function in a different source file.
+
+When someone opens that spec section or the function `bar`, the backlink plugin shows the comment as a backlink. Ardent
+therefore needs one addressing scheme that covers every node in the project, a reference syntax that a person can type,
+and an index from each node to the references that point at it.
+
 ## Open questions
 
 These questions decide the design. Each one is a spike task in milestone M0.
 
-- How does a view node point at a part of the source file so that the link survives edits? Byte offsets, tree paths,
-  content hashes, and stable IDs are all candidates.
+- How do anchors and references point at a node, in the same source file or another one, so that the link survives
+  edits? Byte offsets, tree paths, content hashes, and stable IDs are all candidates.
 - How do the source file and its structure stay in sync when someone edits the source outside Ardent?
 - What is the exact layout of `.ardent/` and the YAML schema for structure and views?
 - What does a plugin export, and which WebAssembly runtime hosts it?
@@ -52,7 +65,9 @@ Use these terms with these meanings in code, specs, and tasks.
 | outline       | The tree of nodes for one source file.                                                    |
 | structure     | The stored form of an outline in `.ardent/`.                                              |
 | view          | Extra data attached to nodes of an outline, stored next to the structure.                 |
-| anchor        | The reference from a view entry to a node or a range of a source file.                    |
+| anchor        | The link that attaches a view entry to a node or a range of a source file.                |
+| reference     | A link written inside view content to a node anywhere in the project, such as `@foo`.     |
+| backlink      | A reference seen from its target: the list of view entries that point at a node.          |
 | format plugin | A plugin that turns a source file of one format into an outline.                          |
 | view plugin   | A plugin that computes a view, for example cyclomatic complexity.                         |
 
