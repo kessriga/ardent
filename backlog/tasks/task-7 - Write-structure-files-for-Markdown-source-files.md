@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-19 16:29'
-updated_date: '2026-11-20 13:11'
+updated_date: '2026-11-20 13:31'
 labels: []
 milestone: m-1
 dependencies:
@@ -52,6 +52,12 @@ Markdown is the simplest structured format and the closest to what Roam and Tana
 4. ardent-cli: project_root::find returns I/O errors and keeps the physical working directory, as git and cargo do; tracked-file walk with the ignore crate, which skips and reports nested projects; ardent sync with lock, stamp check, re-scan, and removal of stale structure files. Integration tests.
 5. README, specs, verification gate, archive the change, finalize the task.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented the OpenSpec change task-7-markdown-structure: 13/13 tasks done. ardent sync writes structure files for tracked Markdown files. New crate ardent-format holds the outline engine (query captures @node/@label, properties kind and level) and the built-in markdown plugin 0.1.0. decision-5 records the level property. The PR #7 review findings are fixed: write_atomic rejects absolute and .. paths and creates parents; project_root::find reports I/O errors; the root search keeps the physical working directory, as git and cargo do. Nested projects are skipped and reported. Gate: fmt, clippy, and 91 tests pass; openspec validate --strict passes. Manual run on a copy of this repo: 54 files synced in about 1 s; a second run scanned 0.
+<!-- SECTION:NOTES:END -->
 
 ## Comments
 
