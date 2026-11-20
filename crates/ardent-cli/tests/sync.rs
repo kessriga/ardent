@@ -531,6 +531,12 @@ fn symlink_in_the_cache_stops_the_sync() -> TestResult {
     let run = project.sync()?;
     assert_eq!(run.code(), Some(1), "stderr: {}", run.stderr());
     assert!(run.stderr().contains("symlink"), "{}", run.stderr());
+    assert_eq!(
+        run.stderr().matches(".ardent/cache/files").count(),
+        1,
+        "{}",
+        run.stderr()
+    );
     assert_eq!(snapshot(outside.path())?, before);
     Ok(())
 }

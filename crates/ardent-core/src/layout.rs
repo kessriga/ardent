@@ -65,7 +65,8 @@ pub fn remove_empty_cache(ardent_dir: &Path) -> io::Result<()> {
 
 /// Creates the directory `relative_path` inside `ardent_dir` and each of its missing parents, and returns its path.
 /// Fails with `NotADirectory` when one of them exists as a symlink or a file: a cloned repository can commit a symlink
-/// into `.ardent/`, and Ardent would then write and delete files outside the project.
+/// into `.ardent/`, and Ardent would then write and delete files outside the project. Each error names the directory
+/// that failed.
 pub fn create_dir(ardent_dir: &Path, relative_path: &str) -> io::Result<PathBuf> {
     create_real_dirs(ardent_dir, checked_relative_path(relative_path)?)
 }
@@ -77,9 +78,12 @@ fn create_real_dirs(ardent_dir: &Path, relative_path: &Path) -> io::Result<PathB
         if let Err(err) = fs::create_dir(&dir)
             && err.kind() != io::ErrorKind::AlreadyExists
         {
-            return Err(err);
+            return Err(at(&dir, err));
         }
-        if !fs::symlink_metadata(&dir)?.is_dir() {
+        if !fs::symlink_metadata(&dir)
+            .map_err(|err| at(&dir, err))?
+            .is_dir()
+        {
             return Err(io::Error::new(
                 io::ErrorKind::NotADirectory,
                 format!("{} is a symlink or a file, not a directory", dir.display()),
@@ -87,6 +91,11 @@ fn create_real_dirs(ardent_dir: &Path, relative_path: &Path) -> io::Result<PathB
         }
     }
     Ok(dir)
+}
+
+/// `err` with `path` in front of its message, because an `io::Error` from std does not name the path.
+fn at(path: &Path, err: io::Error) -> io::Error {
+    io::Error::new(err.kind(), format!("{}: {err}", path.display()))
 }
 
 fn tmp_dir(ardent_dir: &Path) -> PathBuf {
@@ -221,6 +230,24 @@ mod tests {
         let err = create_dir(&ardent_dir, "cache/files").err();
         assert_eq!(err.map(|e| e.kind()), Some(io::ErrorKind::NotADirectory));
         assert_eq!(fs::read_dir(&outside)?.count(), 0);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn names_the_directory_that_failed() -> io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let ardent_dir = tempfile::tempdir()?;
+        fs::set_permissions(ardent_dir.path(), fs::Permissions::from_mode(0o555))?;
+        let err = create_dir(ardent_dir.path(), "cache/files").err();
+        fs::set_permissions(ardent_dir.path(), fs::Permissions::from_mode(0o755))?;
+        let message = err.map(|e| e.to_string()).unwrap_or_default();
+        let cache = ardent_dir.path().join("cache");
+        assert!(
+            message.starts_with(&format!("{}: ", cache.display())),
+            "{message}"
+        );
         Ok(())
     }
 

@@ -22,10 +22,24 @@ use crate::tracked::{self, FormatPatterns, PatternError, Patterns, TrackedFile};
 /// Why a sync did not run. Nothing in `.ardent/` changed, except that the lock file may exist.
 pub enum SyncError {
     NoProject(PathBuf),
-    Io { path: PathBuf, source: io::Error },
-    Config { path: PathBuf, source: ConfigError },
-    Pattern { path: PathBuf, source: PatternError },
-    Plugin { name: String, source: PluginError },
+    Io {
+        path: PathBuf,
+        source: io::Error,
+    },
+    /// A directory in `.ardent/` could not be created. The error names it.
+    CreateDir(io::Error),
+    Config {
+        path: PathBuf,
+        source: ConfigError,
+    },
+    Pattern {
+        path: PathBuf,
+        source: PatternError,
+    },
+    Plugin {
+        name: String,
+        source: PluginError,
+    },
 }
 
 impl fmt::Display for SyncError {
@@ -37,6 +51,7 @@ impl fmt::Display for SyncError {
                 dir.display()
             ),
             Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
+            Self::CreateDir(source) => write!(f, "{source}"),
             Self::Config { path, source } => write!(f, "{}: {source}", path.display()),
             Self::Pattern { path, source } => write!(f, "{}: {source}", path.display()),
             Self::Plugin { name, source } => write!(f, "built-in format plugin {name}: {source}"),
@@ -187,10 +202,7 @@ fn lock(ardent_dir: &Path) -> Result<File, SyncError> {
 
 /// Creates the directory `relative_path` in `.ardent/`, and fails when a part of it is a symlink.
 fn create_dir(ardent_dir: &Path, relative_path: &str) -> Result<PathBuf, SyncError> {
-    layout::create_dir(ardent_dir, relative_path).map_err(|source| SyncError::Io {
-        path: ardent_dir.join(relative_path),
-        source,
-    })
+    layout::create_dir(ardent_dir, relative_path).map_err(SyncError::CreateDir)
 }
 
 /// Brings the structure file of the tracked file `path` up to date: keeps it when the stamp matches, updates only the
