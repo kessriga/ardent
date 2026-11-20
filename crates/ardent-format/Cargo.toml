@@ -1,0 +1,17 @@
+[package]
+name = "ardent-format"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ardent-core.workspace = true
+blake3 = "1.8.7"
+tree-sitter = "0.27.2"
+tree-sitter-md = "=0.5.4"
+
+[dev-dependencies]
+insta = "1.49.0"

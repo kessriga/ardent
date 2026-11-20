@@ -30,7 +30,7 @@ Each task ends with a passing `cargo fmt --check`, `cargo clippy --all-targets -
 
 ## 3. Outline engine and Markdown plugin in ardent-format
 
-- [ ] 3.1 Create the crate `ardent-format` with `tree-sitter` 0.27.2 and `tree-sitter-md` pinned to `=0.5.4`, and the
+- [x] 3.1 Create the crate `ardent-format` with `tree-sitter` 0.27.2 and `tree-sitter-md` pinned to `=0.5.4`, and the
       module `engine`: query compilation with `kind` and `level`, candidate nodes, containment, nesting by level, and
       labels; verify with unit tests for the scenarios of the spec `outline` that use a query, including "Invalid level"
 - [ ] 3.2 Add the module `markdown` with `outline.scm`, the plugin constant, and `format_hash`; verify that the spec
