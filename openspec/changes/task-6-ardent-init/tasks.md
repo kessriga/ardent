@@ -16,12 +16,12 @@
       `.ardent/.gitignore` and `.ardent/config.yaml` with the bytes from "Initial content" and nothing else changes; an
       existing `.ardent/` directory, an `.ardent` file, or a `.ardent/` directory in a parent directory gives a nonzero
       exit, a message, and an unchanged tree; verify with `cargo test` and the gate
-- [ ] 2.3 Update `README.md` so the status and "How it should work" describe the working `ardent init`; verify with
+- [x] 2.3 Update `README.md` so the status and "How it should work" describe the working `ardent init`; verify with
   `rumdl fmt --no-cache --enable MD013 README.md`
 
 ## 3. Checks
 
-- [ ] 3.1 Run `openspec validate task-6-ardent-init --strict` and the gate, and verify that all pass
+- [x] 3.1 Run `openspec validate task-6-ardent-init --strict` and the gate, and verify that all pass
 
 ## Workflow follow-up
 
