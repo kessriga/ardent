@@ -297,6 +297,36 @@ is valid UTF-8. A nested project is a directory below the project root that cont
 - **THEN** the sync reports `tools/` as a nested project
 - **AND** Ardent does not track `tools/README.md`
 
+### Requirement: Format patterns match files
+
+A `files` pattern SHALL match the path of the file itself. A file SHALL NOT match because a directory above it matches.
+
+#### Scenario: Directory with the name of a format pattern
+
+- **WHEN** the project holds `notes.md/image.png`
+- **THEN** Ardent does not track `notes.md/image.png`
+
+### Requirement: Ignore files above the project
+
+Git's ignore rules SHALL include the `.gitignore` files above the project root up to the root of its git repository. No
+`.gitignore` file outside a nested git repository SHALL apply inside it.
+
+#### Scenario: Ignore file above the git repository
+
+- **WHEN** `/work/.gitignore` contains `*.md`, `/work/repo/` is a git repository and the project root, and
+  `/work/repo/README.md` exists
+- **THEN** Ardent tracks `README.md`
+
+### Requirement: Excluded directories
+
+Ardent SHALL NOT read a directory that an `exclude` pattern matches.
+
+#### Scenario: Unreadable directory under an excluded directory
+
+- **WHEN** `config.yaml` contains `exclude: ["vendor/"]`, `vendor/secret/` cannot be read, and `vendor/lib/.ardent/`
+  exists
+- **THEN** a sync reports neither directory and exits with status 0
+
 ### Requirement: Plugin locations
 
 Ardent SHALL load plugins only from its binary (the built-in plugins) and from `.ardent/plugins/<name>/`. A project

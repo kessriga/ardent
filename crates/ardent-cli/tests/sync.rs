@@ -461,3 +461,76 @@ fn nested_project_is_skipped_and_reported() -> TestResult {
     assert!(!project.structure_path("tools/README.md").exists());
     Ok(())
 }
+
+#[test]
+fn same_size_edit_within_one_clock_tick_is_scanned() -> TestResult {
+    let project = Project::new()?;
+    project.sync()?.assert_success();
+    let readme = project.path("README.md");
+    let mtime = fs::metadata(&readme)?.modified()?;
+    project.write("README.md", "# Readme\n\nRead it.\n")?;
+    // A coarse clock gives the edit, and the structure file written just before it, the mtime of the old content.
+    for path in [readme, project.structure_path("README.md")] {
+        fs::File::options()
+            .write(true)
+            .open(path)?
+            .set_modified(mtime)?;
+    }
+    let run = project.sync()?;
+    run.assert_success();
+    assert!(run.stdout().contains("1 scanned"), "{}", run.stdout());
+    Ok(())
+}
+
+#[test]
+fn renamed_file_gets_a_structure_file_under_its_new_name() -> TestResult {
+    let project = Project::new()?;
+    project.sync()?.assert_success();
+    fs::rename(project.path("README.md"), project.path("Readme.md"))?;
+    project.sync()?.assert_success();
+    let names: Vec<String> = fs::read_dir(project.path(".ardent/cache/files"))?
+        .map(|entry| entry.map(|entry| entry.file_name().to_string_lossy().into_owned()))
+        .collect::<io::Result<_>>()?;
+    assert!(
+        names.contains(&"Readme.md".to_string()) && !names.contains(&"README.md".to_string()),
+        "{names:?}"
+    );
+    assert!(
+        project
+            .structure("Readme.md")?
+            .contains("path: Readme.md\n")
+    );
+    Ok(())
+}
+
+#[test]
+fn invalid_pattern_in_the_configuration_fails_and_writes_nothing() -> TestResult {
+    let project = Project::new()?;
+    let config = fs::read_to_string(project.path(".ardent/config.yaml"))?;
+    fs::write(
+        project.path(".ardent/config.yaml"),
+        config.replace("exclude: []", r#"exclude: ["[z-a]"]"#),
+    )?;
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1));
+    assert!(run.stderr().contains("config.yaml"), "{}", run.stderr());
+    assert!(run.stderr().contains("invalid pattern"), "{}", run.stderr());
+    assert!(!project.path(".ardent/cache").exists());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_in_the_cache_stops_the_sync() -> TestResult {
+    let project = Project::new()?;
+    let outside = temp_dir()?;
+    fs::create_dir(outside.path().join("empty"))?;
+    fs::create_dir(project.path(".ardent/cache"))?;
+    std::os::unix::fs::symlink(outside.path(), project.path(".ardent/cache/files"))?;
+    let before = snapshot(outside.path())?;
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1), "stderr: {}", run.stderr());
+    assert!(run.stderr().contains("symlink"), "{}", run.stderr());
+    assert_eq!(snapshot(outside.path())?, before);
+    Ok(())
+}

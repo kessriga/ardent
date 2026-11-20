@@ -53,7 +53,9 @@ Out of scope:
 ### Modified Capabilities
 
 - `ardent-layout`: "Project root" reports I/O errors and uses the working directory with symlinks resolved. "Tracked
-  files" excludes the files of nested projects.
+  files" excludes the files of nested projects. New requirements state that a `files` pattern matches the file path
+  itself, that `.gitignore` files apply up to the git repository root, and that the walk does not read excluded
+  directories.
 
 ## Impact
 

@@ -7,6 +7,7 @@ use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use ardent_core::config::{self, Config, ConfigError};
 use ardent_core::layout::{self, ARDENT_DIR, CACHE_DIR, FILES_DIR, LOCK_FILE, STRUCTURE_FILE};
@@ -16,7 +17,7 @@ use ardent_format::engine::{FormatPlugin, PluginError};
 use ardent_format::markdown;
 
 use crate::project_root;
-use crate::tracked::{self, FormatPatterns, PatternError};
+use crate::tracked::{self, FormatPatterns, PatternError, Patterns, TrackedFile};
 
 /// Why a sync did not run. Nothing in `.ardent/` changed, except that the lock file may exist.
 pub enum SyncError {
@@ -68,18 +69,27 @@ pub fn run(working_dir: &Path) -> Result<Report, SyncError> {
     let plugins = builtin_plugins()?;
     let mut report = Report::default();
     let formats = enabled_formats(&config, &plugins, &mut report.warnings);
+    let patterns =
+        Patterns::new(&root, &formats.patterns(), &config.exclude).map_err(|source| {
+            SyncError::Pattern {
+                path: ardent_dir.join(config::FILE_NAME),
+                source,
+            }
+        })?;
     let _lock = lock(&ardent_dir)?;
-    let walk = tracked::walk(&root, &formats.patterns(), &config.exclude).map_err(|source| {
-        SyncError::Pattern {
-            path: ardent_dir.join(config::FILE_NAME),
-            source,
-        }
-    })?;
+    let files_dir = create_dir(&ardent_dir, FILES_DIR)?;
+    let walk = tracked::walk(&root, &patterns);
     report
         .warnings
         .extend(walk.warnings.iter().map(ToString::to_string));
     report.errors.extend(walk.errors.iter().cloned());
     report.tracked = walk.files.len();
+    // An incomplete walk lists too few files, so it must not delete the structure of the files it missed. Pruning comes
+    // before the scans: where file names ignore letter case, `Readme.md` would otherwise reuse the directory of the
+    // old `README.md`, which pruning then deletes.
+    if walk.errors.is_empty() {
+        report.removed = prune(&files_dir, &walk.files, &mut report.errors);
+    }
     for file in &walk.files {
         let plugin = formats.plugins[file.format];
         match sync_file(&root, &ardent_dir, &file.path, plugin) {
@@ -87,17 +97,6 @@ pub fn run(working_dir: &Path) -> Result<Report, SyncError> {
             Ok(Outcome::Unchanged | Outcome::Restamped) => {}
             Err(err) => report.errors.push(format!("{}: {err}", file.path)),
         }
-    }
-    // An incomplete walk lists too few files, so it must not delete the structure of the files it missed.
-    if walk.errors.is_empty() {
-        let tracked: HashSet<&str> = walk.files.iter().map(|file| file.path.as_str()).collect();
-        let mut pruner = Pruner {
-            tracked: &tracked,
-            removed: 0,
-            errors: &mut report.errors,
-        };
-        pruner.prune(&ardent_dir.join(FILES_DIR), "");
-        report.removed = pruner.removed;
     }
     Ok(report)
 }
@@ -174,8 +173,7 @@ fn enabled_formats<'a>(
 /// Takes the lock of the spec `ardent-layout`, which the operating system releases when the process ends.
 fn lock(ardent_dir: &Path) -> Result<File, SyncError> {
     let io_error = |path: PathBuf| move |source| SyncError::Io { path, source };
-    let cache_dir = ardent_dir.join(CACHE_DIR);
-    fs::create_dir_all(&cache_dir).map_err(io_error(cache_dir))?;
+    create_dir(ardent_dir, CACHE_DIR)?;
     let path = ardent_dir.join(LOCK_FILE);
     let file = File::options()
         .create(true)
@@ -185,6 +183,14 @@ fn lock(ardent_dir: &Path) -> Result<File, SyncError> {
         .map_err(io_error(path.clone()))?;
     file.lock().map_err(io_error(path))?;
     Ok(file)
+}
+
+/// Creates the directory `relative_path` in `.ardent/`, and fails when a part of it is a symlink.
+fn create_dir(ardent_dir: &Path, relative_path: &str) -> Result<PathBuf, SyncError> {
+    layout::create_dir(ardent_dir, relative_path).map_err(|source| SyncError::Io {
+        path: ardent_dir.join(relative_path),
+        source,
+    })
 }
 
 /// Brings the structure file of the tracked file `path` up to date: keeps it when the stamp matches, updates only the
@@ -200,10 +206,10 @@ fn sync_file(
     let (size, mtime) = (metadata.len(), metadata.modified()?);
     let structure_path = layout::structure_path(path);
     let previous = read_structure(&ardent_dir.join(&structure_path))
-        .filter(|old| built_by(&old.stamp, plugin));
+        .filter(|(old, _)| built_by(&old.stamp, plugin));
     if previous
         .as_ref()
-        .is_some_and(|old| old.stamp.size == size && old.stamp.mtime == mtime)
+        .is_some_and(|(old, written)| is_unchanged(&old.stamp, size, mtime, *written))
     {
         return Ok(Outcome::Unchanged);
     }
@@ -218,7 +224,7 @@ fn sync_file(
         format_hash: plugin.format_hash.clone(),
     };
     let (outline, outcome) = match previous {
-        Some(old) if old.stamp.hash == stamp.hash => (old.outline, Outcome::Restamped),
+        Some((old, _)) if old.stamp.hash == stamp.hash => (old.outline, Outcome::Restamped),
         _ => (
             Outline::build(path, &source, &plugin.scan(&source)?),
             Outcome::Scanned,
@@ -229,16 +235,37 @@ fn sync_file(
     Ok(outcome)
 }
 
-/// The structure file at `path`, or `None` when it is missing or cannot be read, so that the sync builds it again.
-fn read_structure(path: &Path) -> Option<Structure> {
+/// The structure file at `path` and the time it was written, or `None` when it is missing or cannot be read, so that
+/// the sync builds it again.
+fn read_structure(path: &Path) -> Option<(Structure, SystemTime)> {
     let text = fs::read_to_string(path).ok()?;
-    Structure::from_yaml(&text).ok()
+    let written = fs::metadata(path).and_then(|m| m.modified()).ok()?;
+    Some((Structure::from_yaml(&text).ok()?, written))
+}
+
+/// Whether a source file with `size` and `mtime` still has the content of `stamp`, without reading it. A file whose
+/// mtime is not older than its structure file may have changed again within one tick of a coarse clock, so the sync
+/// compares its content hash.
+fn is_unchanged(stamp: &Stamp, size: u64, mtime: SystemTime, written: SystemTime) -> bool {
+    stamp.size == size && stamp.mtime == mtime && mtime < written
 }
 
 fn built_by(stamp: &Stamp, plugin: &FormatPlugin) -> bool {
     stamp.format == plugin.name
         && stamp.format_version == plugin.version
         && stamp.format_hash == plugin.format_hash
+}
+
+/// Deletes the structure files in `files_dir` of source files that are not tracked, and returns how many.
+fn prune(files_dir: &Path, files: &[TrackedFile], errors: &mut Vec<String>) -> usize {
+    let tracked: HashSet<&str> = files.iter().map(|file| file.path.as_str()).collect();
+    let mut pruner = Pruner {
+        tracked: &tracked,
+        removed: 0,
+        errors,
+    };
+    pruner.prune(files_dir, "");
+    pruner.removed
 }
 
 /// Deletes the structure files of source files that are not tracked, and the directories under `cache/files/` that

@@ -135,25 +135,32 @@ next sync hashes the file again and only updates the time.
 - `.ignore` files: not read, because decision-4 names only git's rules;
 - `.gitignore` and `.git/info/exclude`: read, also when the project is not a git repository yet, so that `target/` stays
   untracked before `git init`;
-- `.gitignore` files above the project root: read only inside a git repository, up to its root, as git does. Outside a
-  repository, the `ignore` crate would read every `.gitignore` up to `/`, such as a `~/.gitignore` that git uses as its
-  global excludes file;
+- `.gitignore` files above the project root: read only inside a git repository, up to its root, as git does. Inside a
+  repository, `require_git` is on, because only then does the `ignore` crate stop at the repository root. Otherwise it
+  reads every `.gitignore` up to `/`, such as a `~/.gitignore` that git uses as its global excludes file. With
+  `require_git` on, a nested git repository also gets no rule from outside it, as in git;
 - the global git excludes file: not read, because it differs between machines, and node paths must not;
 - symbolic links: not followed. A link to a file is not tracked, because git stores the link and not the content.
 
-A filter skips `.git` and `.ardent`, and it stops at each directory that contains `.ardent/`, which it reports as a
-nested project. Format and `exclude` patterns use `ignore::gitignore::GitignoreBuilder`. A pattern list matches a file
-when git would ignore the file under those lines. So `vendor/` matches every file below `vendor/`, as in `.gitignore`.
-The walk returns the tracked files sorted by path.
+A filter skips `.git`, `.ardent`, and each path that an `exclude` pattern matches, so the walk never reads an excluded
+directory. It stops at each directory that contains `.ardent/`, which it reports as a nested project. Format and
+`exclude` patterns use `ignore::gitignore::GitignoreBuilder`, and the sync compiles them before it takes the lock, so an
+invalid pattern writes nothing. An `exclude` list matches a path as git would ignore it, so `vendor/` excludes every
+file below `vendor/`. A `files` list matches only the path of the file itself, so the files in a directory named
+`notes.md/` do not become Markdown. The walk returns the tracked files sorted by path.
 
 ### Sync steps
 
 1. Find the project root and read `config.yaml`. A configuration error ends the command before it writes anything.
-2. Pick a plugin for each enabled format, and warn about each format without a plugin.
-3. Create `.ardent/cache/` if needed, and take the lock on `cache/lock` with `File::lock`.
+2. Pick a plugin for each enabled format, warn about each format without a plugin, and compile the patterns.
+3. Create `.ardent/cache/` if needed, and take the lock on `cache/lock` with `File::lock`. Create `cache/files/`.
 4. Walk the tracked files.
-5. For each file, compare the stamp, then scan and write as the spec `sync` states. Collect file errors.
-6. If the walk reported no error, delete stale structure files and remove empty directories under `cache/files/`.
+5. If the walk reported no error, delete stale structure files and remove empty directories under `cache/files/`. This
+   step comes before the scans. Where file names ignore letter case, `Readme.md` would otherwise reuse the directory of
+   the old `README.md`, and this step would then delete it.
+6. For each file, compare the stamp, then scan and write as the spec `sync` states. A file whose mtime is not earlier
+   than the mtime of its structure file gets hashed even when the stamp matches, as git does for racily clean index
+   entries. Collect file errors.
 7. Print the summary to standard output, and the warnings and errors to standard error. Exit with status 1 if there was
    an error.
 
@@ -162,7 +169,9 @@ The walk returns the tracked files sorted by path.
 `write_atomic` checks `relative_path` first: it must be relative, and each component must be a normal name, so `..` and
 absolute paths fail with `InvalidInput`. `ardent_dir` must already be a directory, so a wrong root fails with `NotFound`
 and creates nothing. `write_atomic` then creates the parent directories of the target, as "Directories on demand"
-requires.
+requires. It creates each directory with `fs::create_dir` and checks it with `fs::symlink_metadata`. A symbolic link
+committed into `.ardent/` therefore fails with `NotADirectory` and cannot send a write or a deletion outside the
+project. `layout::create_dir` gives the lock and the pruning the same check.
 
 ### Project root
 

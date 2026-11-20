@@ -22,8 +22,9 @@ it scanned.
 
 ### Requirement: Unchanged files
 
-A sync SHALL NOT scan a tracked file again when its structure file has the current schema, and the stamp has the format
-name, version, and format hash of the current plugin and the size and modification time of the file.
+A sync SHALL NOT scan a tracked file again when its structure file has the current schema, the stamp has the format
+name, version, and format hash of the current plugin and the size and modification time of the file, and the
+modification time of the file is earlier than the modification time of its structure file.
 
 #### Scenario: Second sync
 
@@ -46,6 +47,18 @@ differs, the sync SHALL scan the file again and replace its structure file.
 
 - **WHEN** a person adds a heading to `README.md` and runs `ardent sync`
 - **THEN** the structure file of `README.md` lists the new heading and has the new `hash`
+
+### Requirement: Edits within one clock tick
+
+When the modification time of a tracked file is not earlier than the modification time of its structure file, a sync
+SHALL hash the file as if its stamp differed. A coarse clock can give an edit that keeps the size of the file the
+modification time of the content that the last sync read.
+
+#### Scenario: Edit within one clock tick
+
+- **WHEN** an edit keeps the size of `README.md`, and a coarse clock gives `README.md` and its structure file the
+  modification time of the old content
+- **THEN** the next sync scans `README.md` again
 
 ### Requirement: Changed format plugin
 
@@ -85,6 +98,18 @@ directory, SHALL delete no structure file, and the command SHALL exit with statu
 - **THEN** the sync reports `docs/`
 - **AND** `.ardent/cache/files/docs/spec.md/structure.yaml` still exists
 
+### Requirement: Deletion before scans
+
+A sync SHALL delete stale structure files before it writes structure files. A file renamed to another letter case then
+gets a structure file under its new name, also on a file system that ignores letter case.
+
+#### Scenario: New letter case
+
+- **WHEN** a person renames `README.md` to `Readme.md` and runs `ardent sync`
+- **THEN** `.ardent/cache/files/` holds a directory with the name `Readme.md`, and no directory with the name
+  `README.md`
+- **AND** the structure file in it has the node path `Readme.md`
+
 ### Requirement: File errors
 
 When a sync cannot read a tracked file or write its structure file, it SHALL report the file and the error, SHALL go on
@@ -107,9 +132,9 @@ match, each file path that is not UTF-8, and each nested project. Warnings alone
 
 ### Requirement: Invalid configuration
 
-When `config.yaml` is not valid YAML, has no `schema` or an unknown one, has a key that the schema does not define, or
-enables a plugin with an invalid or reserved name, `ardent sync` SHALL fail with a message that names the file, and
-SHALL write no file.
+When `config.yaml` is not valid YAML, has no `schema` or an unknown one, has a key that the schema does not define, has
+a pattern that is not valid gitignore syntax, or enables a plugin with an invalid or reserved name, `ardent sync` SHALL
+fail with a message that names the file, and SHALL write no file.
 
 #### Scenario: Typo in the configuration
 
@@ -117,11 +142,25 @@ SHALL write no file.
 - **THEN** `ardent sync` exits with a nonzero status and a message that names `config.yaml` and the key `exlude`
 - **AND** `.ardent/cache/` does not exist after the run, when it did not exist before
 
+#### Scenario: Invalid pattern
+
+- **WHEN** `config.yaml` has `exclude: ["[z-a]"]`
+- **THEN** `ardent sync` exits with a nonzero status and a message that names `config.yaml`
+- **AND** `.ardent/cache/` does not exist after the run, when it did not exist before
+
 ### Requirement: Source files stay unchanged
 
-A sync SHALL create, change, or delete no file or directory outside `.ardent/`.
+A sync SHALL create, change, or delete no file or directory outside `.ardent/`. It SHALL follow no symbolic link inside
+`.ardent/`: when a directory that the sync writes to is a symbolic link, the sync SHALL report it and exit with status
+1.
 
 #### Scenario: Sync of a project
 
 - **WHEN** a person runs `ardent sync` in a project with Markdown and Rust files
 - **THEN** every file and directory outside `.ardent/` keeps its content
+
+#### Scenario: Symbolic link in the cache
+
+- **WHEN** `.ardent/cache/files` is a symbolic link to a directory outside the project
+- **THEN** `ardent sync` reports the link and exits with status 1
+- **AND** every file and directory in the linked directory stays as it was

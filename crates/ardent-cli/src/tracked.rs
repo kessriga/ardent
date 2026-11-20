@@ -72,20 +72,50 @@ impl fmt::Display for PatternError {
 
 impl std::error::Error for PatternError {}
 
+/// The compiled patterns of `config.yaml`: the `files` patterns of each enabled format, and the `exclude` patterns.
+pub struct Patterns<'a> {
+    formats: Vec<(&'a str, Gitignore)>,
+    exclude: Gitignore,
+}
+
+impl<'a> Patterns<'a> {
+    /// Fails when a pattern is not valid gitignore syntax.
+    pub fn new(
+        root: &Path,
+        formats: &[FormatPatterns<'a>],
+        exclude: &[String],
+    ) -> Result<Self, PatternError> {
+        let formats = formats
+            .iter()
+            .map(|format| Ok((format.name, matcher(root, format.files)?)))
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
+            formats,
+            exclude: matcher(root, exclude)?,
+        })
+    }
+
+    /// The indexes of the formats whose `files` patterns match `relative` itself, not one of its parent directories.
+    fn formats_of(&self, relative: &Path) -> Vec<usize> {
+        self.formats
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, files))| files.matched(relative, false).is_ignore())
+            .map(|(i, _)| i)
+            .collect()
+    }
+}
+
 /// Lists the tracked files under `root`, sorted by path.
-pub fn walk(
-    root: &Path,
-    formats: &[FormatPatterns],
-    exclude: &[String],
-) -> Result<Walk, PatternError> {
-    let format_matchers = formats
-        .iter()
-        .map(|format| matcher(root, format.files))
-        .collect::<Result<Vec<_>, _>>()?;
-    let exclude = matcher(root, exclude)?;
-    let nested_projects = Arc::new(Mutex::new(Vec::new()));
+pub fn walk(root: &Path, patterns: &Patterns) -> Walk {
+    let filter = Filter {
+        root: root.to_path_buf(),
+        exclude: patterns.exclude.clone(),
+        nested_projects: Arc::new(Mutex::new(Vec::new())),
+    };
+    let nested_projects = Arc::clone(&filter.nested_projects);
     let mut walk = Walk::default();
-    for entry in walker(root, Arc::clone(&nested_projects)) {
+    for entry in walker(root, filter) {
         let entry = match entry {
             Ok(entry) => entry,
             Err(err) => {
@@ -99,19 +129,7 @@ pub fn walk(
         let Ok(relative) = entry.path().strip_prefix(root) else {
             continue;
         };
-        if exclude
-            .matched_path_or_any_parents(relative, false)
-            .is_ignore()
-        {
-            continue;
-        }
-        let matching: Vec<usize> = (0..formats.len())
-            .filter(|&i| {
-                format_matchers[i]
-                    .matched_path_or_any_parents(relative, false)
-                    .is_ignore()
-            })
-            .collect();
+        let matching = patterns.formats_of(relative);
         let Some(path) = source_path(relative) else {
             if !matching.is_empty() {
                 walk.warnings.push(Warning::NotUtf8(relative.to_path_buf()));
@@ -125,7 +143,7 @@ pub fn walk(
                 path,
                 formats: matching
                     .iter()
-                    .map(|&i| formats[i].name.to_string())
+                    .map(|&i| patterns.formats[i].0.to_string())
                     .collect(),
             }),
         }
@@ -135,44 +153,60 @@ pub fn walk(
             .extend(nested.drain(..).map(Warning::NestedProject));
     }
     walk.files.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(walk)
+    walk
 }
 
-/// A walker with git's ignore rules, which also applies `.gitignore` files when the project is not in a git repository
-/// yet. It reads the `.gitignore` files above the root only inside a git repository, up to its root, as git does.
-/// Hidden files count, `.ignore` files and the global excludes file of git do not.
-fn walker(root: &Path, nested_projects: Arc<Mutex<Vec<PathBuf>>>) -> ignore::Walk {
+/// A walker with git's ignore rules. Inside a git repository, it also reads the `.gitignore` files above the root up to
+/// the repository root, and applies no outer rule inside a nested repository, as git does. Outside a git repository,
+/// it reads only the `.gitignore` files of the project. Hidden files count; `.ignore` files and the global excludes
+/// file of git do not.
+fn walker(root: &Path, filter: Filter) -> ignore::Walk {
     let in_git_repository = root.ancestors().any(|dir| dir.join(".git").exists());
-    let project_root = root.to_path_buf();
     WalkBuilder::new(root)
         .hidden(false)
         .ignore(false)
         .git_global(false)
         .git_ignore(true)
         .git_exclude(true)
-        .require_git(false)
+        .require_git(in_git_repository)
         .parents(in_git_repository)
         .follow_links(false)
-        .filter_entry(move |entry| keep(entry, &project_root, &nested_projects))
+        .filter_entry(move |entry| filter.keep(entry))
         .build()
 }
 
-/// Skips `.git`, the project's `.ardent/`, and every nested project, which it records.
-fn keep(entry: &DirEntry, root: &Path, nested_projects: &Mutex<Vec<PathBuf>>) -> bool {
-    let name = entry.file_name();
-    if name == ".git" || (name == ARDENT_DIR && entry.depth() == 1) {
-        return false;
+/// The entries that the walk does not enter: `.git`, the project's `.ardent/`, excluded paths, and nested projects,
+/// which it records. Excluded directories are never read, so an unreadable or nested project inside one is no error.
+struct Filter {
+    root: PathBuf,
+    exclude: Gitignore,
+    nested_projects: Arc<Mutex<Vec<PathBuf>>>,
+}
+
+impl Filter {
+    fn keep(&self, entry: &DirEntry) -> bool {
+        if entry.depth() == 0 {
+            return true;
+        }
+        let name = entry.file_name();
+        if name == ".git" || (name == ARDENT_DIR && entry.depth() == 1) {
+            return false;
+        }
+        let Ok(relative) = entry.path().strip_prefix(&self.root) else {
+            return true;
+        };
+        let is_dir = entry.file_type().is_some_and(|t| t.is_dir());
+        if self.exclude.matched(relative, is_dir).is_ignore() {
+            return false;
+        }
+        if !is_dir || !entry.path().join(ARDENT_DIR).is_dir() {
+            return true;
+        }
+        if let Ok(mut nested) = self.nested_projects.lock() {
+            nested.push(relative.to_path_buf());
+        }
+        false
     }
-    let is_dir = entry.file_type().is_some_and(|t| t.is_dir());
-    if entry.depth() == 0 || !is_dir || !entry.path().join(ARDENT_DIR).is_dir() {
-        return true;
-    }
-    if let (Ok(mut nested), Ok(relative)) =
-        (nested_projects.lock(), entry.path().strip_prefix(root))
-    {
-        nested.push(relative.to_path_buf());
-    }
-    false
 }
 
 fn matcher(root: &Path, patterns: &[String]) -> Result<Gitignore, PatternError> {
@@ -217,7 +251,10 @@ mod tests {
             name: "markdown",
             files: &markdown,
         }];
-        Ok(walk(root, &formats, &patterns(exclude))?)
+        Ok(walk(
+            root,
+            &Patterns::new(root, &formats, &patterns(exclude))?,
+        ))
     }
 
     fn paths(walk: &Walk) -> Vec<&str> {
@@ -274,6 +311,62 @@ mod tests {
     }
 
     #[test]
+    fn ignores_gitignore_files_above_the_git_repository() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let outer = tempfile::tempdir()?;
+        let repo = outer.path().join("repo");
+        fs::write(outer.path().join(".gitignore"), "*.md\n")?;
+        fs::create_dir_all(repo.join(".git"))?;
+        write(&repo, "README.md")?;
+        assert_eq!(paths(&tracked(&repo, &[])?), ["README.md"]);
+        Ok(())
+    }
+
+    #[test]
+    fn applies_no_outer_gitignore_inside_a_nested_git_repository()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let project = tempfile::tempdir()?;
+        fs::create_dir_all(project.path().join(".git"))?;
+        fs::create_dir_all(project.path().join("lib/.git"))?;
+        fs::write(project.path().join(".gitignore"), "notes.md\n")?;
+        write(project.path(), "notes.md")?;
+        write(project.path(), "lib/notes.md")?;
+        assert_eq!(paths(&tracked(project.path(), &[])?), ["lib/notes.md"]);
+        Ok(())
+    }
+
+    #[test]
+    fn matches_format_patterns_against_the_file_path_only() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let project = tempfile::tempdir()?;
+        write(project.path(), "notes.md/image.png")?;
+        write(project.path(), "README.md")?;
+        assert_eq!(paths(&tracked(project.path(), &[])?), ["README.md"]);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn does_not_enter_excluded_directories() -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let project = tempfile::tempdir()?;
+        fs::create_dir_all(project.path().join("vendor/lib/.ardent"))?;
+        write(project.path(), "vendor/lib/README.md")?;
+        let secret = project.path().join("vendor/secret");
+        fs::create_dir(&secret)?;
+        write(project.path(), "README.md")?;
+        fs::set_permissions(&secret, fs::Permissions::from_mode(0o000))?;
+        let walk = tracked(project.path(), &["vendor/"]);
+        fs::set_permissions(&secret, fs::Permissions::from_mode(0o755))?;
+        let walk = walk?;
+        assert_eq!(paths(&walk), ["README.md"]);
+        assert!(walk.warnings.is_empty(), "{:?}", walk.warnings);
+        assert!(walk.errors.is_empty(), "{:?}", walk.errors);
+        Ok(())
+    }
+
+    #[test]
     fn skips_excluded_files() -> Result<(), Box<dyn std::error::Error>> {
         let project = tempfile::tempdir()?;
         write(project.path(), "vendor/lib/README.md")?;
@@ -300,7 +393,10 @@ mod tests {
                 files: &notes,
             },
         ];
-        let walk = walk(project.path(), &formats, &[])?;
+        let walk = walk(
+            project.path(),
+            &Patterns::new(project.path(), &formats, &[])?,
+        );
         assert!(walk.files.is_empty());
         assert_eq!(
             walk.warnings,
@@ -367,7 +463,7 @@ mod tests {
     #[test]
     fn rejects_an_invalid_pattern() -> io::Result<()> {
         let project = tempfile::tempdir()?;
-        assert!(walk(project.path(), &[], &patterns(&["[z-a]"])).is_err());
+        assert!(Patterns::new(project.path(), &[], &patterns(&["[z-a]"])).is_err());
         Ok(())
     }
 }
