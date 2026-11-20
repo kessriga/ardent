@@ -3,8 +3,9 @@
 Ardent is a terminal outliner for structured text. It reads the files in a project, such as Markdown, Rust, or HTML, and
 shows each file as a tree of nodes, in the same outline form that Roam Research and Tana use.
 
-> **Status:** milestone M0 has settled the core design, and milestone M1 builds a read-only outline. The binary has one
-> command, `ardent init`. Run `backlog milestone list` to see progress.
+> **Status:** milestone M0 has settled the core design, and milestone M1 builds a read-only outline. The binary has two
+> commands: `ardent init` and `ardent sync`. Only Markdown has a format plugin so far. Run `backlog milestone list` to
+> see progress.
 
 ## Idea
 
@@ -39,6 +40,16 @@ file, Ardent keeps:
 - **Derived data**, in `cache/`, which git ignores: the structure files, the views that plugins compute, and the
   backlink index. When the cache is missing, Ardent rebuilds it from the source files and `views/`.
 
+Run `ardent sync` anywhere in the project. It scans each tracked file that changed since the last sync and writes its
+structure to `.ardent/cache/files/<source path>/structure.yaml`. It skips a file whose size, modification time, and
+format plugin are unchanged, and it deletes the structure of a file that Ardent no longer tracks. Ardent follows git's
+ignore rules, and it skips a subdirectory that holds its own `.ardent/` as a separate project. Until the Rust plugin
+exists, `ardent sync` warns that the `rust` format has no plugin.
+
+The outline of a Markdown file holds headings, paragraphs, lists and their items, code blocks, block quotes, tables, and
+front matter. A heading contains the blocks after it, up to the next heading of the same or a higher rank: `## Usage`
+ends a `### Details` section. The text of a list item is part of the item, so its paragraphs are not separate nodes.
+
 Format support (how to parse Rust, Markdown, and so on) and views (complexity, comments) come from **plugins**. A format
 plugin is a tree-sitter grammar and a query that finds the nodes of the outline. A view plugin is a WebAssembly
 component that stores or computes view entries. The same plugins can run in a future web UI.
@@ -69,6 +80,8 @@ Milestone M0 settled these questions. Each answer is a Backlog decision; run `ba
   `schema` version. The specs `ardent-layout` and `ardent-schemas` in `openspec/specs/` give the details.
 - Decided in decision-3: a format plugin is a tree-sitter grammar with an outline query, and a view plugin is a
   WebAssembly component that Wasmtime hosts. Ardent finds and rewrites the references in plugin data itself.
+- Decided in decision-5, during M1: an outline query can give a node a `level`, and the node then contains the siblings
+  after it up to the next one with the same or a smaller level. Markdown headings nest this way.
 
 ## Glossary
 
@@ -98,5 +111,6 @@ cargo build
 cargo run -p ardent-cli   # the `ardent` binary
 ```
 
-The workspace has two crates. `ardent-core` holds the document model. `ardent-cli` builds the `ardent` binary and
-depends on `ardent-core`.
+The workspace has three crates. `ardent-core` holds the document model: outlines, structure files, and the
+configuration. `ardent-format` holds the outline engine and the built-in format plugins, and depends on `ardent-core`.
+`ardent-cli` builds the `ardent` binary and depends on both.

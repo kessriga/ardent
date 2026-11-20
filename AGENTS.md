@@ -35,9 +35,10 @@ stop and ask me. Do not settle a core design question inside implementation code
 ## Code layout
 
 - `crates/ardent-core`: the document model. No terminal, file-watching, or plugin-runtime dependencies.
-- `crates/ardent-cli`: the `ardent` binary. It depends on `ardent-core`.
-- Dependency direction: `ardent-core ← ardent-cli`. Add crates (for example a TUI crate or a plugin host) when a task
-  needs them, and keep the direction acyclic with `ardent-core` at the bottom.
+- `crates/ardent-format`: the outline engine and the built-in format plugins. It holds the tree-sitter dependency.
+- `crates/ardent-cli`: the `ardent` binary. It depends on `ardent-core` and `ardent-format`.
+- Dependency direction: `ardent-core ← ardent-format ← ardent-cli`. Add crates (for example a TUI crate or a plugin
+  host) when a task needs them, and keep the direction acyclic with `ardent-core` at the bottom.
 - Workspace lints deny `unwrap`, `panic!`, and `unsafe`. Return typed errors from library crates.
 
 ## Verification gate
@@ -52,6 +53,9 @@ rumdl fmt --no-cache --enable MD013 <changed .md files>
 ```
 
 There is no CI yet, so this gate is the contract.
+
+Leave the Markdown files in `crates/ardent-format/tests/markdown/` unformatted: they are snapshot input, and `rumdl`
+would change the outlines that the snapshots record.
 
 ## Autonomy
 

@@ -1,0 +1,48 @@
+---
+source: crates/ardent-format/tests/markdown.rs
+expression: "outline_yaml(\"blocks.md\")?"
+---
+- path: blocks.md
+  kind: file
+  range: 0..312
+  fingerprint: 3d03f50eb3915cc1
+- path: blocks.md#Blocks
+  kind: heading
+  range: 0..312
+  fingerprint: 9ffae8a203076315
+- path: blocks.md#Blocks/quote
+  kind: quote
+  range: 10..80
+  fingerprint: ef0128ff79b25169
+- path: blocks.md#Blocks/quote/list
+  kind: list
+  range: 58..80
+  fingerprint: 63bb8e564f447504
+- path: blocks.md#Blocks/quote/list/item
+  kind: item
+  range: 58..80
+  fingerprint: 63bb8e564f447504
+- path: blocks.md#Blocks/table
+  kind: table
+  range: 81..132
+  fingerprint: 54c1d7f755d6a80a
+- path: blocks.md#Blocks/list
+  kind: list
+  range: 218..264
+  fingerprint: a2edf93336f97301
+- path: blocks.md#Blocks/list/item
+  kind: item
+  range: 218..264
+  fingerprint: a2edf93336f97301
+- path: blocks.md#Blocks/list/item/Heading in an item
+  kind: heading
+  range: 220..264
+  fingerprint: a918ef3b1c822bf2
+- path: blocks.md#Blocks/list/item/Heading in an item/paragraph
+  kind: paragraph
+  range: 245..263
+  fingerprint: 5c6b87c840dad303
+- path: blocks.md#Blocks/Read\/write \[notes\] \\ \#1
+  kind: heading
+  range: 264..312
+  fingerprint: 5413806924d2b637

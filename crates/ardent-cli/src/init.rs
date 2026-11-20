@@ -29,7 +29,8 @@ pub enum InitError {
     AlreadyExists(PathBuf),
     /// A parent directory is already a project root. Nothing changed.
     InsideProject(PathBuf),
-    /// The file system failed at `path`. Init removed the `.ardent/` it had started, so nothing changed.
+    /// The file system failed at `path`. Nothing changed: either init had not started, or it removed the `.ardent/` it
+    /// had started.
     Io { path: PathBuf, source: io::Error },
     /// The file system failed at `path`, and init could not remove the `.ardent/` it had started.
     Incomplete {
@@ -82,9 +83,13 @@ fn refuse_existing_project(project_dir: &Path, ardent_dir: &Path) -> Result<(), 
     if fs::symlink_metadata(ardent_dir).is_ok() {
         return Err(InitError::AlreadyExists(ardent_dir.to_path_buf()));
     }
-    match project_dir.parent().and_then(project_root::find) {
-        Some(root) => Err(InitError::InsideProject(root)),
-        None => Ok(()),
+    let Some(parent) = project_dir.parent() else {
+        return Ok(());
+    };
+    match project_root::find(parent) {
+        Ok(Some(root)) => Err(InitError::InsideProject(root)),
+        Ok(None) => Ok(()),
+        Err((path, source)) => Err(InitError::Io { path, source }),
     }
 }
 
