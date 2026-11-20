@@ -3,8 +3,8 @@
 Ardent is a terminal outliner for structured text. It reads the files in a project, such as Markdown, Rust, or HTML, and
 shows each file as a tree of nodes, in the same outline form that Roam Research and Tana use.
 
-> **Status:** design phase. The binary does nothing yet. The open design questions are tasks in milestone M0; run
-> `backlog milestone list` to see progress.
+> **Status:** milestone M0 has settled the core design, and milestone M1 builds a read-only outline. The binary does
+> nothing yet. Run `backlog milestone list` to see progress.
 
 ## Idea
 
@@ -23,10 +23,19 @@ can address a function or a section by its place in a tree rather than by line n
 
 ## How it should work
 
-Running `ardent init` in a project creates a `.ardent/` directory. For each tracked file, that directory holds:
+Running `ardent init` in a project creates a `.ardent/` directory with a `config.yaml`. The configuration selects the
+plugins and the files that Ardent tracks. For each tracked file, Ardent keeps:
 
 - the **structure** of the file, as human-readable YAML;
 - zero or more **views** of the file, also as YAML.
+
+`.ardent/` has two parts:
+
+- **User data**, in git: `config.yaml`, project plugins in `plugins/`, and stored views in `views/`, such as the
+  comments that people and agents write. The comments on `src/engine.rs` are in
+  `.ardent/views/src/engine.rs/comments.yaml`.
+- **Derived data**, in `cache/`, which git ignores: the structure files, the views that plugins compute, and the
+  backlink index. When the cache is missing, Ardent rebuilds it from the source files and `views/`.
 
 Format support (how to parse Rust, Markdown, and so on) and views (complexity, comments) come from **plugins**. A format
 plugin is a tree-sitter grammar and a query that finds the nodes of the outline. A view plugin is a WebAssembly
@@ -45,16 +54,17 @@ When someone opens that spec section or the function `bar`, the backlink plugin 
 therefore needs one addressing scheme that covers every node in the project, a reference syntax that a person can type,
 and an index from each node to the references that point at it.
 
-## Open questions
+## Design decisions
 
-These questions decide the design. Each one is a spike task in milestone M0.
+Milestone M0 settled these questions. Each answer is a Backlog decision; run `backlog decision list` to read them.
 
 - Decided in decision-1: anchors and references address a node by its node path, such as
   `docs/spec.md#Sync rules/Renames`, and keep a fingerprint of its content to find it again after a rename or move. A
   reference in view content has the form `@[docs/spec.md#Sync rules]`.
 - Decided in decision-2: every Ardent command first checks the tracked files for changes and re-scans the changed ones.
-  The structure is a local cache; only the views and the project configuration go into git.
-- What is the exact layout of `.ardent/` and the YAML schema for structure and views?
+  The structure is a local cache; only stored views, the project configuration, and project plugins go into git.
+- Decided in decision-4: the layout of `.ardent/` and the YAML schema of each file in it. Every file starts with a
+  `schema` version. The specs `ardent-layout` and `ardent-schemas` in `openspec/specs/` give the details.
 - Decided in decision-3: a format plugin is a tree-sitter grammar with an outline query, and a view plugin is a
   WebAssembly component that Wasmtime hosts. Ardent finds and rewrites the references in plugin data itself.
 
@@ -71,7 +81,8 @@ Use these terms with these meanings in code, specs, and tasks.
 | fingerprint   | A hash of a node's content without its label. It finds a node again after a rename.       |
 | structure     | The stored form of an outline in `.ardent/`. A local cache that Ardent rebuilds.          |
 | sync          | Re-scans changed source files and re-resolves links. Every command runs it first.         |
-| view          | Extra data attached to nodes of an outline, stored next to the structure.                 |
+| view          | Extra data attached to nodes of an outline. A view plugin stores or computes it.          |
+| view entry    | One item of a view, such as one comment. Its anchor attaches it to a node.                |
 | anchor        | The link that attaches a view entry to a node or a range of a source file.                |
 | reference     | A link written inside view content to a node anywhere in the project, such as `@foo`.     |
 | backlink      | A reference seen from its target: the list of view entries that point at a node.          |
