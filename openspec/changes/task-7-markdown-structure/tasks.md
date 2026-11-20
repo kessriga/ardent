@@ -4,7 +4,7 @@ Each task ends with a passing `cargo fmt --check`, `cargo clippy --all-targets -
 
 ## 1. Decision and review fixes
 
-- [ ] 1.1 Record decision-5 with `backlog decision create`: outline queries may set `level`, and the engine nests
+- [x] 1.1 Record decision-5 with `backlog decision create`: outline queries may set `level`, and the engine nests
       following siblings under a node with a smaller level; it amends the query table of decision-3. Verify that
       `backlog decision list` shows it as accepted
 - [ ] 1.2 Harden `layout::write_atomic` in `ardent-core`: reject absolute paths and components other than normal names,
