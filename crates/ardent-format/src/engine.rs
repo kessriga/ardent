@@ -1,5 +1,5 @@
 //! The outline engine: runs the outline query of a format plugin on a tree-sitter parse tree and returns the nodes it
-//! finds, nested by containment and by level (spec `outline`, decision-3, decision-5).
+//! finds, nested by containment and by level (spec `outline`, decision-3, decision-5, decision-6).
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -16,6 +16,7 @@ use tree_sitter::{
 
 const NODE_CAPTURE: &str = "node";
 const LABEL_CAPTURE: &str = "label";
+const ANNOTATION_CAPTURE: &str = "annotation";
 const KIND_PROPERTY: &str = "kind";
 const LEVEL_PROPERTY: &str = "level";
 
@@ -36,6 +37,7 @@ struct CompiledQuery {
     query: Query,
     node_capture: u32,
     label_capture: Option<u32>,
+    annotation_capture: Option<u32>,
     /// The `kind` and `level` properties of each pattern, by pattern index.
     patterns: Vec<PatternProperties>,
 }
@@ -159,6 +161,7 @@ impl CompiledQuery {
             .capture_index_for_name(NODE_CAPTURE)
             .ok_or(PluginError::MissingNodeCapture)?;
         let label_capture = query.capture_index_for_name(LABEL_CAPTURE);
+        let annotation_capture = query.capture_index_for_name(ANNOTATION_CAPTURE);
         let patterns = (0..query.pattern_count())
             .map(|pattern| PatternProperties::new(&query, pattern))
             .collect::<Result<_, _>>()?;
@@ -166,6 +169,7 @@ impl CompiledQuery {
             query,
             node_capture,
             label_capture,
+            annotation_capture,
             patterns,
         })
     }
@@ -226,10 +230,18 @@ impl CompiledQuery {
             .kind
             .clone()
             .unwrap_or_else(|| node.kind().to_string());
+        let range = found
+            .captures()
+            .iter()
+            .filter(|c| Some(c.index) == self.annotation_capture)
+            .map(|c| c.node.byte_range())
+            .fold(node.byte_range(), |range, annotation| {
+                range.start.min(annotation.start)..range.end.max(annotation.end)
+            });
         Some(Candidate {
             label: label(source, &label_ranges).unwrap_or_else(|| kind.clone()),
             kind,
-            range: node.byte_range(),
+            range,
             label_ranges,
             level: properties.level,
             depth: iter::successors(node.parent(), |node| node.parent()).count(),
@@ -393,11 +405,30 @@ mod tests {
         }
     }
 
-    fn outline(query: &str, source: &str) -> Result<String, Box<dyn Error>> {
-        let nodes = markdown(query)?.scan(source.as_bytes())?;
+    fn rust(query: &str) -> Result<FormatPlugin, PluginError> {
+        FormatPlugin::new(
+            "test",
+            "0.0.0",
+            &["*.rs"],
+            tree_sitter_rust::LANGUAGE.into(),
+            query,
+            String::new(),
+        )
+    }
+
+    fn rendered(plugin: &FormatPlugin, source: &str) -> Result<String, Box<dyn Error>> {
+        let nodes = plugin.scan(source.as_bytes())?;
         let mut out = String::new();
         render(&nodes, 0, &mut out);
         Ok(out)
+    }
+
+    fn outline(query: &str, source: &str) -> Result<String, Box<dyn Error>> {
+        rendered(&markdown(query)?, source)
+    }
+
+    fn rust_outline(query: &str, source: &str) -> Result<String, Box<dyn Error>> {
+        rendered(&rust(query)?, source)
     }
 
     const HEADINGS: &str = r#"
@@ -507,6 +538,26 @@ mod tests {
     #[test]
     fn label_without_text_is_the_kind() -> Result<(), Box<dyn Error>> {
         assert_eq!(outline(HEADINGS, "Text.\n")?, "paragraph paragraph 0..6\n");
+        Ok(())
+    }
+
+    const DOC_COMMENTS: &str = "((line_comment)* @annotation . (function_item) @node)";
+
+    #[test]
+    fn annotations_widen_the_range() -> Result<(), Box<dyn Error>> {
+        assert_eq!(
+            rust_outline(DOC_COMMENTS, "/// Runs.\nfn run() {}\n")?,
+            "function_item function_item 0..21\n"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn match_without_annotations_keeps_the_node_range() -> Result<(), Box<dyn Error>> {
+        assert_eq!(
+            rust_outline(DOC_COMMENTS, "fn a() {}\n\nfn run() {}\n")?,
+            "function_item function_item 0..9\nfunction_item function_item 11..22\n"
+        );
         Ok(())
     }
 
