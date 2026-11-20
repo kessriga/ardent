@@ -4,7 +4,7 @@ title: Write structure files for Markdown source files
 status: To Do
 assignee: []
 created_date: '2026-11-19 16:29'
-updated_date: '2026-11-19 16:29'
+updated_date: '2026-11-20 12:10'
 labels: []
 milestone: m-1
 dependencies:
@@ -39,3 +39,13 @@ Markdown is the simplest structured format and the closest to what Roam and Tana
 - [ ] #3 README and specs match the new behavior
 - [ ] #4 OpenSpec change archived in the same PR when the task has one
 <!-- DOD:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: @claude
+created: 2026-11-20 12:10
+---
+Nested projects, open question from TASK-6. `ardent init` refuses to run inside an existing project, but it does not check the directories below: `ardent init` in a parent of an existing project still creates a nested project. Under the current "Tracked files" rule of `ardent-layout`, the outer project would then also track every file of the inner project, with other node paths and a separate `views/`. When this task builds the file scan, decide what the sync does with a directory that holds its own `.ardent/`, for example skip it as a separate project and report it. If the answer changes "Tracked files", update the spec in this task's OpenSpec change. Reuse `project_root::find` in ardent-cli for the root search.
+---
+<!-- COMMENTS:END -->
