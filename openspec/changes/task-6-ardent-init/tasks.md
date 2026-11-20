@@ -9,10 +9,10 @@
 
 ## 2. `ardent init`
 
-- [ ] 2.1 Add `clap` to `ardent-cli`, the `init` subcommand, and the modules `project_root` and `init` that follow the
+- [x] 2.1 Add `clap` to `ardent-cli`, the `init` subcommand, and the modules `project_root` and `init` that follow the
   steps in design.md; verify with unit tests that the root search finds the nearest `.ardent/` directory and skips a
   file named `.ardent`, that `ardent --help` lists `init`, and that the gate passes
-- [ ] 2.2 Add integration tests that run the binary in a temporary directory: a new project gets exactly
+- [x] 2.2 Add integration tests that run the binary in a temporary directory: a new project gets exactly
       `.ardent/.gitignore` and `.ardent/config.yaml` with the bytes from "Initial content" and nothing else changes; an
       existing `.ardent/` directory, an `.ardent` file, or a `.ardent/` directory in a parent directory gives a nonzero
       exit, a message, and an unchanged tree; verify with `cargo test` and the gate
