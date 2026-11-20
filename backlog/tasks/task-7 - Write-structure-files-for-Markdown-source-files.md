@@ -1,16 +1,19 @@
 ---
 id: TASK-7
 title: Write structure files for Markdown source files
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-19 16:29'
-updated_date: '2026-11-20 12:49'
+updated_date: '2026-11-20 13:11'
 labels: []
 milestone: m-1
 dependencies:
   - TASK-3
   - TASK-5
   - TASK-6
+references:
+  - openspec/changes/task-7-markdown-structure
 priority: medium
 type: feature
 ordinal: 7000
@@ -39,6 +42,16 @@ Markdown is the simplest structured format and the closest to what Roam and Tana
 - [ ] #3 README and specs match the new behavior
 - [ ] #4 OpenSpec change archived in the same PR when the task has one
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. OpenSpec change task-7-markdown-structure: ardent-layout delta (sync command, nested projects in Tracked files), new capabilities outline-query and markdown-format. Record decision-5: outline queries may set a level, and the engine nests following siblings under a node with a lower level (amends decision-3).
+2. ardent-core: harden layout::write_atomic (reject absolute and .. paths, create parent dirs, never create .ardent itself); add outline types with node paths and fingerprints, structure file types with YAML read/write (serde-saphyr, blake3, jiff), and config.yaml types.
+3. New crate ardent-format (tree-sitter 0.27.2, tree-sitter-md 0.5.4): generic outline engine for @node/@label/kind/level queries, and the built-in markdown plugin (heading, paragraph, list, item, code, quote, table, front_matter; ATX and setext headings nest by level). Snapshot tests with insta.
+4. ardent-cli: project_root::find returns I/O errors and keeps the physical working directory, as git and cargo do; tracked-file walk with the ignore crate, which skips and reports nested projects; ardent sync with lock, stamp check, re-scan, and removal of stale structure files. Integration tests.
+5. README, specs, verification gate, archive the change, finalize the task.
+<!-- SECTION:PLAN:END -->
 
 ## Comments
 
