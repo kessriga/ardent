@@ -38,6 +38,12 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn grammar_version_is_the_pinned_version() {
+        let pin = format!("{GRAMMAR_CRATE} = \"={GRAMMAR_VERSION}\"");
+        assert!(include_str!("../Cargo.toml").contains(&pin), "{pin}");
+    }
+
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 
     fn outline(source_path: &str, text: &str) -> Result<Outline, Box<dyn std::error::Error>> {
