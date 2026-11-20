@@ -28,8 +28,9 @@ Running `ardent init` in a project creates a `.ardent/` directory. For each trac
 - the **structure** of the file, as human-readable YAML;
 - zero or more **views** of the file, also as YAML.
 
-Format support (how to parse Rust, Markdown, and so on) and views (complexity, comments) come from **plugins**.
-WebAssembly is the likely plugin format, because the same plugins could then run in a future web UI.
+Format support (how to parse Rust, Markdown, and so on) and views (complexity, comments) come from **plugins**. A format
+plugin is a tree-sitter grammar and a query that finds the nodes of the outline. A view plugin is a WebAssembly
+component that stores or computes view entries. The same plugins can run in a future web UI.
 
 ### Example: comments and backlinks
 
@@ -54,7 +55,8 @@ These questions decide the design. Each one is a spike task in milestone M0.
 - Decided in decision-2: every Ardent command first checks the tracked files for changes and re-scans the changed ones.
   The structure is a local cache; only the views and the project configuration go into git.
 - What is the exact layout of `.ardent/` and the YAML schema for structure and views?
-- What does a plugin export, and which WebAssembly runtime hosts it?
+- Decided in decision-3: a format plugin is a tree-sitter grammar with an outline query, and a view plugin is a
+  WebAssembly component that Wasmtime hosts. Ardent finds and rewrites the references in plugin data itself.
 
 ## Glossary
 
@@ -73,8 +75,8 @@ Use these terms with these meanings in code, specs, and tasks.
 | anchor        | The link that attaches a view entry to a node or a range of a source file.                |
 | reference     | A link written inside view content to a node anywhere in the project, such as `@foo`.     |
 | backlink      | A reference seen from its target: the list of view entries that point at a node.          |
-| format plugin | A plugin that turns a source file of one format into an outline.                          |
-| view plugin   | A plugin that computes a view, for example cyclomatic complexity.                         |
+| format plugin | A tree-sitter grammar and an outline query that turn files of one format into outlines.   |
+| view plugin   | A WebAssembly component that stores or computes a view, such as comments or complexity.   |
 
 ## Building
 
