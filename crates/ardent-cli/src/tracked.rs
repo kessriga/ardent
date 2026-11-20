@@ -25,9 +25,14 @@ pub struct TrackedFile {
 /// A file or directory that the walk skipped, and that the sync reports.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Warning {
-    TwoFormats { path: String, formats: Vec<String> },
+    TwoFormats {
+        path: String,
+        formats: Vec<String>,
+    },
     NotUtf8(PathBuf),
     NestedProject(PathBuf),
+    /// A line of a `.gitignore` or `.git/info/exclude` file that the `ignore` crate cannot parse, with its location.
+    IgnoreRule(String),
 }
 
 impl fmt::Display for Warning {
@@ -48,6 +53,7 @@ impl fmt::Display for Warning {
                 "{}/ is a nested Ardent project; Ardent does not track its files",
                 dir.display()
             ),
+            Self::IgnoreRule(error) => write!(f, "{error}; Ardent skips this rule"),
         }
     }
 }
@@ -58,6 +64,28 @@ pub struct Walk {
     pub files: Vec<TrackedFile>,
     pub warnings: Vec<Warning>,
     pub errors: Vec<String>,
+}
+
+impl Walk {
+    /// The entry of a walk step, after it records the errors of the step. Only an I/O error makes the file list
+    /// incomplete. An ignore rule that cannot be parsed gives a warning, wherever its file is: git accepts such lines.
+    fn record_errors(&mut self, entry: Result<DirEntry, ignore::Error>) -> Option<DirEntry> {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) if err.is_io() => {
+                self.errors.push(err.to_string());
+                return None;
+            }
+            Err(err) => {
+                self.warnings.push(Warning::IgnoreRule(err.to_string()));
+                return None;
+            }
+        };
+        if let Some(err) = entry.error() {
+            self.warnings.push(Warning::IgnoreRule(err.to_string()));
+        }
+        Some(entry)
+    }
 }
 
 /// A pattern in `config.yaml` that is not valid gitignore syntax.
@@ -116,12 +144,8 @@ pub fn walk(root: &Path, patterns: &Patterns) -> Walk {
     let nested_projects = Arc::clone(&filter.nested_projects);
     let mut walk = Walk::default();
     for entry in walker(root, filter) {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(err) => {
-                walk.errors.push(err.to_string());
-                continue;
-            }
+        let Some(entry) = walk.record_errors(entry) else {
+            continue;
         };
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
@@ -319,6 +343,30 @@ mod tests {
         fs::create_dir_all(repo.join(".git"))?;
         write(&repo, "README.md")?;
         assert_eq!(paths(&tracked(&repo, &[])?), ["README.md"]);
+        Ok(())
+    }
+
+    #[test]
+    fn warns_about_a_gitignore_line_it_cannot_parse() -> Result<(), Box<dyn std::error::Error>> {
+        let outer = tempfile::tempdir()?;
+        let root = outer.path().join("project");
+        fs::create_dir_all(outer.path().join(".git"))?;
+        fs::write(outer.path().join(".gitignore"), "[z-a]\n")?;
+        write(&root, "README.md")?;
+        fs::write(root.join(".gitignore"), "[y-b]\n")?;
+        let walk = tracked(&root, &[])?;
+        assert_eq!(paths(&walk), ["README.md"]);
+        assert!(walk.errors.is_empty(), "{:?}", walk.errors);
+        let messages: Vec<String> = walk.warnings.iter().map(ToString::to_string).collect();
+        assert_eq!(messages.len(), 2, "{messages:?}");
+        assert!(
+            messages[0].contains("[z-a]") || messages[1].contains("[z-a]"),
+            "{messages:?}"
+        );
+        assert!(
+            messages[0].contains("[y-b]") || messages[1].contains("[y-b]"),
+            "{messages:?}"
+        );
         Ok(())
     }
 

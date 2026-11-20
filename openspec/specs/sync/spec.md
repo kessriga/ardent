@@ -123,12 +123,20 @@ with the other files, and the command SHALL exit with status 1.
 ### Requirement: Warnings
 
 A sync SHALL print a warning to standard error for each enabled format without a plugin, each file that two formats
-match, each file path that is not UTF-8, and each nested project. Warnings alone SHALL NOT change the exit status.
+match, each file path that is not UTF-8, each nested project, and each line of a `.gitignore` or `.git/info/exclude`
+file that Ardent cannot parse. Ardent SHALL skip such a line, as git accepts it. Warnings alone SHALL NOT change the
+exit status, and SHALL NOT stop the deletion of stale structure files.
 
 #### Scenario: Format without a plugin
 
 - **WHEN** `config.yaml` enables the format `rust`, and Ardent has no `rust` plugin
 - **THEN** `ardent sync` warns that the format `rust` has no plugin, tracks no `.rs` file, and exits with status 0
+
+#### Scenario: Ignore rule that Ardent cannot parse
+
+- **WHEN** the project is a subdirectory of a git repository, and the `.gitignore` at the repository root contains the
+  line `[z-a]`
+- **THEN** `ardent sync` warns about the line, deletes stale structure files, and exits with status 0
 
 ### Requirement: Invalid configuration
 
