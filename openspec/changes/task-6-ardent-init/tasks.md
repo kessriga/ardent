@@ -2,7 +2,7 @@
 
 ## 1. Atomic write
 
-- [ ] 1.1 Add `tempfile` to `ardent-core` and the module `layout` with the `.ardent`, `cache`, and `cache/tmp` paths and
+- [x] 1.1 Add `tempfile` to `ardent-core` and the module `layout` with the `.ardent`, `cache`, and `cache/tmp` paths and
       `write_atomic`; verify with unit tests that a new file gets the content, an existing file gets the new content,
       and `cache/tmp/` holds no file afterwards, and that `cargo fmt --check`,
       `cargo clippy --all-targets -- -D warnings`, and `cargo test` pass

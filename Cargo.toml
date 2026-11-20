@@ -9,6 +9,7 @@ publish = false
 
 [workspace.dependencies]
 ardent-core = { path = "crates/ardent-core" }
+tempfile = "3.27.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
