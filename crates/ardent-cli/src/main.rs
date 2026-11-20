@@ -3,6 +3,7 @@ mod project_root;
 
 use std::env;
 use std::fmt;
+use std::io::{self, Write};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
@@ -34,7 +35,8 @@ fn init() -> ExitCode {
     };
     match init::run(&project_dir) {
         Ok(ardent_dir) => {
-            println!("Created {}", ardent_dir.display());
+            // The project exists now, so a closed stdout must not turn this run into a failure.
+            let _ = writeln!(io::stdout(), "Created {}", ardent_dir.display());
             ExitCode::SUCCESS
         }
         Err(err) => fail(err),
@@ -42,6 +44,6 @@ fn init() -> ExitCode {
 }
 
 fn fail(message: impl fmt::Display) -> ExitCode {
-    eprintln!("ardent: {message}");
+    let _ = writeln!(io::stderr(), "ardent: {message}");
     ExitCode::FAILURE
 }
