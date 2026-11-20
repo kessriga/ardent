@@ -5,11 +5,19 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-19 16:29'
-updated_date: '2026-11-20 19:10'
+updated_date: '2026-11-20 19:15'
 labels: []
 milestone: m-1
 dependencies:
   - TASK-7
+references:
+  - openspec/changes/task-8-rust-structure
+  - >-
+    backlog/decisions/decision-6 -
+    Outline-queries-can-widen-a-node-over-annotation-captures.md
+  - >-
+    backlog/decisions/decision-7 -
+    A-sync-reports-a-syntax-error-and-keeps-the-last-structure-file.md
 priority: medium
 type: feature
 ordinal: 8000

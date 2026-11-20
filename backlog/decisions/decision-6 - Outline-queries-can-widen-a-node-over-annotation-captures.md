@@ -11,7 +11,7 @@ decision-3 makes the byte range of the `@node` capture the range of a node. In `
 it. A `@node` capture of the item therefore leaves them out.
 
 TASK-8 requires that doc comments and attributes are part of the node they apply to. A move of the node must carry them,
-and an edit of a doc comment must change the fingerprint of its item, not the fingerprint of the parent.
+and an edit of a doc comment must change the fingerprint of its item, not only the fingerprint of the parent.
 
 A query can match a run of siblings before an item, for example
 `[(attribute_item) (line_comment outer: (outer_doc_comment_marker))]* @x . (function_item) @node`. A throwaway check
