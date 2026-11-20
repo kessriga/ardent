@@ -135,6 +135,9 @@ next sync hashes the file again and only updates the time.
 - `.ignore` files: not read, because decision-4 names only git's rules;
 - `.gitignore` and `.git/info/exclude`: read, also when the project is not a git repository yet, so that `target/` stays
   untracked before `git init`;
+- `.gitignore` files above the project root: read only inside a git repository, up to its root, as git does. Outside a
+  repository, the `ignore` crate would read every `.gitignore` up to `/`, such as a `~/.gitignore` that git uses as its
+  global excludes file;
 - the global git excludes file: not read, because it differs between machines, and node paths must not;
 - symbolic links: not followed. A link to a file is not tracked, because git stores the link and not the content.
 

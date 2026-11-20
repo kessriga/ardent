@@ -41,10 +41,10 @@ Each task ends with a passing `cargo fmt --check`, `cargo clippy --all-targets -
 
 ## 4. ardent sync in ardent-cli
 
-- [ ] 4.1 Add `ignore` and the module `tracked`: the walk with the settings of design.md, format and `exclude` patterns,
+- [x] 4.1 Add `ignore` and the module `tracked`: the walk with the settings of design.md, format and `exclude` patterns,
       and warnings for two formats, non-UTF-8 paths, and nested projects; verify with unit tests for each scenario of
       "Tracked files" in `ardent-layout`
-- [ ] 4.2 Add the module `sync` and the subcommand `ardent sync`: configuration, plugins, lock, stamp check, scan,
+- [x] 4.2 Add the module `sync` and the subcommand `ardent sync`: configuration, plugins, lock, stamp check, scan,
       write, stale structure files, summary, and exit status; verify with integration tests for each scenario of the
       spec `sync` that a test can set up, and for "No project" and "Nested project" of `ardent-layout`
 - [ ] 4.3 Update `README.md`: status, the `ardent sync` command, the Markdown outline, and the crate list; verify with

@@ -12,6 +12,17 @@ pub const ARDENT_DIR: &str = ".ardent";
 pub const CACHE_DIR: &str = "cache";
 /// Temporary files of atomic writes, relative to `cache/`.
 const TMP_DIR: &str = "tmp";
+/// Derived data per source file, relative to `.ardent/`.
+pub const FILES_DIR: &str = "cache/files";
+/// The name of a structure file in the directory of its source file under `cache/files/`.
+pub const STRUCTURE_FILE: &str = "structure.yaml";
+/// The lock that a sync holds, relative to `.ardent/`.
+pub const LOCK_FILE: &str = "cache/lock";
+
+/// The path of the structure file of `source_path`, relative to `.ardent/`.
+pub fn structure_path(source_path: &str) -> String {
+    format!("{FILES_DIR}/{source_path}/{STRUCTURE_FILE}")
+}
 
 /// Writes `contents` to `relative_path` inside `ardent_dir` through a temporary file in `cache/tmp/`, so that the
 /// target file has either its old or its new content, even after a crash or a power loss. Creates `cache/tmp/` and the
