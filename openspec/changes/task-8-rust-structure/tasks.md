@@ -32,9 +32,9 @@ Each task ends with a passing `cargo fmt --check`, `cargo clippy --all-targets -
 
 ## 4. Sync
 
-- [ ] 4.1 Load the Rust plugin in `builtin_plugins` of `ardent-cli`; verify with an integration test that a sync of a
+- [x] 4.1 Load the Rust plugin in `builtin_plugins` of `ardent-cli`; verify with an integration test that a sync of a
       new project writes the structure file of `src/main.rs` with `format: rust`
-- [ ] 4.2 Change the test "Format without a plugin" to enable `html`, and add integration tests for the scenarios
+- [x] 4.2 Change the test "Format without a plugin" to enable `html`, and add integration tests for the scenarios
       "Syntax error in one file" and "Syntax error after a scan" of the `sync` delta; verify that they pass
 - [ ] 4.3 Update `README.md`: the status line and the note that `ardent sync` warns about the `rust` format; verify with
       `rumdl fmt --no-cache --enable MD013 README.md`
