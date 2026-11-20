@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-19 16:29'
-updated_date: '2026-11-20 14:13'
+updated_date: '2026-11-20 14:40'
 labels: []
 milestone: m-1
 dependencies:
@@ -73,6 +73,8 @@ Review of PR #8 (code-review, 15 findings). Fixed on the branch before merge, ea
 - A same-size edit within one coarse clock tick looked unchanged. A file whose mtime is not earlier than its structure file now gets hashed (spec sync, 'Edits within one clock tick'). Decision-2 step 3 has no note of this, because the Backlog CLI cannot edit decisions.
 - Smaller: the first query pattern wins on a shared syntax node; an empty kind is a plugin error; a test ties GRAMMAR_VERSION to the Cargo.toml pin; patterns compile before the lock; --help works from a deleted directory.
 Not fixed (reported only): full parse of each structure file for the stamp check, fingerprint cost on deeply nested files, EnabledFormats parallel lists, init.rs hardcoded defaults, two fully qualified paths in engine.rs, permission tests fail as root.
+
+Second review of PR #8 (code-review medium, 7 findings). Fixed: a .gitignore line that the ignore crate cannot parse, such as [z-a], in a .gitignore above the project root made every sync exit 1 and skip pruning, while git accepts it; now only I/O errors make the walk incomplete, and unparseable rules give a warning (spec sync, Warnings). Two nodes with the same range nested by match order; now the outer syntax node is the parent (spec outline, Parent by containment). Fully qualified std and crate paths replaced by imports. Not fixed: full parse of each structure file for the stamp check, a new tree-sitter parser per file, EnabledFormats parallel lists, and a possible second match of one pattern for one heading (not reproduced; snapshots show labels).
 <!-- SECTION:NOTES:END -->
 
 ## Comments
