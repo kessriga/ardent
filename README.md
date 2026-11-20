@@ -3,8 +3,8 @@
 Ardent is a terminal outliner for structured text. It reads the files in a project, such as Markdown, Rust, or HTML, and
 shows each file as a tree of nodes, in the same outline form that Roam Research and Tana use.
 
-> **Status:** milestone M0 has settled the core design, and milestone M1 builds a read-only outline. The binary does
-> nothing yet. Run `backlog milestone list` to see progress.
+> **Status:** milestone M0 has settled the core design, and milestone M1 builds a read-only outline. The binary has one
+> command, `ardent init`. Run `backlog milestone list` to see progress.
 
 ## Idea
 
@@ -23,8 +23,10 @@ can address a function or a section by its place in a tree rather than by line n
 
 ## How it should work
 
-Running `ardent init` in a project creates a `.ardent/` directory with a `config.yaml`. The configuration selects the
-plugins and the files that Ardent tracks. For each tracked file, Ardent keeps:
+Run `ardent init` in the root directory of a project. It creates a `.ardent/` directory with a `config.yaml` and a
+`.gitignore`. It refuses to run where `.ardent` already exists or inside another Ardent project. The configuration
+selects the plugins and the files that Ardent tracks; at first, it tracks Markdown and Rust files. For each tracked
+file, Ardent keeps:
 
 - the **structure** of the file, as human-readable YAML;
 - zero or more **views** of the file, also as YAML.
