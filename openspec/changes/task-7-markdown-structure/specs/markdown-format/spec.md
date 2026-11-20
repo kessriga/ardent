@@ -58,9 +58,9 @@ A heading SHALL contain the blocks after it up to the next heading with the same
 
 ### Requirement: Paragraphs
 
-A paragraph SHALL be a node of the kind `paragraph` when it is a direct child of the document body: before the first
-heading or in the content of a heading. A paragraph inside a list item, a block quote, or a setext heading SHALL be part
-of that node and SHALL NOT be a node.
+A paragraph SHALL be a node of the kind `paragraph` when it stands before the first heading of the file or directly in
+the content of a heading, also of a heading inside a list item or a block quote. Every other paragraph, such as the text
+of a list item, a block quote, or a setext heading, SHALL be part of the node that contains it and SHALL NOT be a node.
 
 #### Scenario: Paragraph under a heading
 
@@ -71,6 +71,11 @@ of that node and SHALL NOT be a node.
 
 - **WHEN** a list item in `README.md` is `- Download the binary.`
 - **THEN** the outline has no `paragraph` node inside the item
+
+#### Scenario: Heading inside a list item
+
+- **WHEN** a list item in `README.md` holds the heading `## Note` and a paragraph below it
+- **THEN** the paragraph is a node, with the node path `README.md#list/item/Note/paragraph`
 
 ### Requirement: Lists and items
 

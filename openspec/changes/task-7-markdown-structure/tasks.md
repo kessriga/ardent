@@ -36,7 +36,7 @@ Each task ends with a passing `cargo fmt --check`, `cargo clippy --all-targets -
 - [x] 3.2 Add the module `markdown` with `outline.scm`, the plugin constant, and `format_hash`; verify that the spec
       example of `ardent-schemas` gives exactly the paths, kinds, ranges, and fingerprints of the spec, and that unit
       tests cover each scenario of the spec `markdown-format`
-- [ ] 3.3 Add `insta` snapshot tests for Markdown files with nested headings, setext headings, lists, code blocks, front
+- [x] 3.3 Add `insta` snapshot tests for Markdown files with nested headings, setext headings, lists, code blocks, front
       matter, quotes, and tables; verify that `cargo test -p ardent-format` passes with the reviewed snapshots
 
 ## 4. ardent sync in ardent-cli

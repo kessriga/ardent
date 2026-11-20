@@ -174,6 +174,21 @@ mod tests {
     }
 
     #[test]
+    fn paragraph_under_a_heading_inside_a_list_item() -> TestResult {
+        assert_eq!(
+            paths("README.md", "- ## Note\n\n  Text below the note.\n")?,
+            [
+                "README.md",
+                "README.md#list",
+                "README.md#list/item",
+                "README.md#list/item/Note",
+                "README.md#list/item/Note/paragraph",
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn nested_list() -> TestResult {
         let text = "## Install\n\n- Download.\n- Put it on the path:\n  - macOS\n  - Linux\n\n  Then restart.\n";
         assert_eq!(
