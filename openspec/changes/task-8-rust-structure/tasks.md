@@ -36,7 +36,7 @@ Each task ends with a passing `cargo fmt --check`, `cargo clippy --all-targets -
       new project writes the structure file of `src/main.rs` with `format: rust`
 - [x] 4.2 Change the test "Format without a plugin" to enable `html`, and add integration tests for the scenarios
       "Syntax error in one file" and "Syntax error after a scan" of the `sync` delta; verify that they pass
-- [ ] 4.3 Update `README.md`: the status line and the note that `ardent sync` warns about the `rust` format; verify with
+- [x] 4.3 Update `README.md`: the status line and the note that `ardent sync` warns about the `rust` format; verify with
       `rumdl fmt --no-cache --enable MD013 README.md`
 
 ## 5. Verification

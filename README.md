@@ -4,8 +4,8 @@ Ardent is a terminal outliner for structured text. It reads the files in a proje
 shows each file as a tree of nodes, in the same outline form that Roam Research and Tana use.
 
 > **Status:** milestone M0 has settled the core design, and milestone M1 builds a read-only outline. The binary has two
-> commands: `ardent init` and `ardent sync`. Only Markdown has a format plugin so far. Run `backlog milestone list` to
-> see progress.
+> commands: `ardent init` and `ardent sync`. Markdown and Rust have built-in format plugins. Run
+> `backlog milestone list` to see progress.
 
 ## Idea
 
@@ -43,12 +43,19 @@ file, Ardent keeps:
 Run `ardent sync` anywhere in the project. It scans each tracked file that changed since the last sync and writes its
 structure to `.ardent/cache/files/<source path>/structure.yaml`. It skips a file whose size, modification time, and
 format plugin are unchanged, and it deletes the structure of a file that Ardent no longer tracks. Ardent follows git's
-ignore rules, and it skips a subdirectory that holds its own `.ardent/` as a separate project. Until the Rust plugin
-exists, `ardent sync` warns that the `rust` format has no plugin.
+ignore rules, and it skips a subdirectory that holds its own `.ardent/` as a separate project. When a file has a syntax
+error, `ardent sync` reports the file with the line and column of the error, keeps the structure from its last scan, and
+exits with status 1.
 
 The outline of a Markdown file holds headings, paragraphs, lists and their items, code blocks, block quotes, tables, and
 front matter. A heading contains the blocks after it, up to the next heading of the same or a higher rank: `## Usage`
 ends a `### Details` section. The text of a list item is part of the item, so its paragraphs are not separate nodes.
+
+The outline of a Rust file holds its items and their members. Items are modules, impl blocks, traits, functions,
+structs, enums, unions, constants, statics, type aliases, `macro_rules!` macros, and extern blocks. Members are fields,
+enum variants, and the functions, constants, and types of traits and impl blocks. The label of an item is its keyword
+and its name, such as `fn run` or `impl Display for Engine`. The doc comments and attributes above an item are part of
+its node. `use` declarations, macro calls, and the statements in a function body are not nodes.
 
 Format support (how to parse Rust, Markdown, and so on) and views (complexity, comments) come from **plugins**. A format
 plugin is a tree-sitter grammar and a query that finds the nodes of the outline. A view plugin is a WebAssembly
