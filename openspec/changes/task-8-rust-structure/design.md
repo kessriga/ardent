@@ -119,6 +119,10 @@ of the query text, then `tree-sitter-rust`, then `0.24.2`.
   this repository. A failure shows up as a file error with a position, not as lost data.
 - [A Rust project mid-edit makes `ardent sync` exit with status 1] → decision-7 accepts this. The error names the file
   and the position, and the structure file stays as it was.
+- [The reported position is where tree-sitter's error recovery puts the first error node, which can be after the real
+  mistake] → In the snapshot test, a half-typed `fn helper(` on line 4 gives an error at `fn after` on line 6. The
+  message still names the file and a nearby position. A better position needs a heuristic over the parse tree, which
+  can come later without a spec change.
 - [An ordinary comment between a doc comment and its item ends the annotation run] → decision-6 accepts this. A later
   query version can include ordinary comments, and its format hash re-scans the files.
 - [Tuple fields have positional paths such as `field[2]`, which shift when a person inserts a field before them] → The

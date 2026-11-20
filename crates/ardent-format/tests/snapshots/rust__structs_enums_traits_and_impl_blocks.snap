@@ -1,0 +1,148 @@
+---
+source: crates/ardent-format/tests/rust.rs
+expression: "outline_yaml(\"types.rs\")?"
+---
+- path: types.rs
+  kind: file
+  range: 0..1152
+  fingerprint: 0497430d255f5370
+- path: types.rs#struct Entry
+  kind: struct
+  range: 39..181
+  fingerprint: 3a7e478852794735
+- path: types.rs#struct Entry/path
+  kind: field
+  range: 106..163
+  fingerprint: 47217b92a9667e3f
+- path: types.rs#struct Entry/size
+  kind: field
+  range: 169..178
+  fingerprint: fec838af89b8afae
+- path: types.rs#struct Id
+  kind: struct
+  range: 183..228
+  fingerprint: f0f90fe479e42a89
+- path: types.rs#struct Id/field
+  kind: field
+  range: 197..221
+  fingerprint: d58045fd357edbe8
+- path: types.rs#struct Id/field[2]
+  kind: field
+  range: 223..226
+  fingerprint: a769d54b248a528e
+- path: types.rs#enum Kind
+  kind: enum
+  range: 230..367
+  fingerprint: 59b3c2eb91f9586b
+- path: types.rs#enum Kind/File
+  kind: variant
+  range: 277..281
+  fingerprint: af1349b9f5f9a1a6
+- path: types.rs#enum Kind/Dir
+  kind: variant
+  range: 287..339
+  fingerprint: ada5e78fecfe1135
+- path: types.rs#enum Kind/Dir/depth
+  kind: field
+  range: 328..337
+  fingerprint: 665349ad54d09563
+- path: types.rs#enum Kind/Link
+  kind: variant
+  range: 345..364
+  fingerprint: da7ee10e132f57e1
+- path: types.rs#enum Kind/Link/field
+  kind: field
+  range: 350..357
+  fingerprint: 3e37de95bf6e4662
+- path: types.rs#enum Kind/Link/field[2]
+  kind: field
+  range: 359..363
+  fingerprint: eed4fe70489585d9
+- path: types.rs#trait Scan
+  kind: trait
+  range: 369..523
+  fingerprint: bb25b5ff871bfbf1
+- path: types.rs#trait Scan/type Output
+  kind: type
+  range: 390..402
+  fingerprint: e436acb4b40175eb
+- path: types.rs#trait Scan/const LIMIT
+  kind: const
+  range: 407..426
+  fingerprint: 3d6d1d0a0d74484a
+- path: types.rs#trait Scan/fn scan
+  kind: fn
+  range: 432..463
+  fingerprint: 80bd995c4cec4f62
+- path: types.rs#trait Scan/fn limit
+  kind: fn
+  range: 469..521
+  fingerprint: ff9042bf192ab572
+- path: types.rs#impl Entry
+  kind: impl
+  range: 525..616
+  fingerprint: e428044bcf3deaa0
+- path: types.rs#impl Entry/fn new
+  kind: fn
+  range: 542..614
+  fingerprint: ad339b96640ef0e5
+- path: types.rs#impl Scan for Entry
+  kind: impl
+  range: 618..745
+  fingerprint: 494e19f5c5cc42c6
+- path: types.rs#impl Scan for Entry/type Output
+  kind: type
+  range: 644..662
+  fingerprint: f3358252bd86c48c
+- path: types.rs#impl Scan for Entry/const LIMIT
+  kind: const
+  range: 667..690
+  fingerprint: ce7b98784aa93a45
+- path: types.rs#impl Scan for Entry/fn scan
+  kind: fn
+  range: 696..743
+  fingerprint: 918a4fb3aef4fedd
+- path: types.rs#impl From<Vec<T>> for Kind
+  kind: impl
+  range: 747..865
+  fingerprint: e142148df06dab38
+- path: types.rs#impl From<Vec<T>> for Kind/fn from
+  kind: fn
+  range: 810..863
+  fingerprint: f2cc7a2aaba6556d
+- path: types.rs#impl fmt::Display for Entry
+  kind: impl
+  range: 867..1012
+  fingerprint: 8b1a7f4074b81579
+- path: types.rs#impl fmt::Display for Entry/fn fmt
+  kind: fn
+  range: 901..1010
+  fingerprint: 8c013f4ceedc8f8a
+- path: types.rs#impl Send for Id
+  kind: impl
+  range: 1014..1034
+  fingerprint: b4077211f45ddb72
+- path: types.rs#impl Sync for Id
+  kind: impl
+  range: 1036..1062
+  fingerprint: b96530d988e8f979
+- path: types.rs#union Bits
+  kind: union
+  range: 1064..1108
+  fingerprint: 16224ed8f88ca53f
+- path: types.rs#union Bits/int
+  kind: field
+  range: 1081..1089
+  fingerprint: c8cb35689e767bfb
+- path: types.rs#union Bits/float
+  kind: field
+  range: 1095..1105
+  fingerprint: 4db025c6fde09180
+- path: types.rs#extern "C"
+  kind: extern
+  range: 1110..1151
+  fingerprint: 13c7f9f501d763dd
+- path: types.rs#extern "C"/fn abs
+  kind: fn
+  range: 1127..1149
+  fingerprint: 76232f2a7010a237

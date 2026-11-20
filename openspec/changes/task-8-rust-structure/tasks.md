@@ -9,24 +9,24 @@ Each task ends with a passing `cargo fmt --check`, `cargo clippy --all-targets -
 
 ## 2. Outline engine
 
-- [ ] 2.1 Read `@annotation` captures in `engine.rs` and widen the range of the candidate to cover them; verify with
+- [x] 2.1 Read `@annotation` captures in `engine.rs` and widen the range of the candidate to cover them; verify with
       unit tests for the scenarios "Doc comment before a function" and "Match without annotations" of the `outline`
       delta
-- [ ] 2.2 Return `ScanError::Syntax { line, column }` from `FormatPlugin::scan` for a tree with an `ERROR` or `MISSING`
+- [x] 2.2 Return `ScanError::Syntax { line, column }` from `FormatPlugin::scan` for a tree with an `ERROR` or `MISSING`
       node, with the column counted in characters; verify with unit tests for the scenario "Half-typed function", an
       error on the first line, and an error after a non-ASCII character
-- [ ] 2.3 Move the format hash rule of built-in plugins from `markdown.rs` into `engine.rs`; verify that the Markdown
+- [x] 2.3 Move the format hash rule of built-in plugins from `markdown.rs` into `engine.rs`; verify that the Markdown
       tests pass and that the Markdown format hash does not change
 
 ## 3. Rust plugin
 
-- [ ] 3.1 Add `tree-sitter-rust = "=0.24.2"` and the module `rust` with `rust/outline.scm` for items, labels, and
+- [x] 3.1 Add `tree-sitter-rust = "=0.24.2"` and the module `rust` with `rust/outline.scm` for items, labels, and
       annotations; verify with unit tests for identity, the pin, the spec example of `ardent-schemas`, and the scenarios
       of "Item nodes", "Item labels", "Impl block labels", "Extern block labels", "Nesting of items", "Doc comments and
       attributes", and "Rust code that is not a node" of the spec `rust-format`
-- [ ] 3.2 Add the patterns for fields, tuple fields, and enum variants; verify with unit tests for the scenarios of
+- [x] 3.2 Add the patterns for fields, tuple fields, and enum variants; verify with unit tests for the scenarios of
       "Fields and variants" and "Attribute on a tuple field"
-- [ ] 3.3 Add `insta` snapshot tests in `tests/rust.rs` for files in `tests/rust/` with inline modules, impl blocks,
+- [x] 3.3 Add `insta` snapshot tests in `tests/rust.rs` for files in `tests/rust/` with inline modules, impl blocks,
       trait impls, fields, variants, and doc comments, and for the error message of a file with a syntax error; verify
       with `cargo insta review` that each snapshot shows the expected outline
 
