@@ -52,7 +52,7 @@ Each task ends with a passing `cargo fmt --check`, `cargo clippy --all-targets -
 
 ## 5. Checks
 
-- [ ] 5.1 Run `openspec validate task-7-markdown-structure --strict` and the gate, and run `ardent init` and
+- [x] 5.1 Run `openspec validate task-7-markdown-structure --strict` and the gate, and run `ardent init` and
       `ardent sync` by hand in a scratch copy of this repository; verify that all pass and that
       `.ardent/cache/files/README.md/structure.yaml` lists the headings of the README
 
