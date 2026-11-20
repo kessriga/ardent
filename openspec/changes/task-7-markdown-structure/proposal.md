@@ -61,7 +61,7 @@ Out of scope:
   `ardent-core ← ardent-format ← ardent-cli` (decision-3).
 - `ardent-core` gains the modules `outline`, `structure`, `config`, and `yaml`, and `layout` gains path checks.
 - `ardent-cli` gains the `sync` command and the modules `tracked` and `sync`. `project_root::find` returns
-  `io::Result<Option<PathBuf>>`, and `ardent init` handles the error.
+  `Result<Option<PathBuf>, (PathBuf, io::Error)>`, and `ardent init` handles the error.
 - New dependencies:
   - `tree-sitter` 0.27.2 and `tree-sitter-md` 0.5.4: the parser basis of decision-3.
   - `serde` and `serde-saphyr` 2.2: YAML. `serde_yaml` is unmaintained. `serde-saphyr` writes the format of the spec

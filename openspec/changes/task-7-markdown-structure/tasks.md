@@ -7,13 +7,13 @@ Each task ends with a passing `cargo fmt --check`, `cargo clippy --all-targets -
 - [x] 1.1 Record decision-5 with `backlog decision create`: outline queries may set `level`, and the engine nests
       following siblings under a node with a smaller level; it amends the query table of decision-3. Verify that
       `backlog decision list` shows it as accepted
-- [ ] 1.2 Harden `layout::write_atomic` in `ardent-core`: reject absolute paths and components other than normal names,
+- [x] 1.2 Harden `layout::write_atomic` in `ardent-core`: reject absolute paths and components other than normal names,
       fail when `ardent_dir` is not a directory, and create the parent directories of the target; verify with unit tests
       for `..`, an absolute path, a missing `ardent_dir` that stays missing, and a write to
       `cache/files/src/engine.rs/structure.yaml`
-- [ ] 1.3 Change `project_root::find` in `ardent-cli` to return `io::Result<Option<PathBuf>>` and make `ardent init`
-      report its errors; verify with a unit test for a directory that denies search permission, and with the existing
-      init tests
+- [x] 1.3 Change `project_root::find` in `ardent-cli` to return `Result<Option<PathBuf>, (PathBuf, io::Error)>` and make
+      `ardent init` report its errors; verify with a unit test for a directory that denies search permission, and with
+      the existing init tests
 
 ## 2. Outline and structure types in ardent-core
 

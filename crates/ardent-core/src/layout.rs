@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use tempfile::NamedTempFile;
 
@@ -14,15 +14,29 @@ pub const CACHE_DIR: &str = "cache";
 const TMP_DIR: &str = "tmp";
 
 /// Writes `contents` to `relative_path` inside `ardent_dir` through a temporary file in `cache/tmp/`, so that the
-/// target file has either its old or its new content, even after a crash or a power loss. Creates `cache/tmp/` when it
-/// is missing. The file gets the permissions that `fs::write` gives a new file.
+/// target file has either its old or its new content, even after a crash or a power loss. Creates `cache/tmp/` and the
+/// parent directories of the target when they are missing. The file gets the permissions that `fs::write` gives a new
+/// file.
+///
+/// `relative_path` often derives from a source path in a cloned repository, so it must consist of normal names only:
+/// an absolute path or a `..` fails with `InvalidInput`. A missing `ardent_dir` fails with `NotFound`, and the call
+/// then creates nothing.
 pub fn write_atomic(ardent_dir: &Path, relative_path: &str, contents: &[u8]) -> io::Result<()> {
+    let target = ardent_dir.join(checked_relative_path(relative_path)?);
+    if !fs::metadata(ardent_dir)?.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotADirectory,
+            format!("{} is not a directory", ardent_dir.display()),
+        ));
+    }
     let tmp_dir = tmp_dir(ardent_dir);
     fs::create_dir_all(&tmp_dir)?;
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let mut file = create_temp_file(&tmp_dir)?;
     file.write_all(contents)?;
     file.as_file().sync_all()?;
-    let target = ardent_dir.join(relative_path);
     file.persist(&target).map_err(|err| err.error)?;
     if let Some(parent) = target.parent() {
         sync_dir(parent)?;
@@ -40,6 +54,19 @@ pub fn remove_empty_cache(ardent_dir: &Path) -> io::Result<()> {
 
 fn tmp_dir(ardent_dir: &Path) -> PathBuf {
     ardent_dir.join(CACHE_DIR).join(TMP_DIR)
+}
+
+fn checked_relative_path(relative_path: &str) -> io::Result<&Path> {
+    let path = Path::new(relative_path);
+    let mut components = path.components().peekable();
+    if components.peek().is_some() && components.all(|c| matches!(c, Component::Normal(_))) {
+        Ok(path)
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{relative_path:?} is not a relative path inside .ardent/"),
+        ))
+    }
 }
 
 /// `tempfile` creates files with mode 0o600; 0o666 minus the umask is what `fs::write` gives a new file.
@@ -107,6 +134,49 @@ mod tests {
         write_atomic(ardent_dir.path(), "atomic", b"")?;
         let mode = |name: &str| fs::metadata(ardent_dir.path().join(name)).map(|m| m.permissions());
         assert_eq!(mode("atomic")?, mode("plain")?);
+        Ok(())
+    }
+
+    #[test]
+    fn creates_the_parent_directories_of_the_target() -> io::Result<()> {
+        let ardent_dir = tempfile::tempdir()?;
+        let target = "cache/files/src/engine.rs/structure.yaml";
+        write_atomic(ardent_dir.path(), target, b"schema: 1\n")?;
+        assert_eq!(fs::read(ardent_dir.path().join(target))?, b"schema: 1\n");
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_paths_that_leave_the_ardent_dir() -> io::Result<()> {
+        let outer = tempfile::tempdir()?;
+        let ardent_dir = outer.path().join(".ardent");
+        fs::create_dir(&ardent_dir)?;
+        let absolute = outer.path().join("absolute");
+        for path in [
+            "../escape",
+            "views/../../escape",
+            "",
+            absolute.to_str().unwrap_or_default(),
+        ] {
+            let err = write_atomic(&ardent_dir, path, b"").err();
+            assert_eq!(
+                err.map(|e| e.kind()),
+                Some(io::ErrorKind::InvalidInput),
+                "{path:?}"
+            );
+        }
+        assert!(!outer.path().join("escape").exists());
+        assert!(!absolute.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn creates_nothing_when_the_ardent_dir_is_missing() -> io::Result<()> {
+        let outer = tempfile::tempdir()?;
+        let missing = outer.path().join(".ardent");
+        let err = write_atomic(&missing, "config.yaml", b"").err();
+        assert_eq!(err.map(|e| e.kind()), Some(io::ErrorKind::NotFound));
+        assert!(!missing.exists());
         Ok(())
     }
 

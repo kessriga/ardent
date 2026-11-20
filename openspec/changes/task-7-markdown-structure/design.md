@@ -163,9 +163,9 @@ requires.
 
 ### Project root
 
-`project_root::find` returns `io::Result<Option<PathBuf>>`. It checks each directory with `fs::metadata`, continues on
-`NotFound` and `NotADirectory`, and returns every other error with its path. `ardent init` reports such an error and
-changes nothing.
+`project_root::find` returns `Result<Option<PathBuf>, (PathBuf, io::Error)>`. It checks each directory with
+`fs::metadata`, continues on `NotFound` and `NotADirectory`, and returns every other error with the path it could not
+check, the error shape that `ardent init` already uses. `ardent init` reports such an error and changes nothing.
 
 The search starts at `env::current_dir()`, the path with symbolic links resolved, as git and cargo do. Alternative: the
 logical path in `$PWD`. The walk does not follow symbolic links, so the files under a linked directory are not part of
