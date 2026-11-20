@@ -1,6 +1,7 @@
 //! The YAML form that every file in `.ardent/` shares (spec `ardent-schemas`): block style with keys in the order of
 //! the spec, a leading `schema` version, unknown keys rejected, and ranges and times as one-line strings.
 
+use std::error::Error;
 use std::fmt;
 use std::io;
 
@@ -28,7 +29,7 @@ impl fmt::Display for ReadError {
     }
 }
 
-impl std::error::Error for ReadError {}
+impl Error for ReadError {}
 
 /// Reads `text` as a `T` when its `schema` is `schema`. The version is checked first, so a file from a newer Ardent
 /// reports its version and not the first key that this version does not know.
@@ -88,18 +89,19 @@ pub(crate) mod range {
 pub(crate) mod timestamp {
     use std::time::SystemTime;
 
+    use jiff::Timestamp;
     use serde::de::Error as _;
     use serde::ser::Error as _;
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(time: &SystemTime, serializer: S) -> Result<S::Ok, S::Error> {
-        let timestamp = jiff::Timestamp::try_from(*time).map_err(S::Error::custom)?;
+        let timestamp = Timestamp::try_from(*time).map_err(S::Error::custom)?;
         serializer.collect_str(&format_args!("{timestamp:.9}"))
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<SystemTime, D::Error> {
         let text = String::deserialize(deserializer)?;
-        let timestamp: jiff::Timestamp = text.parse().map_err(D::Error::custom)?;
+        let timestamp: Timestamp = text.parse().map_err(D::Error::custom)?;
         SystemTime::try_from(timestamp).map_err(D::Error::custom)
     }
 }

@@ -3,6 +3,7 @@
 
 mod common;
 
+use std::error::Error;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -12,7 +13,7 @@ use std::time::{Duration, SystemTime};
 use common::{Tree, snapshot, temp_dir};
 use tempfile::TempDir;
 
-type TestResult = Result<(), Box<dyn std::error::Error>>;
+type TestResult = Result<(), Box<dyn Error>>;
 
 /// The Markdown example of the spec `ardent-schemas`, and the structure file the spec gives for it.
 const SPEC_MD: &str = "Ardent derives an outline from each source file.
@@ -431,10 +432,12 @@ fn sync_outside_a_project_fails() -> TestResult {
 #[cfg(unix)]
 #[test]
 fn directory_reached_through_a_symbolic_link_is_not_in_the_project() -> TestResult {
+    use std::os::unix::fs as unix_fs;
+
     let project = Project::new()?;
     let outside = temp_dir()?;
     fs::create_dir(outside.path().join("docs"))?;
-    std::os::unix::fs::symlink(outside.path().join("docs"), project.path("linked"))?;
+    unix_fs::symlink(outside.path().join("docs"), project.path("linked"))?;
     let run = Run(project.ardent_in(&project.path("linked"), "sync")?);
     assert_eq!(run.code(), Some(1));
     assert!(
@@ -522,11 +525,13 @@ fn invalid_pattern_in_the_configuration_fails_and_writes_nothing() -> TestResult
 #[cfg(unix)]
 #[test]
 fn symlink_in_the_cache_stops_the_sync() -> TestResult {
+    use std::os::unix::fs as unix_fs;
+
     let project = Project::new()?;
     let outside = temp_dir()?;
     fs::create_dir(outside.path().join("empty"))?;
     fs::create_dir(project.path(".ardent/cache"))?;
-    std::os::unix::fs::symlink(outside.path(), project.path(".ardent/cache/files"))?;
+    unix_fs::symlink(outside.path(), project.path(".ardent/cache/files"))?;
     let before = snapshot(outside.path())?;
     let run = project.sync()?;
     assert_eq!(run.code(), Some(1), "stderr: {}", run.stderr());

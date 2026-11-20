@@ -1,6 +1,8 @@
 //! The built-in Markdown format plugin (spec `markdown-format`). Its grammar links natively through `tree-sitter-md`,
 //! and its outline query is the file `markdown/outline.scm`.
 
+use blake3::Hasher;
+
 use crate::engine::{FormatPlugin, PluginError};
 
 pub const NAME: &str = "markdown";
@@ -25,7 +27,7 @@ pub fn plugin() -> Result<FormatPlugin, PluginError> {
 /// The format hash of a built-in plugin (spec `ardent-schemas`): the BLAKE3 hash of the query text, then the name and
 /// version of the grammar crate.
 fn format_hash() -> String {
-    let mut hasher = blake3::Hasher::new();
+    let mut hasher = Hasher::new();
     hasher.update(QUERY.as_bytes());
     hasher.update(GRAMMAR_CRATE.as_bytes());
     hasher.update(GRAMMAR_VERSION.as_bytes());
@@ -34,6 +36,8 @@ fn format_hash() -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
     use ardent_core::outline::{Node, Outline};
 
     use super::*;
@@ -44,14 +48,14 @@ mod tests {
         assert!(include_str!("../Cargo.toml").contains(&pin), "{pin}");
     }
 
-    type TestResult = Result<(), Box<dyn std::error::Error>>;
+    type TestResult = Result<(), Box<dyn Error>>;
 
-    fn outline(source_path: &str, text: &str) -> Result<Outline, Box<dyn std::error::Error>> {
+    fn outline(source_path: &str, text: &str) -> Result<Outline, Box<dyn Error>> {
         let top_level = plugin()?.scan(text.as_bytes())?;
         Ok(Outline::build(source_path, text.as_bytes(), &top_level))
     }
 
-    fn paths(source_path: &str, text: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    fn paths(source_path: &str, text: &str) -> Result<Vec<String>, Box<dyn Error>> {
         Ok(outline(source_path, text)?
             .nodes
             .into_iter()

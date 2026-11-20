@@ -2,8 +2,10 @@
 //! finds, nested by containment and by level (spec `outline`, decision-3, decision-5).
 
 use std::collections::HashMap;
+use std::error::Error;
 use std::fmt;
 use std::iter;
+use std::mem;
 use std::ops::Range;
 
 use ardent_core::outline::ScannedNode;
@@ -81,7 +83,7 @@ impl fmt::Display for PluginError {
     }
 }
 
-impl std::error::Error for PluginError {}
+impl Error for PluginError {}
 
 /// Why a format plugin could not scan a file.
 #[derive(Debug)]
@@ -101,7 +103,7 @@ impl fmt::Display for ScanError {
     }
 }
 
-impl std::error::Error for ScanError {}
+impl Error for ScanError {}
 
 /// A node that a match found, before nesting.
 struct Candidate {
@@ -327,7 +329,7 @@ fn nest_by_level(siblings: Vec<Candidate>, parent_end: usize) -> Vec<Candidate> 
     let mut result = Vec::new();
     let mut open: Vec<Candidate> = Vec::new();
     for mut sibling in siblings {
-        sibling.children = nest_by_level(std::mem::take(&mut sibling.children), sibling.range.end);
+        sibling.children = nest_by_level(mem::take(&mut sibling.children), sibling.range.end);
         if let Some(level) = sibling.level {
             while open.last().is_some_and(|run| run.level >= Some(level)) {
                 close_run(&mut open, &mut result, sibling.range.start);
@@ -391,7 +393,7 @@ mod tests {
         }
     }
 
-    fn outline(query: &str, source: &str) -> Result<String, Box<dyn std::error::Error>> {
+    fn outline(query: &str, source: &str) -> Result<String, Box<dyn Error>> {
         let nodes = markdown(query)?.scan(source.as_bytes())?;
         let mut out = String::new();
         render(&nodes, 0, &mut out);
@@ -405,7 +407,7 @@ mod tests {
 "#;
 
     #[test]
-    fn paragraph_pattern_gives_one_node() -> Result<(), Box<dyn std::error::Error>> {
+    fn paragraph_pattern_gives_one_node() -> Result<(), Box<dyn Error>> {
         let query = r#"((paragraph) @node (#set! kind "paragraph"))"#;
         assert_eq!(
             outline(query, "Ardent derives an outline from each source file.\n")?,
@@ -415,7 +417,7 @@ mod tests {
     }
 
     #[test]
-    fn kind_defaults_to_the_syntax_node_type() -> Result<(), Box<dyn std::error::Error>> {
+    fn kind_defaults_to_the_syntax_node_type() -> Result<(), Box<dyn Error>> {
         assert_eq!(
             outline("(block_quote) @node", "> quoted\n")?,
             "block_quote block_quote 0..9\n"
@@ -424,8 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn one_node_for_a_syntax_node_that_two_patterns_match() -> Result<(), Box<dyn std::error::Error>>
-    {
+    fn one_node_for_a_syntax_node_that_two_patterns_match() -> Result<(), Box<dyn Error>> {
         let query =
             r#"((paragraph) @node (#set! kind "first")) ((paragraph) @node (#set! kind "second"))"#;
         assert_eq!(outline(query, "Text.\n")?, "first first 0..6\n");
@@ -433,8 +434,7 @@ mod tests {
     }
 
     #[test]
-    fn first_pattern_wins_when_a_later_pattern_finishes_first()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn first_pattern_wins_when_a_later_pattern_finishes_first() -> Result<(), Box<dyn Error>> {
         let query = r#"
 ((atx_heading (atx_h2_marker) heading_content: (inline) @label) @node (#set! kind "first"))
 ((atx_heading) @node (#set! kind "second"))
@@ -444,7 +444,7 @@ mod tests {
     }
 
     #[test]
-    fn nests_by_containment() -> Result<(), Box<dyn std::error::Error>> {
+    fn nests_by_containment() -> Result<(), Box<dyn Error>> {
         let query = r#"((list) @node (#set! kind "list")) ((list_item) @node (#set! kind "item"))"#;
         assert_eq!(
             outline(query, "- a\n- b\n  - c\n")?,
@@ -454,8 +454,8 @@ mod tests {
     }
 
     #[test]
-    fn outer_syntax_node_is_the_parent_when_two_nodes_share_a_range()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn outer_syntax_node_is_the_parent_when_two_nodes_share_a_range() -> Result<(), Box<dyn Error>>
+    {
         // The list pattern finishes at the paragraph, after the item pattern has finished at the item.
         let query = r#"((list (list_item (paragraph))) @node (#set! kind "list")) ((list_item) @node (#set! kind "item"))"#;
         assert_eq!(
@@ -466,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn nests_by_level() -> Result<(), Box<dyn std::error::Error>> {
+    fn nests_by_level() -> Result<(), Box<dyn Error>> {
         let source = "## A\n\nOne.\n\n### B\n\nTwo.\n\n## C\n";
         assert_eq!(
             outline(HEADINGS, source)?,
@@ -476,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn a_skipped_level_still_nests() -> Result<(), Box<dyn std::error::Error>> {
+    fn a_skipped_level_still_nests() -> Result<(), Box<dyn Error>> {
         let query = r#"
 ((atx_heading (atx_h1_marker) heading_content: (inline) @label) @node (#set! level "1"))
 ((atx_heading (atx_h2_marker) heading_content: (inline) @label) @node (#set! level "2"))
@@ -490,7 +490,7 @@ mod tests {
     }
 
     #[test]
-    fn joins_label_captures_and_collapses_whitespace() -> Result<(), Box<dyn std::error::Error>> {
+    fn joins_label_captures_and_collapses_whitespace() -> Result<(), Box<dyn Error>> {
         let query = r#"((setext_heading heading_content: (paragraph (inline) @label)) @node (#set! kind "heading"))"#;
         assert_eq!(
             outline(query, "Setext\n  title\n===\n")?,
@@ -505,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn label_without_text_is_the_kind() -> Result<(), Box<dyn std::error::Error>> {
+    fn label_without_text_is_the_kind() -> Result<(), Box<dyn Error>> {
         assert_eq!(outline(HEADINGS, "Text.\n")?, "paragraph paragraph 0..6\n");
         Ok(())
     }

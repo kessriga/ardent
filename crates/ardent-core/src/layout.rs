@@ -120,7 +120,9 @@ fn checked_relative_path(relative_path: &str) -> io::Result<&Path> {
 fn create_temp_file(tmp_dir: &Path) -> io::Result<NamedTempFile> {
     use std::os::unix::fs::PermissionsExt;
 
-    tempfile::Builder::new()
+    use tempfile::Builder;
+
+    Builder::new()
         .permissions(fs::Permissions::from_mode(0o666))
         .tempfile_in(tmp_dir)
 }
@@ -219,12 +221,14 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn refuses_to_write_through_a_symlink() -> io::Result<()> {
+        use std::os::unix::fs as unix_fs;
+
         let outer = tempfile::tempdir()?;
         let ardent_dir = outer.path().join(".ardent");
         let outside = outer.path().join("outside");
         fs::create_dir_all(ardent_dir.join("cache"))?;
         fs::create_dir(&outside)?;
-        std::os::unix::fs::symlink(&outside, ardent_dir.join("cache/files"))?;
+        unix_fs::symlink(&outside, ardent_dir.join("cache/files"))?;
         let err = write_atomic(&ardent_dir, "cache/files/a.md/structure.yaml", b"").err();
         assert_eq!(err.map(|e| e.kind()), Some(io::ErrorKind::NotADirectory));
         let err = create_dir(&ardent_dir, "cache/files").err();

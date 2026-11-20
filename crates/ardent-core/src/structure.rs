@@ -62,6 +62,12 @@ pub fn content_hash(source: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+    use std::ops::Range;
+    use std::time::Duration;
+
+    use jiff::Timestamp;
+
     use super::*;
     use crate::outline::ScannedNode;
 
@@ -107,12 +113,7 @@ nodes:
     fingerprint: 0c3892e426b726a6
 ";
 
-    fn node(
-        kind: &str,
-        label: &str,
-        range: std::ops::Range<usize>,
-        labels: &[&str],
-    ) -> ScannedNode {
+    fn node(kind: &str, label: &str, range: Range<usize>, labels: &[&str]) -> ScannedNode {
         let label_ranges = labels
             .iter()
             .filter_map(|word| {
@@ -129,7 +130,7 @@ nodes:
         }
     }
 
-    fn engine_structure() -> Result<Structure, Box<dyn std::error::Error>> {
+    fn engine_structure() -> Result<Structure, Box<dyn Error>> {
         let mut engine = node("impl", "impl Engine", 47..187, &["impl", "Engine"]);
         engine.children = vec![
             node("fn", "fn run", 65..124, &["fn", "run"]),
@@ -137,9 +138,7 @@ nodes:
         ];
         let stamp = Stamp {
             size: 188,
-            mtime: SystemTime::try_from(
-                "2026-11-20T08:15:42.123456789Z".parse::<jiff::Timestamp>()?,
-            )?,
+            mtime: SystemTime::try_from("2026-11-20T08:15:42.123456789Z".parse::<Timestamp>()?)?,
             hash: content_hash(ENGINE_RS.as_bytes()),
             format: "rust".to_string(),
             format_version: "0.1.0".to_string(),
@@ -151,22 +150,22 @@ nodes:
     }
 
     #[test]
-    fn writes_the_rust_example_of_the_spec() -> Result<(), Box<dyn std::error::Error>> {
+    fn writes_the_rust_example_of_the_spec() -> Result<(), Box<dyn Error>> {
         assert_eq!(engine_structure()?.to_yaml()?, ENGINE_STRUCTURE);
         Ok(())
     }
 
     #[test]
-    fn reads_back_what_it_writes() -> Result<(), Box<dyn std::error::Error>> {
+    fn reads_back_what_it_writes() -> Result<(), Box<dyn Error>> {
         let structure = engine_structure()?;
         assert_eq!(Structure::from_yaml(&structure.to_yaml()?)?, structure);
         Ok(())
     }
 
     #[test]
-    fn round_trip_keeps_quoted_labels_and_old_times() -> Result<(), Box<dyn std::error::Error>> {
+    fn round_trip_keeps_quoted_labels_and_old_times() -> Result<(), Box<dyn Error>> {
         let mut structure = engine_structure()?;
-        structure.stamp.mtime = SystemTime::UNIX_EPOCH - std::time::Duration::new(10, 1);
+        structure.stamp.mtime = SystemTime::UNIX_EPOCH - Duration::new(10, 1);
         structure.outline.nodes[1].path =
             "src/engine.rs#Note: this/- 'item' \"x\" #tag".to_string();
         structure.outline.nodes[2].fingerprint = "1234567890123456".to_string();

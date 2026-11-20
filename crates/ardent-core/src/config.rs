@@ -2,6 +2,7 @@
 //! file patterns, and which files Ardent never tracks.
 
 use std::collections::BTreeMap;
+use std::error::Error;
 use std::fmt;
 
 use serde::Deserialize;
@@ -71,7 +72,7 @@ impl fmt::Display for ConfigError {
     }
 }
 
-impl std::error::Error for ConfigError {}
+impl Error for ConfigError {}
 
 impl Config {
     pub fn from_yaml(text: &str) -> Result<Self, ConfigError> {

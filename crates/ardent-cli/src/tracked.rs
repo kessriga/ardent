@@ -1,6 +1,7 @@
 //! The tracked files of a project (spec `ardent-layout`, "Tracked files"): each file that the patterns of exactly one
 //! enabled format match, outside git's ignore rules, the `exclude` patterns, `.ardent/`, and nested projects.
 
+use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -98,7 +99,7 @@ impl fmt::Display for PatternError {
     }
 }
 
-impl std::error::Error for PatternError {}
+impl Error for PatternError {}
 
 /// The compiled patterns of `config.yaml`: the `files` patterns of each enabled format, and the `exclude` patterns.
 pub struct Patterns<'a> {
@@ -269,7 +270,7 @@ mod tests {
         patterns.iter().map(|p| p.to_string()).collect()
     }
 
-    fn tracked(root: &Path, exclude: &[&str]) -> Result<Walk, Box<dyn std::error::Error>> {
+    fn tracked(root: &Path, exclude: &[&str]) -> Result<Walk, Box<dyn Error>> {
         let markdown = patterns(&["*.md", "*.markdown"]);
         let formats = [FormatPatterns {
             name: "markdown",
@@ -286,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn tracks_matching_files_sorted_by_path() -> Result<(), Box<dyn std::error::Error>> {
+    fn tracks_matching_files_sorted_by_path() -> Result<(), Box<dyn Error>> {
         let project = tempfile::tempdir()?;
         for path in [
             "README.md",
@@ -312,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn skips_files_that_git_ignores() -> Result<(), Box<dyn std::error::Error>> {
+    fn skips_files_that_git_ignores() -> Result<(), Box<dyn Error>> {
         let project = tempfile::tempdir()?;
         fs::write(project.path().join(".gitignore"), "target/\n")?;
         write(project.path(), "target/doc/notes.md")?;
@@ -323,7 +324,7 @@ mod tests {
 
     #[test]
     fn reads_gitignore_files_above_the_root_only_inside_a_git_repository()
-    -> Result<(), Box<dyn std::error::Error>> {
+    -> Result<(), Box<dyn Error>> {
         let outer = tempfile::tempdir()?;
         let root = outer.path().join("project");
         fs::write(outer.path().join(".gitignore"), "*.md\n")?;
@@ -335,8 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_gitignore_files_above_the_git_repository() -> Result<(), Box<dyn std::error::Error>>
-    {
+    fn ignores_gitignore_files_above_the_git_repository() -> Result<(), Box<dyn Error>> {
         let outer = tempfile::tempdir()?;
         let repo = outer.path().join("repo");
         fs::write(outer.path().join(".gitignore"), "*.md\n")?;
@@ -347,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn warns_about_a_gitignore_line_it_cannot_parse() -> Result<(), Box<dyn std::error::Error>> {
+    fn warns_about_a_gitignore_line_it_cannot_parse() -> Result<(), Box<dyn Error>> {
         let outer = tempfile::tempdir()?;
         let root = outer.path().join("project");
         fs::create_dir_all(outer.path().join(".git"))?;
@@ -371,8 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn applies_no_outer_gitignore_inside_a_nested_git_repository()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn applies_no_outer_gitignore_inside_a_nested_git_repository() -> Result<(), Box<dyn Error>> {
         let project = tempfile::tempdir()?;
         fs::create_dir_all(project.path().join(".git"))?;
         fs::create_dir_all(project.path().join("lib/.git"))?;
@@ -384,8 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_format_patterns_against_the_file_path_only() -> Result<(), Box<dyn std::error::Error>>
-    {
+    fn matches_format_patterns_against_the_file_path_only() -> Result<(), Box<dyn Error>> {
         let project = tempfile::tempdir()?;
         write(project.path(), "notes.md/image.png")?;
         write(project.path(), "README.md")?;
@@ -395,7 +393,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn does_not_enter_excluded_directories() -> Result<(), Box<dyn std::error::Error>> {
+    fn does_not_enter_excluded_directories() -> Result<(), Box<dyn Error>> {
         use std::os::unix::fs::PermissionsExt;
 
         let project = tempfile::tempdir()?;
@@ -415,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn skips_excluded_files() -> Result<(), Box<dyn std::error::Error>> {
+    fn skips_excluded_files() -> Result<(), Box<dyn Error>> {
         let project = tempfile::tempdir()?;
         write(project.path(), "vendor/lib/README.md")?;
         write(project.path(), "README.md")?;
@@ -427,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn reports_a_file_that_two_formats_match() -> Result<(), Box<dyn std::error::Error>> {
+    fn reports_a_file_that_two_formats_match() -> Result<(), Box<dyn Error>> {
         let project = tempfile::tempdir()?;
         write(project.path(), "notes.md")?;
         let (markdown, notes) = (patterns(&["*.md"]), patterns(&["notes.*"]));
@@ -457,7 +455,7 @@ mod tests {
     }
 
     #[test]
-    fn skips_and_reports_nested_projects() -> Result<(), Box<dyn std::error::Error>> {
+    fn skips_and_reports_nested_projects() -> Result<(), Box<dyn Error>> {
         let project = tempfile::tempdir()?;
         fs::create_dir_all(project.path().join("tools/.ardent"))?;
         write(project.path(), "tools/README.md")?;
@@ -472,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    fn never_tracks_files_in_ardent_or_git() -> Result<(), Box<dyn std::error::Error>> {
+    fn never_tracks_files_in_ardent_or_git() -> Result<(), Box<dyn Error>> {
         let project = tempfile::tempdir()?;
         write(project.path(), ".ardent/notes.md")?;
         write(project.path(), ".git/notes.md")?;
@@ -482,10 +480,12 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn skips_symbolic_links() -> Result<(), Box<dyn std::error::Error>> {
+    fn skips_symbolic_links() -> Result<(), Box<dyn Error>> {
+        use std::os::unix::fs as unix_fs;
+
         let project = tempfile::tempdir()?;
         write(project.path(), "README.md")?;
-        std::os::unix::fs::symlink(
+        unix_fs::symlink(
             project.path().join("README.md"),
             project.path().join("LINK.md"),
         )?;
@@ -495,7 +495,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn reports_a_path_that_is_not_utf8() -> Result<(), Box<dyn std::error::Error>> {
+    fn reports_a_path_that_is_not_utf8() -> Result<(), Box<dyn Error>> {
         use std::ffi::OsStr;
         use std::os::unix::ffi::OsStrExt;
 
