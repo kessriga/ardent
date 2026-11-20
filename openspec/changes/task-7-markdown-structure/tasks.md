@@ -33,7 +33,7 @@ Each task ends with a passing `cargo fmt --check`, `cargo clippy --all-targets -
 - [x] 3.1 Create the crate `ardent-format` with `tree-sitter` 0.27.2 and `tree-sitter-md` pinned to `=0.5.4`, and the
       module `engine`: query compilation with `kind` and `level`, candidate nodes, containment, nesting by level, and
       labels; verify with unit tests for the scenarios of the spec `outline` that use a query, including "Invalid level"
-- [ ] 3.2 Add the module `markdown` with `outline.scm`, the plugin constant, and `format_hash`; verify that the spec
+- [x] 3.2 Add the module `markdown` with `outline.scm`, the plugin constant, and `format_hash`; verify that the spec
       example of `ardent-schemas` gives exactly the paths, kinds, ranges, and fingerprints of the spec, and that unit
       tests cover each scenario of the spec `markdown-format`
 - [ ] 3.3 Add `insta` snapshot tests for Markdown files with nested headings, setext headings, lists, code blocks, front
