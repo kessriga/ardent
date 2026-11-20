@@ -1,13 +1,14 @@
 //! The outline engine: runs the outline query of a format plugin on a tree-sitter parse tree and returns the nodes it
 //! finds, nested by containment and by level (spec `outline`, decision-3, decision-5).
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fmt;
 use std::ops::Range;
 
 use ardent_core::outline::ScannedNode;
 use tree_sitter::{
-    Language, LanguageError, Parser, Query, QueryCursor, QueryError, StreamingIterator,
+    Language, LanguageError, Node, Parser, Query, QueryCursor, QueryError, QueryMatch,
+    StreamingIterator,
 };
 
 const NODE_CAPTURE: &str = "node";
@@ -52,6 +53,10 @@ pub enum PluginError {
         pattern: usize,
         value: String,
     },
+    /// A pattern sets `kind` without a value or to the empty string, which gives no usable node path.
+    EmptyKind {
+        pattern: usize,
+    },
 }
 
 impl fmt::Display for PluginError {
@@ -64,6 +69,11 @@ impl fmt::Display for PluginError {
             Self::InvalidLevel { pattern, value } => write!(
                 f,
                 "pattern {} of the outline query sets level to {value:?}, which is not a positive integer",
+                pattern + 1
+            ),
+            Self::EmptyKind { pattern } => write!(
+                f,
+                "pattern {} of the outline query sets an empty kind",
                 pattern + 1
             ),
         }
@@ -156,42 +166,69 @@ impl CompiledQuery {
     }
 
     /// One candidate for each syntax node that an `@node` capture matches, from the first pattern that matches it.
-    fn candidates(&self, root: tree_sitter::Node<'_>, source: &[u8]) -> Vec<Candidate> {
+    /// Matches arrive in the order they finish, so a later pattern can match the same syntax node first.
+    fn candidates(&self, root: Node<'_>, source: &[u8]) -> Vec<Candidate> {
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(&self.query, root, source);
-        let mut seen = HashSet::new();
+        // The pattern index and the candidate index of each syntax node that has a candidate.
+        let mut chosen: HashMap<usize, (usize, usize)> = HashMap::new();
         let mut candidates = Vec::new();
         while let Some(found) = matches.next() {
-            let captures = found.captures();
-            let Some(node) = captures.iter().find(|c| c.index == self.node_capture) else {
+            let Some(node) = found
+                .captures()
+                .iter()
+                .find(|c| c.index == self.node_capture)
+            else {
                 continue;
             };
-            if !seen.insert(node.node.id()) {
+            let earlier = chosen.get(&node.node.id()).copied();
+            if earlier.is_some_and(|(pattern, _)| pattern <= found.pattern_index) {
                 continue;
             }
-            let Some(properties) = self.patterns.get(found.pattern_index) else {
+            let Some(candidate) = self.candidate(found, node.node, source) else {
                 continue;
             };
-            let mut label_ranges: Vec<_> = captures
-                .iter()
-                .filter(|c| Some(c.index) == self.label_capture)
-                .map(|c| c.node.byte_range())
-                .collect();
-            label_ranges.sort_by_key(|range| range.start);
-            let kind = properties
-                .kind
-                .clone()
-                .unwrap_or_else(|| node.node.kind().to_string());
-            candidates.push(Candidate {
-                label: label(source, &label_ranges).unwrap_or_else(|| kind.clone()),
-                kind,
-                range: node.node.byte_range(),
-                label_ranges,
-                level: properties.level,
-                children: Vec::new(),
-            });
+            let index = match earlier {
+                Some((_, index)) => {
+                    candidates[index] = candidate;
+                    index
+                }
+                None => {
+                    candidates.push(candidate);
+                    candidates.len() - 1
+                }
+            };
+            chosen.insert(node.node.id(), (found.pattern_index, index));
         }
         candidates
+    }
+
+    fn candidate(
+        &self,
+        found: &QueryMatch<'_, '_>,
+        node: Node<'_>,
+        source: &[u8],
+    ) -> Option<Candidate> {
+        let properties = self.patterns.get(found.pattern_index)?;
+        let mut label_ranges: Vec<_> = found
+            .captures()
+            .iter()
+            .filter(|c| Some(c.index) == self.label_capture)
+            .map(|c| c.node.byte_range())
+            .collect();
+        label_ranges.sort_by_key(|range| range.start);
+        let kind = properties
+            .kind
+            .clone()
+            .unwrap_or_else(|| node.kind().to_string());
+        Some(Candidate {
+            label: label(source, &label_ranges).unwrap_or_else(|| kind.clone()),
+            kind,
+            range: node.byte_range(),
+            label_ranges,
+            level: properties.level,
+            children: Vec::new(),
+        })
     }
 }
 
@@ -204,6 +241,9 @@ impl PatternProperties {
         for setting in query.property_settings(pattern) {
             let value = setting.value.as_deref().unwrap_or_default();
             match &*setting.key {
+                KIND_PROPERTY if value.is_empty() => {
+                    return Err(PluginError::EmptyKind { pattern });
+                }
                 KIND_PROPERTY => properties.kind = Some(value.to_string()),
                 LEVEL_PROPERTY => {
                     let level = value.parse().ok().filter(|level| *level > 0);
@@ -388,6 +428,17 @@ mod tests {
     }
 
     #[test]
+    fn first_pattern_wins_when_a_later_pattern_finishes_first()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let query = r#"
+((atx_heading (atx_h2_marker) heading_content: (inline) @label) @node (#set! kind "first"))
+((atx_heading) @node (#set! kind "second"))
+"#;
+        assert_eq!(outline(query, "## Title\n")?, "first Title 0..9\n");
+        Ok(())
+    }
+
+    #[test]
     fn nests_by_containment() -> Result<(), Box<dyn std::error::Error>> {
         let query = r#"((list) @node (#set! kind "list")) ((list_item) @node (#set! kind "item"))"#;
         assert_eq!(
@@ -452,6 +503,19 @@ mod tests {
                     Err(PluginError::InvalidLevel { pattern: 0, .. })
                 ),
                 "{value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_an_empty_kind() {
+        for query in [
+            r#"((paragraph) @node (#set! kind))"#,
+            r#"((paragraph) @node (#set! kind ""))"#,
+        ] {
+            assert!(
+                matches!(markdown(query), Err(PluginError::EmptyKind { pattern: 0 })),
+                "{query}"
             );
         }
     }
