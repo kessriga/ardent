@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-19 16:29'
-updated_date: '2026-11-20 13:33'
+updated_date: '2026-11-20 14:13'
 labels: []
 milestone: m-1
 dependencies:
@@ -63,6 +63,16 @@ Markdown is the simplest structured format and the closest to what Roam and Tana
 Implemented the OpenSpec change task-7-markdown-structure: 13/13 tasks done. ardent sync writes structure files for tracked Markdown files. New crate ardent-format holds the outline engine (query captures @node/@label, properties kind and level) and the built-in markdown plugin 0.1.0. decision-5 records the level property. The PR #7 review findings are fixed: write_atomic rejects absolute and .. paths and creates parents; project_root::find reports I/O errors; the root search keeps the physical working directory, as git and cargo do. Nested projects are skipped and reported. Gate: fmt, clippy, and 91 tests pass; openspec validate --strict passes. Manual run on a copy of this repo: 54 files synced in about 1 s; a second run scanned 0.
 
 Acceptance evidence. AC1: structure::tests::writes_the_rust_example_of_the_spec matches the spec's Rust structure file byte for byte. AC2: tests/sync.rs (18 integration tests), and a manual run on a copy of this repo (54 files). AC3: markdown::tests (nesting, setext, lists, paragraphs) and three insta snapshots. AC4: every node has a range; the spec example ranges match in markdown::tests::structure_of_the_spec_example and tests/sync.rs. AC5: structure::tests::reads_back_what_it_writes and round_trip_keeps_quoted_labels_and_old_times. AC6: tests/markdown.rs snapshot of guide.md (front matter, nested headings, lists, code blocks). Gate after the archive: cargo fmt --check, clippy -D warnings, 91 tests, openspec validate --specs --strict (5 specs).
+
+Review of PR #8 (code-review, 15 findings). Fixed on the branch before merge, each with a regression test:
+- A symbolic link inside .ardent/ let sync write outside the project and delete empty directories there. layout::create_dir now refuses a symlink or file on the way; write_atomic, the lock, and cache/files use it.
+- .gitignore files above the git repository root applied (require_git was off). require_git now follows in_git_repository, so the walk stops at the repository root and nested repositories get no outer rule.
+- The walk entered excluded directories. The exclude check moved into the walk filter.
+- On a case-insensitive file system, renaming README.md to Readme.md lost its structure file. Pruning now runs before the scans.
+- Format patterns matched files through a matching directory (notes.md/image.png). They now match the file path only.
+- A same-size edit within one coarse clock tick looked unchanged. A file whose mtime is not earlier than its structure file now gets hashed (spec sync, 'Edits within one clock tick'). Decision-2 step 3 has no note of this, because the Backlog CLI cannot edit decisions.
+- Smaller: the first query pattern wins on a shared syntax node; an empty kind is a plugin error; a test ties GRAMMAR_VERSION to the Cargo.toml pin; patterns compile before the lock; --help works from a deleted directory.
+Not fixed (reported only): full parse of each structure file for the stamp check, fingerprint cost on deeply nested files, EnabledFormats parallel lists, init.rs hardcoded defaults, two fully qualified paths in engine.rs, permission tests fail as root.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
