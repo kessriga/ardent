@@ -24,7 +24,7 @@ Each task ends with a passing `cargo fmt --check`, `cargo clippy --all-targets -
       structure file with YAML read and write; verify with a round-trip test (write, read, compare equal), a test that
       the Rust example of `ardent-schemas` serializes to the spec text byte for byte, and tests that an unknown schema
       and an unknown key fail to read
-- [ ] 2.3 Add the module `config`: read `config.yaml` with the `schema` check, unknown keys, and plugin name checks;
+- [x] 2.3 Add the module `config`: read `config.yaml` with the `schema` check, unknown keys, and plugin name checks;
       verify with unit tests for the initial configuration, a missing `schema`, `schema: 2`, the key `exlude`, and a
       view named `structure`
 
