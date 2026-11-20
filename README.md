@@ -62,7 +62,7 @@ Milestone M0 settled these questions. Each answer is a Backlog decision; run `ba
   `docs/spec.md#Sync rules/Renames`, and keep a fingerprint of its content to find it again after a rename or move. A
   reference in view content has the form `@[docs/spec.md#Sync rules]`.
 - Decided in decision-2: every Ardent command first checks the tracked files for changes and re-scans the changed ones.
-  The structure is a local cache; only the views and the project configuration go into git.
+  The structure is a local cache; only stored views, the project configuration, and project plugins go into git.
 - Decided in decision-4: the layout of `.ardent/` and the YAML schema of each file in it. Every file starts with a
   `schema` version. The specs `ardent-layout` and `ardent-schemas` in `openspec/specs/` give the details.
 - Decided in decision-3: a format plugin is a tree-sitter grammar with an outline query, and a view plugin is a
