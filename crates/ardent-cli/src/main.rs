@@ -28,11 +28,12 @@ enum Command {
 }
 
 fn main() -> ExitCode {
+    let command = Cli::parse().command;
     let working_dir = match env::current_dir() {
         Ok(dir) => dir,
         Err(err) => return fail(format_args!("cannot read the working directory: {err}")),
     };
-    match Cli::parse().command {
+    match command {
         Command::Init => init(working_dir),
         Command::Sync => sync(working_dir),
     }
