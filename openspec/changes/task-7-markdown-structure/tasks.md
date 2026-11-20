@@ -17,10 +17,10 @@ Each task ends with a passing `cargo fmt --check`, `cargo clippy --all-targets -
 
 ## 2. Outline and structure types in ardent-core
 
-- [ ] 2.1 Add the module `outline`: the node data of a format plugin, the outline, node paths with escapes and `[n]`
+- [x] 2.1 Add the module `outline`: the node data of a format plugin, the outline, node paths with escapes and `[n]`
       suffixes, and fingerprints; verify with unit tests for the scenarios "Node path", "Positional suffixes", and "Root
       node" of the spec `outline`, and the fingerprint scenarios of `ardent-schemas`
-- [ ] 2.2 Add `serde`, `serde-saphyr`, `jiff`, and `blake3`, and the modules `yaml` and `structure`: the stamp and the
+- [x] 2.2 Add `serde`, `serde-saphyr`, `jiff`, and `blake3`, and the modules `yaml` and `structure`: the stamp and the
       structure file with YAML read and write; verify with a round-trip test (write, read, compare equal), a test that
       the Rust example of `ardent-schemas` serializes to the spec text byte for byte, and tests that an unknown schema
       and an unknown key fail to read
