@@ -41,9 +41,9 @@ Each task ends with a passing `cargo fmt --check`, `cargo clippy --all-targets -
 
 ## 5. Verification
 
-- [ ] 5.1 Run `ardent sync` on a copy of this repository; verify that it scans every `.rs` and `.md` file, reports no
+- [x] 5.1 Run `ardent sync` on a copy of this repository; verify that it scans every `.rs` and `.md` file, reports no
       syntax error, and that a second run scans 0 files
-- [ ] 5.2 Run `openspec validate task-8-rust-structure --strict`; verify that it passes
+- [x] 5.2 Run `openspec validate task-8-rust-structure --strict`; verify that it passes
 
 ## Workflow follow-up
 
