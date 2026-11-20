@@ -9,6 +9,7 @@ use std::mem;
 use std::ops::Range;
 
 use ardent_core::outline::ScannedNode;
+use blake3::Hasher;
 use tree_sitter::{
     Language, LanguageError, Node, Parser, Query, QueryCursor, QueryError, QueryMatch,
     StreamingIterator,
@@ -161,6 +162,20 @@ impl FormatPlugin {
             .map(into_scanned)
             .collect())
     }
+}
+
+/// The format hash of a built-in plugin (spec `ardent-schemas`): the BLAKE3 hash of the query text, then the name and
+/// version of the grammar crate.
+pub(crate) fn builtin_format_hash(
+    query: &str,
+    grammar_crate: &str,
+    grammar_version: &str,
+) -> String {
+    let mut hasher = Hasher::new();
+    hasher.update(query.as_bytes());
+    hasher.update(grammar_crate.as_bytes());
+    hasher.update(grammar_version.as_bytes());
+    hasher.finalize().to_hex().to_string()
 }
 
 impl CompiledQuery {

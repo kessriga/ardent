@@ -1,9 +1,7 @@
 //! The built-in Markdown format plugin (spec `markdown-format`). Its grammar links natively through `tree-sitter-md`,
 //! and its outline query is the file `markdown/outline.scm`.
 
-use blake3::Hasher;
-
-use crate::engine::{FormatPlugin, PluginError};
+use crate::engine::{self, FormatPlugin, PluginError};
 
 pub const NAME: &str = "markdown";
 const VERSION: &str = "0.1.0";
@@ -20,18 +18,8 @@ pub fn plugin() -> Result<FormatPlugin, PluginError> {
         DEFAULT_FILES,
         tree_sitter_md::LANGUAGE.into(),
         QUERY,
-        format_hash(),
+        engine::builtin_format_hash(QUERY, GRAMMAR_CRATE, GRAMMAR_VERSION),
     )
-}
-
-/// The format hash of a built-in plugin (spec `ardent-schemas`): the BLAKE3 hash of the query text, then the name and
-/// version of the grammar crate.
-fn format_hash() -> String {
-    let mut hasher = Hasher::new();
-    hasher.update(QUERY.as_bytes());
-    hasher.update(GRAMMAR_CRATE.as_bytes());
-    hasher.update(GRAMMAR_VERSION.as_bytes());
-    hasher.finalize().to_hex().to_string()
 }
 
 #[cfg(test)]
