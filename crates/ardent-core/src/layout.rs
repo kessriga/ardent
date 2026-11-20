@@ -30,20 +30,20 @@ pub fn structure_path(source_path: &str) -> String {
 /// file.
 ///
 /// `relative_path` often derives from a source path in a cloned repository, so it must consist of normal names only:
-/// an absolute path or a `..` fails with `InvalidInput`. A missing `ardent_dir` fails with `NotFound`, and the call
-/// then creates nothing.
+/// an absolute path or a `..` fails with `InvalidInput`. A symlink on the way to the target fails as `create_dir`
+/// describes. A missing `ardent_dir` fails with `NotFound`, and the call then creates nothing.
 pub fn write_atomic(ardent_dir: &Path, relative_path: &str, contents: &[u8]) -> io::Result<()> {
-    let target = ardent_dir.join(checked_relative_path(relative_path)?);
+    let relative_path = checked_relative_path(relative_path)?;
+    let target = ardent_dir.join(relative_path);
     if !fs::metadata(ardent_dir)?.is_dir() {
         return Err(io::Error::new(
             io::ErrorKind::NotADirectory,
             format!("{} is not a directory", ardent_dir.display()),
         ));
     }
-    let tmp_dir = tmp_dir(ardent_dir);
-    fs::create_dir_all(&tmp_dir)?;
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)?;
+    let tmp_dir = create_real_dirs(ardent_dir, &Path::new(CACHE_DIR).join(TMP_DIR))?;
+    if let Some(parent) = relative_path.parent() {
+        create_real_dirs(ardent_dir, parent)?;
     }
     let mut file = create_temp_file(&tmp_dir)?;
     file.write_all(contents)?;
@@ -61,6 +61,32 @@ pub fn remove_empty_cache(ardent_dir: &Path) -> io::Result<()> {
     fs::remove_dir(tmp_dir(ardent_dir))?;
     fs::remove_dir(ardent_dir.join(CACHE_DIR))?;
     sync_dir(ardent_dir)
+}
+
+/// Creates the directory `relative_path` inside `ardent_dir` and each of its missing parents, and returns its path.
+/// Fails with `NotADirectory` when one of them exists as a symlink or a file: a cloned repository can commit a symlink
+/// into `.ardent/`, and Ardent would then write and delete files outside the project.
+pub fn create_dir(ardent_dir: &Path, relative_path: &str) -> io::Result<PathBuf> {
+    create_real_dirs(ardent_dir, checked_relative_path(relative_path)?)
+}
+
+fn create_real_dirs(ardent_dir: &Path, relative_path: &Path) -> io::Result<PathBuf> {
+    let mut dir = ardent_dir.to_path_buf();
+    for part in relative_path.components() {
+        dir.push(part);
+        if let Err(err) = fs::create_dir(&dir)
+            && err.kind() != io::ErrorKind::AlreadyExists
+        {
+            return Err(err);
+        }
+        if !fs::symlink_metadata(&dir)?.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotADirectory,
+                format!("{} is a symlink or a file, not a directory", dir.display()),
+            ));
+        }
+    }
+    Ok(dir)
 }
 
 fn tmp_dir(ardent_dir: &Path) -> PathBuf {
@@ -178,6 +204,33 @@ mod tests {
         }
         assert!(!outer.path().join("escape").exists());
         assert!(!absolute.exists());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_to_write_through_a_symlink() -> io::Result<()> {
+        let outer = tempfile::tempdir()?;
+        let ardent_dir = outer.path().join(".ardent");
+        let outside = outer.path().join("outside");
+        fs::create_dir_all(ardent_dir.join("cache"))?;
+        fs::create_dir(&outside)?;
+        std::os::unix::fs::symlink(&outside, ardent_dir.join("cache/files"))?;
+        let err = write_atomic(&ardent_dir, "cache/files/a.md/structure.yaml", b"").err();
+        assert_eq!(err.map(|e| e.kind()), Some(io::ErrorKind::NotADirectory));
+        let err = create_dir(&ardent_dir, "cache/files").err();
+        assert_eq!(err.map(|e| e.kind()), Some(io::ErrorKind::NotADirectory));
+        assert_eq!(fs::read_dir(&outside)?.count(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn creates_a_directory_and_its_parents() -> io::Result<()> {
+        let ardent_dir = tempfile::tempdir()?;
+        let dir = create_dir(ardent_dir.path(), "cache/files")?;
+        assert_eq!(dir, ardent_dir.path().join("cache/files"));
+        assert!(dir.is_dir());
+        assert_eq!(create_dir(ardent_dir.path(), "cache/files")?, dir);
         Ok(())
     }
 
