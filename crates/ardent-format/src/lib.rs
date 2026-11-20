@@ -2,3 +2,4 @@
 
 pub mod engine;
 pub mod markdown;
+pub mod rust;

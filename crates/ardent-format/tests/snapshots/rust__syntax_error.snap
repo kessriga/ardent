@@ -1,0 +1,5 @@
+---
+source: crates/ardent-format/tests/rust.rs
+expression: err.to_string()
+---
+syntax error at line 6, column 5

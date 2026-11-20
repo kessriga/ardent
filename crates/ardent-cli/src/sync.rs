@@ -14,7 +14,7 @@ use ardent_core::layout::{self, ARDENT_DIR, CACHE_DIR, FILES_DIR, LOCK_FILE, STR
 use ardent_core::outline::Outline;
 use ardent_core::structure::{self, Stamp, Structure};
 use ardent_format::engine::{FormatPlugin, PluginError};
-use ardent_format::markdown;
+use ardent_format::{markdown, rust};
 
 use crate::project_root;
 use crate::tracked::{self, FormatPatterns, PatternError, Patterns, TrackedFile};
@@ -134,11 +134,20 @@ fn read_config(ardent_dir: &Path) -> Result<Config, SyncError> {
 }
 
 fn builtin_plugins() -> Result<Vec<FormatPlugin>, SyncError> {
-    let markdown = markdown::plugin().map_err(|source| SyncError::Plugin {
-        name: markdown::NAME.to_string(),
+    Ok(vec![
+        builtin(markdown::NAME, markdown::plugin())?,
+        builtin(rust::NAME, rust::plugin())?,
+    ])
+}
+
+fn builtin(
+    name: &str,
+    plugin: Result<FormatPlugin, PluginError>,
+) -> Result<FormatPlugin, SyncError> {
+    plugin.map_err(|source| SyncError::Plugin {
+        name: name.to_string(),
         source,
-    })?;
-    Ok(vec![markdown])
+    })
 }
 
 /// The enabled formats that have a plugin, with their file patterns. `TrackedFile::format` indexes both lists.

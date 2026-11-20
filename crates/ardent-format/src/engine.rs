@@ -1,5 +1,5 @@
 //! The outline engine: runs the outline query of a format plugin on a tree-sitter parse tree and returns the nodes it
-//! finds, nested by containment and by level (spec `outline`, decision-3, decision-5).
+//! finds, nested by containment and by level (spec `outline`, decision-3, decision-5, decision-6, decision-7).
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -9,6 +9,7 @@ use std::mem;
 use std::ops::Range;
 
 use ardent_core::outline::ScannedNode;
+use blake3::Hasher;
 use tree_sitter::{
     Language, LanguageError, Node, Parser, Query, QueryCursor, QueryError, QueryMatch,
     StreamingIterator,
@@ -16,6 +17,7 @@ use tree_sitter::{
 
 const NODE_CAPTURE: &str = "node";
 const LABEL_CAPTURE: &str = "label";
+const ANNOTATION_CAPTURE: &str = "annotation";
 const KIND_PROPERTY: &str = "kind";
 const LEVEL_PROPERTY: &str = "level";
 
@@ -36,6 +38,7 @@ struct CompiledQuery {
     query: Query,
     node_capture: u32,
     label_capture: Option<u32>,
+    annotation_capture: Option<u32>,
     /// The `kind` and `level` properties of each pattern, by pattern index.
     patterns: Vec<PatternProperties>,
 }
@@ -92,6 +95,8 @@ pub enum ScanError {
     Language(LanguageError),
     /// tree-sitter returned no tree.
     Parse,
+    /// The parse tree has an `ERROR` or `MISSING` node. Both numbers count from 1, and `column` counts characters.
+    Syntax { line: usize, column: usize },
 }
 
 impl fmt::Display for ScanError {
@@ -99,6 +104,9 @@ impl fmt::Display for ScanError {
         match self {
             Self::Language(err) => write!(f, "cannot load the grammar: {err}"),
             Self::Parse => f.write_str("the parser returned no syntax tree"),
+            Self::Syntax { line, column } => {
+                write!(f, "syntax error at line {line}, column {column}")
+            }
         }
     }
 }
@@ -137,12 +145,16 @@ impl FormatPlugin {
     }
 
     /// Parses `source` and returns the top-level nodes of its outline, each with its descendants, in document order.
+    /// A file with a syntax error gives no nodes (decision-7).
     pub fn scan(&self, source: &[u8]) -> Result<Vec<ScannedNode>, ScanError> {
         let mut parser = Parser::new();
         parser
             .set_language(&self.language)
             .map_err(ScanError::Language)?;
         let tree = parser.parse(source, None).ok_or(ScanError::Parse)?;
+        if tree.root_node().has_error() {
+            return Err(syntax_error(tree.root_node(), source));
+        }
         let candidates = self.query.candidates(tree.root_node(), source);
         let nested = nest_by_containment(candidates);
         Ok(nest_by_level(nested, source.len())
@@ -152,6 +164,20 @@ impl FormatPlugin {
     }
 }
 
+/// The format hash of a built-in plugin (spec `ardent-schemas`): the BLAKE3 hash of the query text, then the name and
+/// version of the grammar crate.
+pub(crate) fn builtin_format_hash(
+    query: &str,
+    grammar_crate: &str,
+    grammar_version: &str,
+) -> String {
+    let mut hasher = Hasher::new();
+    hasher.update(query.as_bytes());
+    hasher.update(grammar_crate.as_bytes());
+    hasher.update(grammar_version.as_bytes());
+    hasher.finalize().to_hex().to_string()
+}
+
 impl CompiledQuery {
     fn new(language: &Language, source: &str) -> Result<Self, PluginError> {
         let query = Query::new(language, source).map_err(PluginError::Query)?;
@@ -159,6 +185,7 @@ impl CompiledQuery {
             .capture_index_for_name(NODE_CAPTURE)
             .ok_or(PluginError::MissingNodeCapture)?;
         let label_capture = query.capture_index_for_name(LABEL_CAPTURE);
+        let annotation_capture = query.capture_index_for_name(ANNOTATION_CAPTURE);
         let patterns = (0..query.pattern_count())
             .map(|pattern| PatternProperties::new(&query, pattern))
             .collect::<Result<_, _>>()?;
@@ -166,6 +193,7 @@ impl CompiledQuery {
             query,
             node_capture,
             label_capture,
+            annotation_capture,
             patterns,
         })
     }
@@ -226,10 +254,18 @@ impl CompiledQuery {
             .kind
             .clone()
             .unwrap_or_else(|| node.kind().to_string());
+        let range = found
+            .captures()
+            .iter()
+            .filter(|c| Some(c.index) == self.annotation_capture)
+            .map(|c| c.node.byte_range())
+            .fold(node.byte_range(), |range, annotation| {
+                range.start.min(annotation.start)..range.end.max(annotation.end)
+            });
         Some(Candidate {
             label: label(source, &label_ranges).unwrap_or_else(|| kind.clone()),
             kind,
-            range: node.byte_range(),
+            range,
             label_ranges,
             level: properties.level,
             depth: iter::successors(node.parent(), |node| node.parent()).count(),
@@ -262,6 +298,30 @@ impl PatternProperties {
             }
         }
         Ok(properties)
+    }
+}
+
+/// The position of the first `ERROR` or `MISSING` node below `root` in document order. A loop, not a recursion, so a
+/// deep tree cannot overflow the stack.
+fn syntax_error(root: Node<'_>, source: &[u8]) -> ScanError {
+    let mut node = root;
+    while !node.is_error() && !node.is_missing() {
+        let mut cursor = node.walk();
+        let Some(child) = node.children(&mut cursor).find(|child| child.has_error()) else {
+            break;
+        };
+        node = child;
+    }
+    let point = node.start_position();
+    let line_start = node.start_byte().saturating_sub(point.column);
+    let column = source
+        .get(line_start..node.start_byte())
+        .map_or(point.column, |text| {
+            String::from_utf8_lossy(text).chars().count()
+        });
+    ScanError::Syntax {
+        line: point.row + 1,
+        column: column + 1,
     }
 }
 
@@ -393,11 +453,39 @@ mod tests {
         }
     }
 
-    fn outline(query: &str, source: &str) -> Result<String, Box<dyn Error>> {
-        let nodes = markdown(query)?.scan(source.as_bytes())?;
+    fn rust(query: &str) -> Result<FormatPlugin, PluginError> {
+        FormatPlugin::new(
+            "test",
+            "0.0.0",
+            &["*.rs"],
+            tree_sitter_rust::LANGUAGE.into(),
+            query,
+            String::new(),
+        )
+    }
+
+    fn rendered(plugin: &FormatPlugin, source: &str) -> Result<String, Box<dyn Error>> {
+        let nodes = plugin.scan(source.as_bytes())?;
         let mut out = String::new();
         render(&nodes, 0, &mut out);
         Ok(out)
+    }
+
+    fn outline(query: &str, source: &str) -> Result<String, Box<dyn Error>> {
+        rendered(&markdown(query)?, source)
+    }
+
+    fn rust_outline(query: &str, source: &str) -> Result<String, Box<dyn Error>> {
+        rendered(&rust(query)?, source)
+    }
+
+    /// The line and column of the syntax error that a scan of `source` reports.
+    fn syntax_error(source: &str) -> Result<Option<(usize, usize)>, Box<dyn Error>> {
+        match rust("(function_item) @node")?.scan(source.as_bytes()) {
+            Err(ScanError::Syntax { line, column }) => Ok(Some((line, column))),
+            Err(err) => Err(err.into()),
+            Ok(_) => Ok(None),
+        }
     }
 
     const HEADINGS: &str = r#"
@@ -507,6 +595,57 @@ mod tests {
     #[test]
     fn label_without_text_is_the_kind() -> Result<(), Box<dyn Error>> {
         assert_eq!(outline(HEADINGS, "Text.\n")?, "paragraph paragraph 0..6\n");
+        Ok(())
+    }
+
+    const DOC_COMMENTS: &str = "((line_comment)* @annotation . (function_item) @node)";
+
+    #[test]
+    fn annotations_widen_the_range() -> Result<(), Box<dyn Error>> {
+        assert_eq!(
+            rust_outline(DOC_COMMENTS, "/// Runs.\nfn run() {}\n")?,
+            "function_item function_item 0..21\n"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn match_without_annotations_keeps_the_node_range() -> Result<(), Box<dyn Error>> {
+        assert_eq!(
+            rust_outline(DOC_COMMENTS, "fn a() {}\n\nfn run() {}\n")?,
+            "function_item function_item 0..9\nfunction_item function_item 11..22\n"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn half_typed_function_is_a_syntax_error_on_its_line() -> Result<(), Box<dyn Error>> {
+        let error = syntax_error("fn run() {}\nfn helper(\n")?;
+        assert_eq!(error.map(|(line, _)| line), Some(2));
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_error_on_the_first_line() -> Result<(), Box<dyn Error>> {
+        assert_eq!(syntax_error("fn run() {} )\n")?, Some((1, 13)));
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_error_column_counts_characters() -> Result<(), Box<dyn Error>> {
+        assert_eq!(syntax_error("const S: &str = \"äöü\"; )\n")?, Some((1, 24)));
+        Ok(())
+    }
+
+    #[test]
+    fn missing_token_is_a_syntax_error() -> Result<(), Box<dyn Error>> {
+        assert_eq!(syntax_error("fn f() { let x = 1 }\n")?, Some((1, 19)));
+        Ok(())
+    }
+
+    #[test]
+    fn file_without_errors_has_no_syntax_error() -> Result<(), Box<dyn Error>> {
+        assert_eq!(syntax_error("fn run() {}\n")?, None);
         Ok(())
     }
 

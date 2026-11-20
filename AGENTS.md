@@ -57,6 +57,10 @@ There is no CI yet, so this gate is the contract.
 Leave the Markdown files in `crates/ardent-format/tests/markdown/` unformatted: they are snapshot input, and `rumdl`
 would change the outlines that the snapshots record.
 
+The Rust files in `crates/ardent-format/tests/rust/` are snapshot input too. Do not name one `main.rs`, because Cargo
+then builds it as a test target. Keep Rust input with a syntax error inline in a test, because a sync of this repository
+reports every tracked file with a syntax error.
+
 ## Autonomy
 
 You may, without asking: add or change code and tests inside a task's scope, add a well-maintained dependency that the

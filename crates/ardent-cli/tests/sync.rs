@@ -347,16 +347,75 @@ fn unreadable_source_file_does_not_stop_the_others() -> TestResult {
 #[test]
 fn format_without_a_plugin_gives_a_warning() -> TestResult {
     let project = Project::new()?;
-    project.write("src/main.rs", "fn main() {}\n")?;
+    let config = project.path(".ardent/config.yaml");
+    let text = fs::read_to_string(&config)?.replace("views: {}", "  html: {}\nviews: {}");
+    fs::write(&config, text)?;
+    project.write("index.html", "<p>Hello</p>\n")?;
     let run = project.sync()?;
     run.assert_success();
     assert!(
         run.stderr()
-            .contains("warning: the format `rust` has no plugin"),
+            .contains("warning: the format `html` has no plugin"),
         "{}",
         run.stderr()
     );
-    assert!(!project.structure_path("src/main.rs").exists());
+    assert!(!run.stderr().contains("`rust`"), "{}", run.stderr());
+    assert!(!project.structure_path("index.html").exists());
+    Ok(())
+}
+
+#[test]
+fn rust_file_gets_a_structure_file() -> TestResult {
+    let project = Project::new()?;
+    project.write("src/main.rs", "/// Starts it.\nfn main() {}\n")?;
+    let run = project.sync()?;
+    run.assert_success();
+    let structure = project.structure("src/main.rs")?;
+    assert!(structure.contains("format: rust\n"), "{structure}");
+    assert!(
+        structure.contains("path: src/main.rs#fn main\n    kind: fn\n    range: 0..27\n"),
+        "{structure}"
+    );
+    Ok(())
+}
+
+#[test]
+fn syntax_error_in_one_file_does_not_stop_the_others() -> TestResult {
+    let project = Project::new()?;
+    project.write("src/lib.rs", "fn run() {}\nfn helper(\n")?;
+    project.write("src/main.rs", "fn main() {}\n")?;
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1), "stderr: {}", run.stderr());
+    assert!(
+        run.stderr()
+            .contains("ardent: src/lib.rs: syntax error at line 2, column "),
+        "{}",
+        run.stderr()
+    );
+    assert!(project.structure_path("src/main.rs").is_file());
+    assert!(!project.structure_path("src/lib.rs").exists());
+    Ok(())
+}
+
+#[test]
+fn syntax_error_keeps_the_structure_of_the_last_scan() -> TestResult {
+    let project = Project::new()?;
+    project.write("src/lib.rs", "fn run() {}\n")?;
+    project.sync()?.assert_success();
+    let before = project.structure("src/lib.rs")?;
+    project.write("src/lib.rs", "fn run() {}\nfn helper(\n")?;
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1), "stderr: {}", run.stderr());
+    assert!(
+        run.stderr().contains("src/lib.rs: syntax error"),
+        "{}",
+        run.stderr()
+    );
+    assert_eq!(project.structure("src/lib.rs")?, before);
+    project.write("src/lib.rs", "fn run() {}\nfn helper() {}\n")?;
+    project.sync()?.assert_success();
+    let after = project.structure("src/lib.rs")?;
+    assert!(after.contains("path: src/lib.rs#fn helper\n"), "{after}");
     Ok(())
 }
 
