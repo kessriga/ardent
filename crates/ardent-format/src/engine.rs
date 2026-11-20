@@ -1,5 +1,5 @@
 //! The outline engine: runs the outline query of a format plugin on a tree-sitter parse tree and returns the nodes it
-//! finds, nested by containment and by level (spec `outline`, decision-3, decision-5, decision-6).
+//! finds, nested by containment and by level (spec `outline`, decision-3, decision-5, decision-6, decision-7).
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -94,6 +94,8 @@ pub enum ScanError {
     Language(LanguageError),
     /// tree-sitter returned no tree.
     Parse,
+    /// The parse tree has an `ERROR` or `MISSING` node. Both numbers count from 1, and `column` counts characters.
+    Syntax { line: usize, column: usize },
 }
 
 impl fmt::Display for ScanError {
@@ -101,6 +103,9 @@ impl fmt::Display for ScanError {
         match self {
             Self::Language(err) => write!(f, "cannot load the grammar: {err}"),
             Self::Parse => f.write_str("the parser returned no syntax tree"),
+            Self::Syntax { line, column } => {
+                write!(f, "syntax error at line {line}, column {column}")
+            }
         }
     }
 }
@@ -139,12 +144,16 @@ impl FormatPlugin {
     }
 
     /// Parses `source` and returns the top-level nodes of its outline, each with its descendants, in document order.
+    /// A file with a syntax error gives no nodes (decision-7).
     pub fn scan(&self, source: &[u8]) -> Result<Vec<ScannedNode>, ScanError> {
         let mut parser = Parser::new();
         parser
             .set_language(&self.language)
             .map_err(ScanError::Language)?;
         let tree = parser.parse(source, None).ok_or(ScanError::Parse)?;
+        if tree.root_node().has_error() {
+            return Err(syntax_error(tree.root_node(), source));
+        }
         let candidates = self.query.candidates(tree.root_node(), source);
         let nested = nest_by_containment(candidates);
         Ok(nest_by_level(nested, source.len())
@@ -274,6 +283,30 @@ impl PatternProperties {
             }
         }
         Ok(properties)
+    }
+}
+
+/// The position of the first `ERROR` or `MISSING` node below `root` in document order. A loop, not a recursion, so a
+/// deep tree cannot overflow the stack.
+fn syntax_error(root: Node<'_>, source: &[u8]) -> ScanError {
+    let mut node = root;
+    while !node.is_error() && !node.is_missing() {
+        let mut cursor = node.walk();
+        let Some(child) = node.children(&mut cursor).find(|child| child.has_error()) else {
+            break;
+        };
+        node = child;
+    }
+    let point = node.start_position();
+    let line_start = node.start_byte().saturating_sub(point.column);
+    let column = source
+        .get(line_start..node.start_byte())
+        .map_or(point.column, |text| {
+            String::from_utf8_lossy(text).chars().count()
+        });
+    ScanError::Syntax {
+        line: point.row + 1,
+        column: column + 1,
     }
 }
 
@@ -431,6 +464,15 @@ mod tests {
         rendered(&rust(query)?, source)
     }
 
+    /// The line and column of the syntax error that a scan of `source` reports.
+    fn syntax_error(source: &str) -> Result<Option<(usize, usize)>, Box<dyn Error>> {
+        match rust("(function_item) @node")?.scan(source.as_bytes()) {
+            Err(ScanError::Syntax { line, column }) => Ok(Some((line, column))),
+            Err(err) => Err(err.into()),
+            Ok(_) => Ok(None),
+        }
+    }
+
     const HEADINGS: &str = r#"
 ((atx_heading (atx_h2_marker) heading_content: (inline) @label) @node (#set! kind "heading") (#set! level "2"))
 ((atx_heading (atx_h3_marker) heading_content: (inline) @label) @node (#set! kind "heading") (#set! level "3"))
@@ -558,6 +600,37 @@ mod tests {
             rust_outline(DOC_COMMENTS, "fn a() {}\n\nfn run() {}\n")?,
             "function_item function_item 0..9\nfunction_item function_item 11..22\n"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn half_typed_function_is_a_syntax_error_on_its_line() -> Result<(), Box<dyn Error>> {
+        let error = syntax_error("fn run() {}\nfn helper(\n")?;
+        assert_eq!(error.map(|(line, _)| line), Some(2));
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_error_on_the_first_line() -> Result<(), Box<dyn Error>> {
+        assert_eq!(syntax_error("fn run() {} )\n")?, Some((1, 13)));
+        Ok(())
+    }
+
+    #[test]
+    fn syntax_error_column_counts_characters() -> Result<(), Box<dyn Error>> {
+        assert_eq!(syntax_error("const S: &str = \"äöü\"; )\n")?, Some((1, 24)));
+        Ok(())
+    }
+
+    #[test]
+    fn missing_token_is_a_syntax_error() -> Result<(), Box<dyn Error>> {
+        assert_eq!(syntax_error("fn f() { let x = 1 }\n")?, Some((1, 19)));
+        Ok(())
+    }
+
+    #[test]
+    fn file_without_errors_has_no_syntax_error() -> Result<(), Box<dyn Error>> {
+        assert_eq!(syntax_error("fn run() {}\n")?, None);
         Ok(())
     }
 
