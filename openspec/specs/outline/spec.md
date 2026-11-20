@@ -74,12 +74,18 @@ the whole file, and the source path as its node path.
 ### Requirement: Parent by containment
 
 The parent of a node SHALL be the nearest other node whose range contains the range of the node. A node that no other
-node contains SHALL be a child of the root node.
+node contains SHALL be a child of the root node. When two nodes have the same range, the node whose syntax node is the
+ancestor SHALL be the parent.
 
 #### Scenario: Item inside a list
 
 - **WHEN** a list has the range `89..245` and one of its items has the range `112..223`
 - **THEN** the item is a child of the list
+
+#### Scenario: List with one item
+
+- **WHEN** a list and its only item both have the range `10..14`
+- **THEN** the item is a child of the list, whatever the order of the patterns that match them
 
 ### Requirement: Nesting by level
 

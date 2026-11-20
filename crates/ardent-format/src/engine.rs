@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::iter;
 use std::ops::Range;
 
 use ardent_core::outline::ScannedNode;
@@ -109,6 +110,8 @@ struct Candidate {
     range: Range<usize>,
     label_ranges: Vec<Range<usize>>,
     level: Option<u32>,
+    /// The number of ancestors of the syntax node, which orders two candidates with the same range.
+    depth: usize,
     children: Vec<Candidate>,
 }
 
@@ -227,6 +230,7 @@ impl CompiledQuery {
             range: node.byte_range(),
             label_ranges,
             level: properties.level,
+            depth: iter::successors(node.parent(), |node| node.parent()).count(),
             children: Vec::new(),
         })
     }
@@ -277,13 +281,14 @@ fn label(source: &[u8], label_ranges: &[Range<usize>]) -> Option<String> {
 }
 
 /// Makes each candidate a child of the nearest other candidate whose range contains it, and returns the candidates
-/// that no other contains.
+/// that no other contains. Of two candidates with the same range, the one with the outer syntax node is the parent.
 fn nest_by_containment(mut candidates: Vec<Candidate>) -> Vec<Candidate> {
     candidates.sort_by(|a, b| {
         a.range
             .start
             .cmp(&b.range.start)
             .then(b.range.end.cmp(&a.range.end))
+            .then(a.depth.cmp(&b.depth))
     });
     let mut top_level = Vec::new();
     let mut open: Vec<Candidate> = Vec::new();
@@ -444,6 +449,18 @@ mod tests {
         assert_eq!(
             outline(query, "- a\n- b\n  - c\n")?,
             "list list 0..14\n  item item 0..4\n  item item 4..14\n    list list 10..14\n      item item 10..14\n"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn outer_syntax_node_is_the_parent_when_two_nodes_share_a_range()
+    -> Result<(), Box<dyn std::error::Error>> {
+        // The list pattern finishes at the paragraph, after the item pattern has finished at the item.
+        let query = r#"((list (list_item (paragraph))) @node (#set! kind "list")) ((list_item) @node (#set! kind "item"))"#;
+        assert_eq!(
+            outline(query, "- a\n")?,
+            "list list 0..4\n  item item 0..4\n"
         );
         Ok(())
     }
