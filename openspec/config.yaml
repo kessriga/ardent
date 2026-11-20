@@ -2,7 +2,7 @@ schema: spec-driven
 
 context: |
   Ardent is a Rust TUI outliner. It derives a tree of nodes from structured source files and attaches views to nodes.
-  Use the glossary in README.md exactly: node, outline, structure, view, anchor, reference, backlink, format plugin, view plugin.
+  Use the glossary in README.md exactly: node, outline, node path, fingerprint, structure, sync, view, view entry, anchor, reference, backlink, format plugin, view plugin.
   Source files belong to the user. Ardent writes only inside the project's .ardent/ directory unless a spec says otherwise.
   Files in .ardent/ are YAML that a person can read and diff.
   Core design questions (anchors, sync, .ardent/ layout, plugins) are settled by Backlog decisions from milestone M0.
