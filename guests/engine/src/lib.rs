@@ -7,7 +7,12 @@ use ardent_core::outline::ScannedNode;
 mod engine;
 pub use engine::{PluginError, QueryEngine};
 
-wit_bindgen::generate!({ path: "../../wit", pub_export_macro: true });
+wit_bindgen::generate!({ path: "../../wit", world: "format-plugin", pub_export_macro: true });
+
+pub mod query {
+    wit_bindgen::generate!({ path: "../../wit", world: "query-setup", pub_export_macro: true });
+    pub use exports::ardent::format::query_preparation::Guest;
+}
 pub use exports::ardent::format::scanner;
 use scanner::{ByteRange, Metadata, Node, Position, ScanError};
 

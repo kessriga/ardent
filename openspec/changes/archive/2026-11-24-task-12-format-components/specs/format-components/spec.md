@@ -52,3 +52,9 @@ budget, the next scan of that format SHALL start in a fresh instance with a fres
 - **WHEN** a component exceeds its budget on one file and can scan the following file within budget
 - **THEN** sync reports the first file and leaves its last good structure intact, writes the following file's structure,
   and exits with status 1
+
+#### Scenario: Cold and warm query scans
+
+- **WHEN** a component exports `ardent:format/query-preparation@0.1.0`
+- **THEN** the host SHALL call `prepare` once before the first scan in each instance, with a separate execution budget
+- **AND** the first file SHALL receive the same scan budget as each subsequent file

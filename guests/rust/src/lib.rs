@@ -14,21 +14,30 @@ fn plugin() -> Result<QueryEngine, PluginError> {
     )
 }
 
+thread_local! {
+    static ENGINE: Result<QueryEngine, PluginError> = plugin();
+}
+
+impl guest::query::Guest for Component {
+    fn prepare() {
+        ENGINE.with(|_| ());
+    }
+}
+
 impl Guest for Component {
     fn describe() -> Metadata {
         guest::metadata("rust", env!("CARGO_PKG_VERSION"), &["*.rs"])
     }
 
     fn scan(source: Vec<u8>) -> Result<Vec<Node>, ScanError> {
-        thread_local! {
-            static ENGINE: Result<QueryEngine, PluginError> = plugin();
-        }
         ENGINE.with(|engine| guest::scan(engine.as_ref(), &source))
     }
 }
 
 #[cfg(target_arch = "wasm32")]
 guest::export!(Component with_types_in guest);
+#[cfg(target_arch = "wasm32")]
+guest::query::export!(Component with_types_in guest::query);
 
 #[cfg(test)]
 mod tests {

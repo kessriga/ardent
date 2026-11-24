@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use ardent_core::outline::ScannedNode;
 use thiserror::Error;
-use wasmtime::component::{Component, Linker};
+use wasmtime::component::{Component, Linker, TypedFunc};
 use wasmtime::{Cache, CacheConfig, Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
 
 mod nodes;
@@ -67,6 +67,7 @@ pub(crate) struct Runtime {
 struct Instance {
     store: Store<StoreLimits>,
     bindings: FormatPlugin,
+    prepare_query: Option<TypedFunc<(), ()>>,
 }
 
 impl Runtime {
@@ -100,14 +101,12 @@ impl Runtime {
 
     fn call<T>(
         &mut self,
-        fuel: u64,
         run: impl FnOnce(&mut Instance) -> wasmtime::Result<T>,
     ) -> Result<T, RuntimeError> {
         let mut instance = match self.active.take() {
             Some(instance) => instance,
             None => Instance::new(&self.compiled)?,
         };
-        instance.store.set_fuel(fuel)?;
         let value = run(&mut instance)?;
         // A trap poisons the instance. Only a completed call puts it back into service.
         self.active = Some(instance);
@@ -115,7 +114,8 @@ impl Runtime {
     }
 
     pub fn describe(&mut self) -> Result<Metadata, RuntimeError> {
-        let metadata = self.call(CALL_FUEL, |i| {
+        let metadata = self.call(|i| {
+            i.store.set_fuel(CALL_FUEL)?;
             i.bindings
                 .ardent_format_scanner()
                 .call_describe(&mut i.store)
@@ -144,7 +144,12 @@ impl Runtime {
         source: &[u8],
         fuel: u64,
     ) -> Result<Vec<ScannedNode>, RuntimeError> {
-        let result = self.call(fuel, |i| {
+        let result = self.call(|i| {
+            if let Some(prepare) = i.prepare_query.take() {
+                i.store.set_fuel(CALL_FUEL)?;
+                prepare.call(&mut i.store, ())?;
+            }
+            i.store.set_fuel(fuel)?;
             i.bindings
                 .ardent_format_scanner()
                 .call_scan(&mut i.store, source)
@@ -178,8 +183,22 @@ impl Instance {
         store.limiter(|limits| limits);
         store.set_hostcall_fuel(MEMORY_BYTES);
         store.set_fuel(CALL_FUEL)?;
-        let bindings = compiled.instantiate(&mut store)?;
-        Ok(Self { store, bindings })
+        let instance = compiled.instance_pre().instantiate(&mut store)?;
+        let bindings = FormatPlugin::new(&mut store, &instance)?;
+        let prepare_query = instance
+            .get_export_index(&mut store, None, "ardent:format/query-preparation@0.1.0")
+            .map(|interface| {
+                let prepare = instance
+                    .get_export_index(&mut store, Some(&interface), "prepare")
+                    .ok_or_else(|| wasmtime::Error::msg("query-preparation is missing prepare"))?;
+                instance.get_typed_func(&mut store, prepare)
+            })
+            .transpose()?;
+        Ok(Self {
+            store,
+            bindings,
+            prepare_query,
+        })
     }
 }
 
@@ -265,6 +284,35 @@ mod tests {
             Runtime::compile(&bytes),
             Err(RuntimeError::Invalid(_))
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn cold_and_warm_query_scans_get_the_same_file_budget() -> TestResult {
+        let packages = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins");
+        for (name, source) in [("rust", "fn sample() {}"), ("markdown", "# Sample\n")] {
+            let bytes = fs::read(packages.join(name).join("format.wasm"))?;
+            let mut runtime = Runtime::compile(&bytes)?;
+            runtime.describe()?;
+            let preparation_pending = runtime
+                .active
+                .as_ref()
+                .is_some_and(|i| i.prepare_query.is_some());
+            assert!(
+                preparation_pending,
+                "{name} must defer query preparation until its first scan"
+            );
+            let scan = |r: &mut Runtime| r.scan_with_fuel("sample", source.as_bytes(), 1_000_000);
+            let first = scan(&mut runtime)?;
+            assert_eq!(first.len(), 1);
+            assert_eq!(scan(&mut runtime)?, first);
+            assert!(
+                runtime
+                    .scan_with_fuel("sample", source.as_bytes(), 0)
+                    .is_err()
+            );
+            assert_eq!(scan(&mut runtime)?, first);
+        }
         Ok(())
     }
 

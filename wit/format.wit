@@ -43,3 +43,11 @@ interface scanner {
 world format-plugin {
     export scanner;
 }
+
+interface query-preparation {
+    prepare: func();
+}
+
+world query-setup {
+    export query-preparation;
+}
