@@ -1,0 +1,41 @@
+package ardent:format@0.1.0;
+
+world format-plugin {
+    record prefix {
+        name: string,
+        files: list<string>,
+    }
+
+    record metadata {
+        name: string,
+        version: string,
+        files: list<string>,
+        prefixes: list<prefix>,
+    }
+
+    record byte-range {
+        start: u32,
+        end: u32,
+    }
+
+    record node {
+        parent: option<u32>,
+        kind: string,
+        label: string,
+        span: byte-range,
+        label-ranges: list<byte-range>,
+    }
+
+    record position {
+        line: u32,
+        column: u32,
+    }
+
+    variant scan-error {
+        syntax(position),
+        failure(string),
+    }
+
+    export describe: func() -> metadata;
+    export scan: func(source: list<u8>) -> result<list<node>, scan-error>;
+}

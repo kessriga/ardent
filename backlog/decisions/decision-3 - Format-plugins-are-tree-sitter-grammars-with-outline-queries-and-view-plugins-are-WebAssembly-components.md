@@ -4,16 +4,18 @@ title: >-
   Format plugins are tree-sitter grammars with outline queries, and view plugins
   are WebAssembly components
 date: '2026-11-20 00:11'
-status: accepted
+status: partially superseded by decision-8
 ---
 ## Context
+
+Decision-8 replaces the original format-plugin design. The view plugin interface and the host rules below still apply.
 
 Format support (Markdown, Rust, HTML) and views (complexity, comments) come from plugins, so Ardent can grow without
 changes to its core. The same plugins should run in a future web UI. decision-1 lists the data that a format plugin
 supplies for each node. decision-2 adds a name and a version for each format plugin, and asks for room for a later
 source-edit operation. M1 ships built-in Markdown and Rust support before a plugin host exists.
 
-Three choices came from the design discussion:
+The original design discussion made three choices:
 
 - Wasmtime hosts the plugins through the WebAssembly component model.
 - Every format builds on a tree-sitter grammar. A format plugin is a grammar and an outline query, not code.
@@ -28,66 +30,17 @@ path in the tree-sitter Rust crate.
 
 ### Runtime
 
-Ardent hosts plugins in Wasmtime.
-
-- Format plugins load their grammar through the `wasm` feature of the `tree-sitter` crate: `WasmStore::new(&Engine)` and
-  `WasmStore::load_language`.
-- View plugins are WebAssembly components. Their interface is the WIT package `ardent:plugin`, version `0.1.0` (see
-  "Interface").
-- Grammars and view plugins share one Wasmtime `Engine`. `WasmStore::new` takes the `Engine` type of the Wasmtime
-  version that `tree-sitter` depends on: 48.0.8 for `tree-sitter` 0.27.2 ([Cargo.toml][ts-cargo]). Ardent therefore uses
-  the Wasmtime version that `tree-sitter` pins, not the newest one (50.0.3 on 2026-11-20).
-- View plugins target WASI 0.2 (`wasm32-wasip2`). They need no asynchronous I/O, so WASI 0.3 adds nothing for them.
-- A plugin gets no files, no network, and no environment. The host fixes the clock and seeds the random source. The
-  output of a plugin therefore depends only on its input, on every platform. Labels and fingerprints need this.
-- The host limits the memory and the run time of each call. A trap or an exceeded limit is an error result of that call.
-
-A future web UI can reuse both kinds of plugin. web-tree-sitter loads the same grammar `.wasm` files and runs the same
-queries. jco transpiles a component to core WebAssembly and JavaScript; its documentation still calls browser support
-experimental ([jco][jco]).
+Ardent hosts format and view plugins in Wasmtime as WASI 0.2 components. Decision-8 defines the format interface. The
+view interface uses the WIT package `ardent:plugin@0.1.0`. The host limits memory and execution time, fixes clocks and
+randomness, and denies ambient access to files, the network and the environment.
 
 ### Format plugins
 
-A format plugin is data, not code: a tree-sitter grammar compiled to WebAssembly, an outline query, and a manifest.
+Decision-8 defines the component, its manifest, its outline engine, and the format hash used in a sync. The `outline`
+spec defines the query rules. Ardent core adds the root and builds node paths and fingerprints from the returned nodes.
 
-```text
-markdown/
-  plugin.yaml    manifest
-  grammar.wasm   output of `tree-sitter build --wasm`
-  outline.scm    outline query
-```
-
-The manifest gives:
-
-- the plugin name and version, which go into the stamp (decision-2);
-- the grammar file and the query file;
-- the file patterns that the plugin parses by default, such as `*.md`;
-- the search prefixes that the plugin offers, and the files that each prefix covers (decision-1);
-- a schema version, so that a later manifest format can add fields without breaking older plugins.
-
-TASK-5 fixes the spellings, where plugins live, and how the project configuration overrides the file patterns.
-
-The stamp of decision-2 also records a hash of the grammar and query files. A changed query therefore re-scans its files
-even when the plugin author did not change the version.
-
-#### Outline query
-
-The outline query is a tree-sitter query with two captures and one property:
-
-| Query part          | Meaning                                                                       |
-| ------------------- | ----------------------------------------------------------------------------- |
-| `@node`             | The node. The byte range of the capture is the range of the node.             |
-| `@label`            | One part of the label. A match can have more than one `@label` capture.       |
-| `(#set! kind "fn")` | The node kind. Without it, the kind is the tree-sitter type of the `@node`.   |
-
-- Ardent joins the text of all `@label` captures of one match, in document order, with one space. Their byte ranges are
-  the label ranges that decision-1 removes before it computes a fingerprint.
-- A match without `@label` gets its kind as its label, as decision-1 states for nodes without a natural name.
-- The parent of a node is the nearest `@node` whose range contains it. The file is the root node.
-- The query only finds nodes, kinds, and labels. Ardent core builds node paths, escapes labels, adds `[n]` suffixes, and
-  computes fingerprints (decision-1).
-
-The examples below show the form. TASK-7 and TASK-8 write and test the real queries.
+The following example queries are used by the structure-file examples in the `ardent-schemas` spec. The release plugins
+have their own queries.
 
 ```scheme
 ; Rust
@@ -114,11 +67,8 @@ A throwaway check with `tree-sitter` 0.27.2, `tree-sitter-rust` 0.24.2, and `tre
 with the parent rule above. It gave the expected paths, such as `mod engine/impl Engine/fn run` and
 `Spec/Sync rules/Renames`.
 
-#### Source edits
-
-decision-2 asks for room for edits through the outline. A rename replaces the label ranges. A move cuts and inserts node
-ranges. Ardent can do both from the outline, without plugin code. To insert a new node, Ardent needs text in the syntax
-of the format. A later manifest version can add templates or an optional component for this.
+For future source edits, a rename uses the label ranges and a move uses the node range. Inserting an item requires text
+in the format's syntax.
 
 ### View plugins
 
@@ -276,57 +226,24 @@ world derived-view {
 
 ### Effect on anchors
 
-- **Labels and fingerprints.** The label ranges are the ranges of the `@label` captures, so the fingerprint of
-  decision-1 removes exactly the label text. A label is source text: the Markdown heading `## Sync **rules**` has the
-  label `Sync **rules**`.
-- **Byte ranges.** tree-sitter gives the byte range of every node, which the structure keeps for later edits
-  (decision-2).
-- **Syntax errors.** tree-sitter recovers from syntax errors. In the throwaway check, a half-typed `fn helper(` removed
-  only that function from the outline; its siblings `fn run` and `fn after` kept their paths. Nodes inside a broken
-  region can drop out until the file parses again, and their links then go through the fingerprint search of decision-1.
-  tree-sitter marks a tree that contains errors (`Node::has_error`), so Ardent can tell a syntax error from a deleted
-  node. The task that implements sync decides how to use this. Without such a rule, a person who types in an editor
-  while the TUI runs can turn links into orphans, and each status change rewrites view files.
-- **Determinism.** The same grammar, query, and source give the same outline on every platform. A new grammar or query
-  changes the stamp (see "Format plugins"), so decision-2 re-scans the files. When the new version changes labels, the
-  matcher treats the changes as renames.
-- **Markdown setext headings.** `tree-sitter-md` makes sections only for ATX headings, such as `## Title`. A setext
-  heading, which is a title underlined with `===` or `---`, gets no section, so the content below it does not nest under
-  it. TASK-7 decides how to handle this.
+The host uses the label ranges from each node to compute its fingerprint. The component supplies byte ranges for later
+edits. Decision-5 governs heading levels. Decision-7 governs syntax errors, so a failed scan keeps the last good
+structure and stamp.
 
-### M1 built-in formats
+### Distribution
 
-- The built-in Markdown and Rust plugins have the same shape as external ones: a manifest and an outline query, embedded
-  in the binary.
-- Their grammars link natively through the `tree-sitter-md` and `tree-sitter-rust` crates instead of loading `.wasm`
-  files.
-- One outline engine runs the queries of built-in and external plugins. Only grammar loading differs: a native
-  `Language` in M1, and `WasmStore::load_language` when the plugin host exists. The built-in plugins can then also ship
-  as `.wasm` packages with the same queries.
-- M1 needs no Wasmtime and has no view plugins.
-- A new crate `ardent-format` holds the outline engine and the built-in plugins. It depends on `ardent-core` and
-  `tree-sitter`. `ardent-core` keeps the outline types and gets no parser dependency. The dependency direction in M1 is
-  `ardent-core ← ardent-format ← ardent-cli`. A later crate `ardent-plugin-host` adds Wasmtime, grammar loading from
-  `.wasm` files, and view plugins, between `ardent-format` and `ardent-cli`.
+Decision-8 replaces the M1 built-in distribution. The release ships Markdown and Rust as separate components. TASK-12
+migrates scanning, and TASK-13 installs the selected plugins during initialization.
 
 ## Consequences
 
-- A new format needs a tree-sitter grammar and a query, and no code. A format without a tree-sitter grammar needs a
-  grammar first.
-- A format plugin cannot compute what a query cannot express, such as a label that is not source text. If a format needs
-  this, a later manifest version can add an optional component.
-- The Wasmtime version of Ardent follows the pin of `tree-sitter`. A Wasmtime upgrade waits for a `tree-sitter` release.
 - A plugin cannot read files or use the network. A view that needs outside data, such as test coverage, needs a new host
   function first.
 - This record refines decision-2: the view files in git hold stored views only. Derived views live in the derived part
   of `.ardent/`, next to the structure.
 - TASK-5 must fix the manifest spellings and where plugins live, how the project configuration enables plugins and
   overrides file patterns, where plugin fields go in the YAML of an entry, and where derived view output lives.
-- A web UI needs the outline engine in the browser, for example `ardent-format` compiled to WebAssembly on top of
-  web-tree-sitter. The grammars, the queries, and the view components carry over.
 - The WIT package version changes when the interface changes. The host can support more than one version at a time.
 
 [zed-ext]: https://zed.dev/blog/zed-decoded-extensions
 [zed-lang]: https://zed.dev/blog/language-extensions-part-1
-[ts-cargo]: https://docs.rs/crate/tree-sitter/0.27.2/source/Cargo.toml.orig
-[jco]: https://github.com/bytecodealliance/jco
