@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 use std::fs::{self, File};
-use std::io::{self, Read};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -13,10 +13,11 @@ use ardent_core::config::{self, Config, ConfigError};
 use ardent_core::layout::{self, ARDENT_DIR, CACHE_DIR, FILES_DIR, LOCK_FILE, STRUCTURE_FILE};
 use ardent_core::outline::Outline;
 use ardent_core::structure::{self, Stamp, Structure};
-use ardent_format::{FormatPlugin, InstalledPackages};
+use ardent_format::{FormatPlugin, InstalledPackages, MAX_SOURCE_BYTES};
 use ignore::gitignore::Gitignore;
 
 mod cache_names;
+mod source;
 use cache_names::CacheNames;
 
 use crate::project_root;
@@ -246,7 +247,7 @@ fn sync_file(
     plugin: &mut FormatPlugin,
     unavailable: &HashSet<&str>,
 ) -> Result<Outcome, Box<dyn Error>> {
-    let mut file = File::open(root.join(path))?;
+    let file = File::open(root.join(path))?;
     let metadata = file.metadata()?;
     let (size, mtime) = (metadata.len(), metadata.modified()?);
     let structure_path = layout::structure_path(path);
@@ -267,10 +268,9 @@ fn sync_file(
     {
         return Ok(Outcome::Unchanged);
     }
-    let mut source = Vec::new();
-    file.read_to_end(&mut source)?;
+    let source = source::read(file, size, MAX_SOURCE_BYTES)?;
     let stamp = Stamp {
-        size,
+        size: source.len() as u64,
         mtime,
         hash: structure::content_hash(&source),
         format: plugin.name.clone(),

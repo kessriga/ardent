@@ -4,4 +4,4 @@ mod package;
 mod runtime;
 
 pub use package::{FormatPlugin, InstalledPackages, PluginError};
-pub use runtime::RuntimeError;
+pub use runtime::{MAX_SOURCE_BYTES, RuntimeError};

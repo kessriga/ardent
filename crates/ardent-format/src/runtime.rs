@@ -7,6 +7,7 @@ use thiserror::Error;
 use wasmtime::component::{Component, Linker, TypedFunc};
 use wasmtime::{Cache, CacheConfig, Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
 
+mod diagnostic;
 mod nodes;
 mod wasi;
 
@@ -14,13 +15,14 @@ wasmtime::component::bindgen!({ path: "../../wit", world: "format-plugin" });
 use exports::ardent::format::scanner::{self, ScanError};
 
 pub(crate) const INTERFACE: &str = "ardent:format/scanner@0.1.0";
-const DIAGNOSTIC_BYTES: usize = 1024;
 const MEMORY_BYTES: usize = 64 << 20;
+/// Maximum source bytes that can fit in the linear memory receiving a scan's input.
+pub const MAX_SOURCE_BYTES: usize = MEMORY_BYTES;
 const CALL_FUEL: u64 = 5_000_000_000;
 
 #[derive(Debug, Error)]
 pub enum RuntimeError {
-    #[error("component runtime: {0:#}")]
+    #[error("component runtime: {}", diagnostic::runtime(.0))]
     Runtime(wasmtime::Error),
     #[error("syntax error at line {line}, column {column}")]
     Syntax { line: u32, column: u32 },
@@ -34,22 +36,6 @@ impl From<wasmtime::Error> for RuntimeError {
     fn from(error: wasmtime::Error) -> Self {
         Self::Runtime(error)
     }
-}
-
-fn failure_message(message: &str) -> String {
-    let mut display = String::with_capacity(message.len().min(DIAGNOSTIC_BYTES));
-    for ch in message.chars() {
-        match ch {
-            '"' | '\'' | '\\' => display.push(ch),
-            _ => display.extend(ch.escape_debug()),
-        }
-        if display.len() > DIAGNOSTIC_BYTES {
-            display.truncate(display.floor_char_boundary(DIAGNOSTIC_BYTES - 3));
-            display.push_str("...");
-            break;
-        }
-    }
-    display
 }
 
 pub(crate) struct Metadata {
@@ -157,7 +143,7 @@ impl Runtime {
         match result {
             Ok(nodes) => nodes::tree(nodes, path, source.len()),
             Err(ScanError::Failure(message)) => {
-                Err(RuntimeError::Failure(failure_message(&message)))
+                Err(RuntimeError::Failure(diagnostic::summary(message)))
             }
             Err(ScanError::Syntax(
                 scanner::Position { line: 0, .. } | scanner::Position { column: 0, .. },
@@ -230,20 +216,6 @@ mod tests {
         assert!(runtime.active.is_none());
         assert_eq!(runtime.scan("file", b"next")?.len(), 1);
         Ok(())
-    }
-
-    #[test]
-    fn guest_failures_fit_one_line_and_preserve_unicode() {
-        let quoted_path = r#"can't parse "C:\src\main.rs""#;
-        assert_eq!(failure_message(quoted_path), quoted_path);
-        assert_eq!(failure_message("é\r\n\u{1b}é"), r"é\r\n\u{1b}é");
-        let fits = "é".repeat(DIAGNOSTIC_BYTES / 2);
-        assert_eq!(failure_message(&fits), fits);
-        let truncated = failure_message(&format!("{fits}é"));
-        assert_eq!(
-            truncated,
-            format!("{}...", "é".repeat((DIAGNOSTIC_BYTES - 3) / 2))
-        );
     }
 
     #[test]

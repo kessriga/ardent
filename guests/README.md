@@ -44,8 +44,10 @@ execution. Clocks report the epoch or zero, and random values are repeatable. Ea
 random bytes. The scanner sees empty arguments and environment variables. Calls that require files, sockets or blocking
 I/O trap.
 
-The host accepts manifests up to 1 MiB and components up to 64 MiB. It escapes control characters in guest failure
-messages and limits each displayed message to 1,024 UTF-8 bytes.
+The host accepts manifests up to 1 MiB and components up to 64 MiB. A scan accepts at most 64 MiB of source.
+If a source exceeds that limit, sync keeps its last good structure and continues with the next file. The host reports
+the cause of each trap, escapes control characters in scanner diagnostics and limits the diagnostic text to 1,024 UTF-8
+bytes.
 
 The host gives instantiation and each call 5 billion units of Wasmtime fuel. The packaged parsers export the optional
 `ardent:format/query-preparation@0.1.0` interface. The host calls its `prepare` function once before the first scan in

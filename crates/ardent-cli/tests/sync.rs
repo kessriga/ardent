@@ -445,6 +445,30 @@ fn same_version_component_replacement_invalidates_stamps() -> TestResult {
 }
 
 #[test]
+fn oversized_source_preserves_its_structure_and_the_next_file_scans() -> TestResult {
+    let project = Project::new()?;
+    let first = "a.rs";
+    project.write(first, "fn first() {}")?;
+    project.sync()?.assert_success();
+    let last_good = project.structure(first)?;
+    fs::File::options()
+        .write(true)
+        .open(project.path(first))?
+        .set_len(ardent_format::MAX_SOURCE_BYTES as u64 + 1)?;
+    project.write("b.rs", "fn next() {}")?;
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1));
+    assert!(
+        run.stderr().contains("a.rs: source exceeds"),
+        "{}",
+        run.stderr()
+    );
+    assert_eq!(project.structure(first)?, last_good);
+    assert!(project.structure("b.rs")?.contains("b.rs#fn next"));
+    Ok(())
+}
+
+#[test]
 fn scan_failures_keep_stamps_and_allow_the_next_file_to_run() -> TestResult {
     let project = Project::new()?;
     project.write(
@@ -472,6 +496,8 @@ fn scan_failures_keep_stamps_and_allow_the_next_file_to_run() -> TestResult {
     for name in ["a.probe", "b.probe"] {
         assert!(run.stderr().contains(name), "{}", run.stderr());
     }
+    assert_eq!(run.stderr().lines().count(), 2, "{}", run.stderr());
+    assert!(run.stderr().contains("unreachable"), "{}", run.stderr());
     assert_eq!(project.structure("a.probe")?, a);
     assert_eq!(project.structure("b.probe")?, b);
     assert!(project.structure("c.probe")?.contains("c.probe#text"));
