@@ -85,7 +85,8 @@ SHALL scan the source file again and replace the structure file.
 
 A sync SHALL delete each structure file whose source file is not tracked, and SHALL remove each directory under
 `.ardent/cache/files/` that becomes empty. When the sync cannot read a directory of the project, it SHALL report the
-directory, SHALL delete no structure file, and the command SHALL exit with status 1.
+directory, SHALL delete no structure file, and the command SHALL exit with status 1. The same deletion rule SHALL apply
+if an enabled component fails manifest verification and discovery is incomplete.
 
 #### Scenario: Deleted source file
 
@@ -133,6 +134,13 @@ SHALL keep the structure file of its last scan without a change.
 - **THEN** the next sync reports `src/lib.rs`, and its structure file keeps its content byte for byte
 - **AND** after the person completes the function, the next sync writes a structure file with the node
   `src/lib.rs#fn helper`
+
+#### Scenario: A component exceeds its execution budget
+
+- **WHEN** a scan of `src/large.rs` traps and the next file uses the same format component
+- **THEN** the host SHALL preserve any previous structure and stamp for `src/large.rs`, report the error and exit with
+  status 1
+- **AND** it SHALL scan the next file in a fresh store and instance with a fresh budget
 
 ### Requirement: Warnings
 

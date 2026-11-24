@@ -3,7 +3,8 @@
 ## Purpose
 
 Defines where Ardent keeps each file in a project's `.ardent/` directory, what `ardent init` writes there, how the
-project configuration selects plugins and tracked files, and where plugins live. The layout follows decision-4.
+project configuration selects plugins and tracked files, and where plugins live. Decision-4 defines the M1 layout.
+Decision-8 defines the installed format package for TASK-12 and plugin selection for TASK-13.
 
 ## Requirements
 
@@ -329,8 +330,8 @@ Ardent SHALL NOT read a directory that an `exclude` pattern matches.
 
 ### Requirement: Plugin locations
 
-Ardent SHALL load plugins only from its binary (the built-in plugins) and from `.ardent/plugins/<name>/`. A project
-plugin SHALL replace the built-in plugin with the same name.
+In M1 the binary supplies the built-in formats. The initial component host in TASK-12 SHALL load enabled plugins only
+from `.ardent/plugins/<name>/`. The release supplies components for installation into that directory.
 
 #### Scenario: Pinned Markdown plugin
 
@@ -352,8 +353,7 @@ schema: 1
 name: html
 version: 0.3.1
 kind: format
-grammar: grammar.wasm
-outline: outline.scm
+component: format.wasm
 files:
   - "*.html"
 prefixes:
@@ -361,8 +361,16 @@ prefixes:
     - "*.html"
 ```
 
-- **THEN** Ardent loads the grammar from `.ardent/plugins/html/grammar.wasm` and the outline query from
-  `.ardent/plugins/html/outline.scm`
+- **THEN** before using its defaults, Ardent SHALL verify the manifest metadata against `describe` on the supported
+  `ardent:format/scanner@0.1.0` export
+- **AND** Ardent MAY reuse a successful check for the same manifest bytes, component bytes and supported interface
+
+#### Scenario: Changed manifest excludes all previously tracked files
+
+- **WHEN** only the Rust manifest changes from `*.rs` to `*.txt`, the component still declares `*.rs`, and the project
+  contains no text files
+- **THEN** the sync SHALL report the mismatch, exit with status 1 and skip stale-structure deletion
+- **AND** the existing Rust structures and stamps SHALL stay unchanged
 
 #### Scenario: View manifest
 

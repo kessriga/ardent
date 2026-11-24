@@ -131,13 +131,14 @@ digits; and `format`, `format_version`, and `format_hash` of the format plugin.
 
 ### Requirement: Format hash
 
-`format_hash` SHALL be the BLAKE3 hash of the plugin's grammar file followed by its query file, as 64 lowercase hex
-digits. For a built-in plugin, it SHALL be the hash of the query text followed by the name and version of the grammar
-crate.
+For an installed format component (decision-8), `format_hash` SHALL be the BLAKE3 hash of the complete `format.wasm`
+file, as 64 lowercase hex digits. For an M1 built-in plugin, it SHALL be the hash of the query text followed by the name
+and version of the grammar crate.
 
 #### Scenario: Changed query
 
-- **WHEN** a person changes `.ardent/plugins/html/outline.scm` and keeps `version` in the manifest
+- **WHEN** a person installs a rebuilt `.ardent/plugins/html/format.wasm` with a changed query and the same manifest
+  version
 - **THEN** the next sync finds a different `format_hash` and scans every tracked HTML file again
 
 ### Requirement: Structure nodes

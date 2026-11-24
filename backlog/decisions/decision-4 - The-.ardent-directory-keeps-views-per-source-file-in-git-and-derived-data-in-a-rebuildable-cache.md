@@ -8,6 +8,9 @@ status: accepted
 ---
 ## Context
 
+Decision-8 supersedes the format-plugin installation, manifest, and format hash rules in this record. It also assigns
+plugin selection during initialization to TASK-13.
+
 decision-1, decision-2, and decision-3 left the on-disk form of `.ardent/` to TASK-5. They ask this record to:
 
 - split `.ardent/` into a part in git and a derived part, with one ignore rule for the derived part (decision-2);
