@@ -81,6 +81,21 @@ struct Project {
 
 impl Project {
     fn new() -> io::Result<Self> {
+        let project = Self::without_plugins()?;
+        for name in ["markdown", "rust"] {
+            let package = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../plugins")
+                .join(name);
+            let installed = project.path(".ardent/plugins").join(name);
+            fs::create_dir_all(&installed)?;
+            for file in ["plugin.yaml", "format.wasm"] {
+                fs::copy(package.join(file), installed.join(file))?;
+            }
+        }
+        Ok(project)
+    }
+
+    fn without_plugins() -> io::Result<Self> {
         let project = Self { dir: temp_dir()? };
         let output = project.ardent_in(project.root(), "init")?;
         if !output.status.success() {
@@ -341,6 +356,145 @@ fn unreadable_source_file_does_not_stop_the_others() -> TestResult {
     );
     assert!(project.structure_path("docs/spec.md").is_file());
     assert!(!project.structure_path("README.md").exists());
+    Ok(())
+}
+
+#[test]
+fn new_project_warns_until_packages_are_installed() -> TestResult {
+    let project = Project::without_plugins()?;
+    let run = project.sync()?;
+    run.assert_success();
+    for name in ["markdown", "rust"] {
+        assert!(
+            run.stderr()
+                .contains(&format!("the format `{name}` has no plugin"))
+        );
+    }
+    assert!(run.stdout().contains("0 tracked files: 0 scanned"));
+    Ok(())
+}
+
+#[test]
+fn failed_verification_preserves_structures_and_continues_sync() -> TestResult {
+    let project = Project::new()?;
+    project.write("lib.rs", "fn hello() {}")?;
+    project.sync()?.assert_success();
+    let rust = project.structure("lib.rs")?;
+    let stale = project.structure("README.md")?;
+    fs::remove_file(project.path("README.md"))?;
+    project.write("docs/spec.md", "# Revised\n")?;
+    project.write(
+        ".ardent/config.yaml",
+        "schema: 1\nformats:\n  rust: {}\n  markdown: {files: ['*.md', '*.rs']}\n",
+    )?;
+    let manifest = project.path(".ardent/plugins/rust/plugin.yaml");
+    fs::write(
+        &manifest,
+        fs::read_to_string(&manifest)?.replace("*.rs", "*.txt"),
+    )?;
+
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1), "{}", run.stderr());
+    assert!(run.stderr().contains("rust"));
+    assert_eq!(project.structure("lib.rs")?, rust);
+    assert_eq!(project.structure("README.md")?, stale);
+    assert!(
+        project
+            .structure("docs/spec.md")?
+            .contains("docs/spec.md#Revised")
+    );
+    Ok(())
+}
+
+#[test]
+fn same_version_component_replacement_invalidates_stamps() -> TestResult {
+    use ardent_core::structure;
+    use std::io::Write;
+
+    let project = Project::new()?;
+    project.sync()?.assert_success();
+    let package = project.path(".ardent/plugins/markdown/format.wasm");
+    // An empty custom section changes the component bytes while retaining its exports.
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&package)?
+        .write_all(&[0, 1, 0])?;
+    let hash = structure::content_hash(&fs::read(package)?);
+    let run = project.sync()?;
+    run.assert_success();
+    assert!(run.stdout().contains("2 scanned"));
+    assert!(
+        project
+            .structure("README.md")?
+            .contains(&format!("format_hash: {hash}"))
+    );
+
+    project.edit_structure(
+        "README.md",
+        &hash,
+        "f44946daaae00ba28ceea81715b037f6b691458a901d5ac95a012af336cc5831",
+    )?;
+    assert!(
+        project
+            .sync()?
+            .assert_success()
+            .stdout()
+            .contains("1 scanned")
+    );
+    Ok(())
+}
+
+#[test]
+fn scan_failures_keep_stamps_and_allow_the_next_file_to_run() -> TestResult {
+    let project = Project::new()?;
+    project.write(
+        ".ardent/config.yaml",
+        "schema: 1\nformats: {probe: {}, markdown: {}}",
+    )?;
+    project.write(
+        ".ardent/plugins/probe/plugin.yaml",
+        "schema: 1\nname: probe\nversion: 0.1.0\nkind: format\ncomponent: format.wasm\nfiles: ['*.probe']",
+    )?;
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/components/test-scanner.wasm");
+    fs::copy(fixture, project.path(".ardent/plugins/probe/format.wasm"))?;
+    for name in ["a.probe", "b.probe"] {
+        project.write(name, "good")?;
+    }
+    project.sync()?.assert_success();
+    let a = project.structure("a.probe")?;
+    let b = project.structure("b.probe")?;
+    project.write("a.probe", "trap")?;
+    project.write("b.probe", "invalid")?;
+    project.write("c.probe", "good")?;
+    project.write("new.md", "# New\n")?;
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1), "{}", run.stderr());
+    for name in ["a.probe", "b.probe"] {
+        assert!(run.stderr().contains(name), "{}", run.stderr());
+    }
+    assert_eq!(project.structure("a.probe")?, a);
+    assert_eq!(project.structure("b.probe")?, b);
+    assert!(project.structure("c.probe")?.contains("c.probe#text"));
+    assert!(project.structure("new.md")?.contains("new.md#New"));
+    Ok(())
+}
+
+#[test]
+fn rust_2024_safe_declaration_preserves_the_previous_structure() -> TestResult {
+    let project = Project::new()?;
+    project.write("ffi.rs", "unsafe extern \"C\" { pub fn f(); }")?;
+    project.sync()?.assert_success();
+    let previous = project.structure("ffi.rs")?;
+    project.write("ffi.rs", "unsafe extern \"C\" { pub safe fn f(); }")?;
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1), "{}", run.stderr());
+    assert!(
+        run.stderr()
+            .contains("ffi.rs: syntax error at line 1, column 25"),
+        "{}",
+        run.stderr()
+    );
+    assert_eq!(project.structure("ffi.rs")?, previous);
     Ok(())
 }
 

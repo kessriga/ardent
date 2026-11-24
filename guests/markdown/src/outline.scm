@@ -1,4 +1,4 @@
-; Outline query of the built-in Markdown format plugin (spec markdown-format).
+; Outline query of the Markdown format plugin (spec markdown-format).
 ;
 ; Headings are captured as lines, not as tree-sitter sections. Their level nests the blocks after them (decision-5),
 ; so ATX and setext headings nest the same way.

@@ -10,12 +10,6 @@ use ardent_core::layout::ARDENT_DIR;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::{DirEntry, WalkBuilder};
 
-/// The name and the file patterns of one enabled format.
-pub struct FormatPatterns<'a> {
-    pub name: &'a str,
-    pub files: &'a [String],
-}
-
 /// A tracked file: its source path, relative to the project root with `/` between parts, and the index of its format.
 #[derive(Debug, PartialEq, Eq)]
 pub struct TrackedFile {
@@ -109,19 +103,15 @@ pub struct Patterns<'a> {
 
 impl<'a> Patterns<'a> {
     /// Fails when a pattern is not valid gitignore syntax.
-    pub fn new(
-        root: &Path,
-        formats: &[FormatPatterns<'a>],
-        exclude: &[String],
-    ) -> Result<Self, PatternError> {
-        let formats = formats
-            .iter()
-            .map(|format| Ok((format.name, matcher(root, format.files)?)))
-            .collect::<Result<_, _>>()?;
+    pub fn new(root: &Path, exclude: &[String]) -> Result<Self, PatternError> {
         Ok(Self {
-            formats,
+            formats: Vec::new(),
             exclude: matcher(root, exclude)?,
         })
+    }
+
+    pub fn add(&mut self, name: &'a str, files: Gitignore) {
+        self.formats.push((name, files));
     }
 
     /// The indexes of the formats whose `files` patterns match `relative` itself, not one of its parent directories.
@@ -234,7 +224,7 @@ impl Filter {
     }
 }
 
-fn matcher(root: &Path, patterns: &[String]) -> Result<Gitignore, PatternError> {
+pub fn matcher(root: &Path, patterns: &[String]) -> Result<Gitignore, PatternError> {
     let mut builder = GitignoreBuilder::new(root);
     for pattern in patterns {
         builder.add_line(None, pattern).map_err(PatternError)?;
@@ -272,14 +262,9 @@ mod tests {
 
     fn tracked(root: &Path, exclude: &[&str]) -> Result<Walk, Box<dyn Error>> {
         let markdown = patterns(&["*.md", "*.markdown"]);
-        let formats = [FormatPatterns {
-            name: "markdown",
-            files: &markdown,
-        }];
-        Ok(walk(
-            root,
-            &Patterns::new(root, &formats, &patterns(exclude))?,
-        ))
+        let mut rules = Patterns::new(root, &patterns(exclude))?;
+        rules.add("markdown", matcher(root, &markdown)?);
+        Ok(walk(root, &rules))
     }
 
     fn paths(walk: &Walk) -> Vec<&str> {
@@ -429,20 +414,10 @@ mod tests {
         let project = tempfile::tempdir()?;
         write(project.path(), "notes.md")?;
         let (markdown, notes) = (patterns(&["*.md"]), patterns(&["notes.*"]));
-        let formats = [
-            FormatPatterns {
-                name: "markdown",
-                files: &markdown,
-            },
-            FormatPatterns {
-                name: "notes",
-                files: &notes,
-            },
-        ];
-        let walk = walk(
-            project.path(),
-            &Patterns::new(project.path(), &formats, &[])?,
-        );
+        let mut rules = Patterns::new(project.path(), &[])?;
+        rules.add("markdown", matcher(project.path(), &markdown)?);
+        rules.add("notes", matcher(project.path(), &notes)?);
+        let walk = walk(project.path(), &rules);
         assert!(walk.files.is_empty());
         assert_eq!(
             walk.warnings,
@@ -511,7 +486,7 @@ mod tests {
     #[test]
     fn rejects_an_invalid_pattern() -> io::Result<()> {
         let project = tempfile::tempdir()?;
-        assert!(Patterns::new(project.path(), &[], &patterns(&["[z-a]"])).is_err());
+        assert!(Patterns::new(project.path(), &patterns(&["[z-a]"])).is_err());
         Ok(())
     }
 }

@@ -1,4 +1,4 @@
-; Outline query of the built-in Rust format plugin (spec rust-format).
+; Outline query of the Rust format plugin (spec rust-format).
 ;
 ; Each item, field, and enum variant is a node. The outer doc comments and attributes directly before it are
 ; annotations, so they belong to its node (decision-6). These patterns name no parent: in a pattern with a parent, a run

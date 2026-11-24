@@ -1,5 +1,7 @@
-//! Format plugins: the outline engine that turns a source file into the nodes of its outline, and the built-in plugins.
+//! Loads project-installed format components and validates their output before Ardent builds an outline.
 
-pub mod engine;
-pub mod markdown;
-pub mod rust;
+mod package;
+mod runtime;
+
+pub use package::{FormatPlugin, PluginError, check_installed_names};
+pub use runtime::RuntimeError;

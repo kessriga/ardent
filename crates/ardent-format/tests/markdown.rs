@@ -1,12 +1,13 @@
 //! Snapshot tests: the outline of each Markdown file in `tests/markdown/`, as the `nodes` of its structure file.
 
+mod common;
+
 use std::error::Error;
 use std::fs;
 use std::path::Path;
 
 use ardent_core::outline::Outline;
 use ardent_core::yaml;
-use ardent_format::markdown;
 
 fn outline_yaml(name: &str) -> Result<String, Box<dyn Error>> {
     let source = fs::read(
@@ -14,7 +15,7 @@ fn outline_yaml(name: &str) -> Result<String, Box<dyn Error>> {
             .join("tests/markdown")
             .join(name),
     )?;
-    let top_level = markdown::plugin()?.scan(&source)?;
+    let top_level = common::plugin("markdown")?.scan(name, &source)?;
     Ok(yaml::to_string(&Outline::build(name, &source, &top_level))?)
 }
 

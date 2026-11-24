@@ -9,7 +9,6 @@ use std::mem;
 use std::ops::Range;
 
 use ardent_core::outline::ScannedNode;
-use blake3::Hasher;
 use tree_sitter::{
     Language, LanguageError, Node, Parser, Query, QueryCursor, QueryError, QueryMatch,
     StreamingIterator,
@@ -21,15 +20,8 @@ const ANNOTATION_CAPTURE: &str = "annotation";
 const KIND_PROPERTY: &str = "kind";
 const LEVEL_PROPERTY: &str = "level";
 
-/// A format plugin: a tree-sitter grammar and an outline query, with the name, version, default file patterns, and
-/// format hash that stamps and the configuration use (decision-3).
-pub struct FormatPlugin {
-    pub name: String,
-    pub version: String,
-    /// Gitignore-style patterns of the files that the plugin parses when `config.yaml` gives none.
-    pub default_files: Vec<String>,
-    /// The `format_hash` of stamps (spec `ardent-schemas`).
-    pub format_hash: String,
+/// A grammar and its compiled outline query.
+pub struct QueryEngine {
     language: Language,
     query: CompiledQuery,
 }
@@ -125,20 +117,9 @@ struct Candidate {
     children: Vec<Candidate>,
 }
 
-impl FormatPlugin {
-    pub fn new(
-        name: &str,
-        version: &str,
-        default_files: &[&str],
-        language: Language,
-        query_source: &str,
-        format_hash: String,
-    ) -> Result<Self, PluginError> {
+impl QueryEngine {
+    pub fn new(language: Language, query_source: &str) -> Result<Self, PluginError> {
         Ok(Self {
-            name: name.to_string(),
-            version: version.to_string(),
-            default_files: default_files.iter().map(|p| p.to_string()).collect(),
-            format_hash,
             query: CompiledQuery::new(&language, query_source)?,
             language,
         })
@@ -162,20 +143,6 @@ impl FormatPlugin {
             .map(into_scanned)
             .collect())
     }
-}
-
-/// The format hash of a built-in plugin (spec `ardent-schemas`): the BLAKE3 hash of the query text, then the name and
-/// version of the grammar crate.
-pub(crate) fn builtin_format_hash(
-    query: &str,
-    grammar_crate: &str,
-    grammar_version: &str,
-) -> String {
-    let mut hasher = Hasher::new();
-    hasher.update(query.as_bytes());
-    hasher.update(grammar_crate.as_bytes());
-    hasher.update(grammar_version.as_bytes());
-    hasher.finalize().to_hex().to_string()
 }
 
 impl CompiledQuery {
@@ -430,15 +397,8 @@ fn into_scanned(candidate: Candidate) -> ScannedNode {
 mod tests {
     use super::*;
 
-    fn markdown(query: &str) -> Result<FormatPlugin, PluginError> {
-        FormatPlugin::new(
-            "test",
-            "0.0.0",
-            &["*.md"],
-            tree_sitter_md::LANGUAGE.into(),
-            query,
-            String::new(),
-        )
+    fn markdown(query: &str) -> Result<QueryEngine, PluginError> {
+        QueryEngine::new(tree_sitter_md::LANGUAGE.into(), query)
     }
 
     /// Each node as `kind label start..end`, indented by depth.
@@ -453,18 +413,11 @@ mod tests {
         }
     }
 
-    fn rust(query: &str) -> Result<FormatPlugin, PluginError> {
-        FormatPlugin::new(
-            "test",
-            "0.0.0",
-            &["*.rs"],
-            tree_sitter_rust::LANGUAGE.into(),
-            query,
-            String::new(),
-        )
+    fn rust(query: &str) -> Result<QueryEngine, PluginError> {
+        QueryEngine::new(tree_sitter_rust::LANGUAGE.into(), query)
     }
 
-    fn rendered(plugin: &FormatPlugin, source: &str) -> Result<String, Box<dyn Error>> {
+    fn rendered(plugin: &QueryEngine, source: &str) -> Result<String, Box<dyn Error>> {
         let nodes = plugin.scan(source.as_bytes())?;
         let mut out = String::new();
         render(&nodes, 0, &mut out);
@@ -480,7 +433,7 @@ mod tests {
     }
 
     /// The line and column of the syntax error that a scan of `source` reports.
-    fn syntax_error(source: &str) -> Result<Option<(usize, usize)>, Box<dyn Error>> {
+    fn scan_error_position(source: &str) -> Result<Option<(usize, usize)>, Box<dyn Error>> {
         match rust("(function_item) @node")?.scan(source.as_bytes()) {
             Err(ScanError::Syntax { line, column }) => Ok(Some((line, column))),
             Err(err) => Err(err.into()),
@@ -620,32 +573,38 @@ mod tests {
 
     #[test]
     fn half_typed_function_is_a_syntax_error_on_its_line() -> Result<(), Box<dyn Error>> {
-        let error = syntax_error("fn run() {}\nfn helper(\n")?;
+        let error = scan_error_position("fn run() {}\nfn helper(\n")?;
         assert_eq!(error.map(|(line, _)| line), Some(2));
         Ok(())
     }
 
     #[test]
     fn syntax_error_on_the_first_line() -> Result<(), Box<dyn Error>> {
-        assert_eq!(syntax_error("fn run() {} )\n")?, Some((1, 13)));
+        assert_eq!(scan_error_position("fn run() {} )\n")?, Some((1, 13)));
         Ok(())
     }
 
     #[test]
     fn syntax_error_column_counts_characters() -> Result<(), Box<dyn Error>> {
-        assert_eq!(syntax_error("const S: &str = \"äöü\"; )\n")?, Some((1, 24)));
+        assert_eq!(
+            scan_error_position("const S: &str = \"äöü\"; )\n")?,
+            Some((1, 24))
+        );
         Ok(())
     }
 
     #[test]
     fn missing_token_is_a_syntax_error() -> Result<(), Box<dyn Error>> {
-        assert_eq!(syntax_error("fn f() { let x = 1 }\n")?, Some((1, 19)));
+        assert_eq!(
+            scan_error_position("fn f() { let x = 1 }\n")?,
+            Some((1, 19))
+        );
         Ok(())
     }
 
     #[test]
     fn file_without_errors_has_no_syntax_error() -> Result<(), Box<dyn Error>> {
-        assert_eq!(syntax_error("fn run() {}\n")?, None);
+        assert_eq!(scan_error_position("fn run() {}\n")?, None);
         Ok(())
     }
 

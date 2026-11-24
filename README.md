@@ -3,10 +3,8 @@
 Ardent is a terminal outliner for structured text. It reads the files in a project, such as Markdown, Rust, or HTML, and
 shows each file as a tree of nodes, in the same outline form that Roam Research and Tana use.
 
-> **Status:** milestone M0 has settled the core design, and milestone M1 builds a read-only outline. The binary has two
-> commands: `ardent init` and `ardent sync`. The current binary embeds the Markdown and Rust format plugins. TASK-12
-> moves them into components, and TASK-13 adds plugin selection to `ardent init`. Run `backlog milestone list` to see
-> progress.
+> **Status:** The CLI provides `ardent init` and `ardent sync`. Markdown and Rust ship as separate WebAssembly
+> components. Install the formats your project uses. Run `backlog milestone list` for milestone progress.
 
 ## Idea
 
@@ -27,8 +25,23 @@ can address a function or a section by its place in a tree rather than by line n
 
 Run `ardent init` in the root directory of a project. It creates a `.ardent/` directory with a `config.yaml` and a
 `.gitignore`. It refuses to run where `.ardent` already exists or inside another Ardent project. The configuration
-selects the plugins and the files that Ardent tracks. In the component design, `ardent init` installs the plugins you
-select from the release. For each tracked file, Ardent keeps:
+selects the plugins and the files that Ardent tracks. To enable scanning after init, copy one or both release packages
+from the Ardent checkout into the project. For example, from the project root, with `ARDENT_SOURCE` set to the path of
+the Ardent checkout, run:
+
+```sh
+mkdir -p .ardent/plugins
+cp -R "$ARDENT_SOURCE/plugins/markdown" "$ARDENT_SOURCE/plugins/rust" .ardent/plugins/
+ardent sync
+```
+
+When upgrading an existing project, install its packages before the first sync. Sync prunes cached structures for files
+it no longer tracks. Commit the installed packages with the project. Each includes a `plugin.yaml` manifest and a
+`format.wasm` component. Sync warns for each configured format whose package is missing. If a package fails
+verification, sync reports the format, keeps existing structures, scans files for healthy formats and exits with status
+1.
+
+For each tracked file, Ardent keeps:
 
 - the **structure** of the file, as human-readable YAML;
 - zero or more **views** of the file, also as YAML.
@@ -58,9 +71,9 @@ enum variants, and the functions, constants, and types of traits and impl blocks
 and its name, such as `fn run` or `impl Display for Engine`. The doc comments and attributes above an item are part of
 its node. `use` declarations, macro calls, and the statements in a function body are not nodes.
 
-Format support (how to parse Rust, Markdown, and so on) and views (complexity, comments) come from **plugins**. In the
-component design, a format plugin receives source bytes and returns outline nodes or an error position. Query-based
-plugins package tree-sitter, a grammar, and the outline query together. A view plugin stores or computes view entries.
+Format support (how to parse Rust, Markdown, and so on) and views (complexity, comments) come from **plugins**. A format
+plugin receives source bytes and returns outline nodes or an error position. Query-based plugins package tree-sitter, a
+grammar, and the outline query together. A view plugin stores or computes view entries.
 
 ### Example: comments and backlinks
 
@@ -84,8 +97,8 @@ Run `backlog decision list` to find the design decisions.
   reference in view content has the form `@[docs/spec.md#Sync rules]`.
 - Decided in decision-2: every Ardent command first checks the tracked files for changes and re-scans the changed ones.
   The structure is a local cache; only stored views, the project configuration, and project plugins go into git.
-- Decided in decision-4: the layout of `.ardent/` and the YAML schema of each file in it. Every file starts with a
-  `schema` version. The specs `ardent-layout` and `ardent-schemas` in `openspec/specs/` give the details.
+- Decided in decision-4: the layout of `.ardent/` and the YAML schema of each file in it. Each YAML data file starts
+  with a `schema` version. The specs `ardent-layout` and `ardent-schemas` in `openspec/specs/` give the details.
 - Decision-3 defines view plugins. Ardent finds and rewrites references in their data. Decision-8 defines format plugins
   as WebAssembly components. A sync starts Wasmtime only to verify a changed or previously unverified plugin package or
   to scan a file.
@@ -120,6 +133,6 @@ cargo build
 cargo run -p ardent-cli   # the `ardent` binary
 ```
 
-The workspace has three crates. `ardent-core` holds the document model: outlines, structure files, and the
-configuration. `ardent-format` holds the outline engine and the built-in format plugins, and depends on `ardent-core`.
-`ardent-cli` builds the `ardent` binary and depends on both.
+The host workspace has three crates. `ardent-core` holds the document model, structure files and configuration.
+`ardent-format` verifies packages and runs components in Wasmtime. `ardent-cli` builds the `ardent` binary. A separate
+guest workspace builds the two release packages. See the [guest build instructions](guests/README.md).

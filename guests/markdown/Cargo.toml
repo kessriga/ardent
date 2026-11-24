@@ -1,0 +1,18 @@
+[package]
+name = "ardent-markdown-component"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+ardent-format-guest.workspace = true
+tree-sitter-md.workspace = true
+
+[dev-dependencies]
+ardent-core.workspace = true

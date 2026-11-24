@@ -2,19 +2,19 @@
 
 ## Purpose
 
-Defines the built-in Markdown format plugin: its name, version, and default file patterns, which Markdown blocks become
+Defines the packaged Markdown format plugin: its name, version, and default file patterns, which Markdown blocks become
 nodes of the outline, their kinds and labels, and how headings nest.
 
 ## Requirements
 
 ### Requirement: Plugin identity
 
-The built-in Markdown format plugin SHALL have the name `markdown` and the version `0.1.0`. Its default file patterns
+The packaged Markdown format component SHALL have the name `markdown` and the version `0.1.0`. Its default file patterns
 SHALL be `*.md` and `*.markdown`.
 
 #### Scenario: Stamp of a Markdown file
 
-- **WHEN** a sync scans `README.md` with the built-in Markdown plugin
+- **WHEN** a sync scans `README.md` with the installed Markdown component
 - **THEN** the stamp of its structure file has `format: markdown` and `format_version: 0.1.0`
 
 ### Requirement: Headings

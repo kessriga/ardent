@@ -1,0 +1,17 @@
+[package]
+name = "ardent-format-guest"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ardent-core.workspace = true
+tree-sitter = "=0.27.2"
+wit-bindgen = "=0.63.0"
+
+[dev-dependencies]
+tree-sitter-md.workspace = true
+tree-sitter-rust.workspace = true
