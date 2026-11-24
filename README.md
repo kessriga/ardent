@@ -28,11 +28,12 @@ arrow keys to move between Markdown and Rust, Space to toggle each format, and E
 cancel. Init copies the selected packages into `.ardent/plugins/` and enables them in `.ardent/config.yaml`. It refuses
 to run where `.ardent` already exists or inside another Ardent project.
 
+In MSYS and Cygwin terminals that use pipes, enter the format names separated by commas at the prompt.
+
 In a script, pass the format names explicitly. Use `--plugins ''` to start with an empty selection.
 
 ```sh
-ardent init --plugins markdown,rust
-ardent sync
+ardent init --plugins markdown,rust && ardent sync
 ```
 
 When upgrading an existing project, copy any missing packages listed under `formats` in `.ardent/config.yaml` before the
@@ -40,9 +41,9 @@ first sync. Sync prunes cached structures for files it no longer tracks. For exa
 `ARDENT_RELEASE` to the directory that contains the release executable and run these commands from the project root.
 
 ```sh
-mkdir -p .ardent/plugins
-cp -R "$ARDENT_RELEASE/plugins/markdown" "$ARDENT_RELEASE/plugins/rust" .ardent/plugins/
-ardent sync
+mkdir -p .ardent/plugins &&
+  cp -R "$ARDENT_RELEASE/plugins/markdown" "$ARDENT_RELEASE/plugins/rust" .ardent/plugins/ &&
+  ardent sync
 ```
 
 Commit the installed packages with the project. Each includes a `plugin.yaml` manifest and a `format.wasm` component.

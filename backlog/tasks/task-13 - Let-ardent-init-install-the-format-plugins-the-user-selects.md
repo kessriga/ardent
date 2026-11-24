@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-24 11:35'
-updated_date: '2026-11-24 19:32'
+updated_date: '2026-11-24 20:27'
 labels: []
 milestone: m-3
 dependencies:
@@ -57,6 +57,10 @@ installed in `.ardent/plugins/` (TASK-12). Where third-party plugins come from i
 
 4. Address the review findings: recheck the project root after selection, handle short terminals and interruption, stage
    the CLI test release, restore the upgrade example, and verify both build profiles.
+
+5. Fix executable and working directory resolution, install complete release packages, stop scripts when setup fails,
+   support both arrow encodings and Windows pipe terminals, and stage test executables under Cargo. Verify these cases
+   and both build profiles.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -66,16 +70,19 @@ For installation scope, see decision-8, “Configuration and cache scope”. A p
 same-named plugin in the user’s XDG configuration, and project settings override overlapping user settings. Installing
 portable plugins and selecting a user or project compilation cache are separate concerns.
 
-The picker uses console directly for key input and keeps the cursor visible. Linux and macOS tests use rustix to drive
-the CLI through a pseudo-terminal. The CLI tests stage the executable beside the release packages in both build
-profiles.
+The picker uses rustix for Unix terminal reads and console for native Windows key input. Windows terminals with pipe
+input accept a comma-separated list. The test fixture stages the release beside the Cargo executable so temporary
+project directories can disallow execution.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Init installs and enables the selected release plugins. It checks for an enclosing project again after the picker
-closes. The picker works in a two-row terminal and leaves the cursor visible on Ctrl-C. All 128 workspace tests passed
-in debug and release on macOS. Rust formatting, Clippy and strict OpenSpec validation passed. The README upgrade
-commands installed byte-identical packages and scanned Markdown and Rust with the existing configuration.
+Init installs the selected packages beside their configuration, including ancillary files. Launching through a symlink
+finds the release packages. The picker handles split arrow sequences and refuses a working directory replaced before
+confirmation. The README commands stop before sync when setup fails.
+
+All 135 workspace tests passed in debug and release on macOS. All 19 init integration tests also passed with execution
+blocked in the temporary project directory. The workspace and test targets passed compilation checks for Windows x86-64
+and Linux ARM64. The README examples preserved cached structures after setup and copy failures.
 <!-- SECTION:FINAL_SUMMARY:END -->
