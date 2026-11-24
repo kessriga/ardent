@@ -15,6 +15,7 @@ identify entries and keep git diffs small. They carry no date.
 
 ### Modified Capabilities
 
+- `ardent-layout` specifies per-dashboard settings for the planned view host.
 - `ardent-schemas` gains a creation time in its stored view entry requirements and worked examples.
 
 ## Impact

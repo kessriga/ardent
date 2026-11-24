@@ -30,10 +30,10 @@ its time zone from settings and defaults to UTC. Dashboard calls have the read-o
 `backlinks(target)` functions of decision-3, under the same runtime limits. The dashboard has no host function to write
 source files or view entries.
 
-**Settings.** Configure each dashboard under `views.<plugin>.dashboards.<id>` in `.ardent/config.yaml`. The plugin
-receives the named fields for that ID, using the flat field value types of decision-3. Missing settings mean an empty
-set and the plugin's defaults. The plugin validates the settings. For example, this limits the comments plugin's recent
-list to 20 entries:
+**Settings.** The current CLI rejects the `dashboards` key. When the view host ships, configure each dashboard under
+`views.<plugin>.dashboards.<id>` in `.ardent/config.yaml`. The plugin receives the named fields for that ID, using the
+flat field value types of decision-3. Missing settings mean an empty set and the plugin's defaults. The plugin validates
+the settings. This planned configuration limits recent comments to 20 entries.
 
 ```yaml
 views:
@@ -78,7 +78,7 @@ A plugin can add dashboards without drawing a terminal or changing the base view
 the number of entries in that view. Source changes still pass through the source tool, which can enforce its own status
 rules. An outside entry first seen without a timestamp appears in recent activity at import time.
 
-The throwaway check at `spikes/task-10/check_dashboards.py` loads two minimal components into one Wasmtime host. Both
-return base view metadata. Only the extended component exposes the dashboard interface and returns the Recent comments
-descriptor. This checks discovery and invocation. Rendering and the complete view plugin ABI belong to the future view
-host.
+The throwaway check at `spikes/task-10/check_dashboards.py` builds two components against decision-3's stored view
+interface. Wasmtime calls `info`, `check` and `summary` on both. Only the extended component lists Recent comments and
+renders an outline item linked to a stored entry. The WIT in the spike describes the dashboard types used in this check.
+The production view host and its renderer remain future work.
