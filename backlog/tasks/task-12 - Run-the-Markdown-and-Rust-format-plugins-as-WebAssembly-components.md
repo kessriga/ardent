@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-24 11:35'
-updated_date: '2026-11-24 16:44'
+updated_date: '2026-11-24 17:01'
 labels: []
 milestone: m-3
 dependencies:
@@ -68,6 +68,10 @@ if the code survives the move.
 6. Preserve cache aliases before pruning. Validate disabled manifests and exact package filenames. Bound source reads
    and trap diagnostics. Fix space-safe release builds, document the WIT world, and expose the native scan error. Run
    regression, packaging, and workspace checks.
+
+7. Preserve the last good structure for a mis-cased package, prune after complete discovery despite disabled manifest
+   errors, reject directory-only component paths, and stage both release packages before updating the destination.
+   Verify each regression and the workspace gates.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -88,13 +92,19 @@ without starting the component. Source and diagnostic limits preserve the last g
 An independent guest compiled the documented WIT world and matched the public query scan error. Two clean builds from
 the same paths containing spaces produced identical bytes for all three components. Moving the checkout can change Cargo
 crate hashes.
+
+Fixed the four findings from the third review. Case-sensitive and case-insensitive APFS tests preserved the last good
+outline after a package case change. An invalid disabled manifest still reports an error and permits stale-file cleanup
+when discovery completes. Enabled and disabled manifests reject component paths ending in a separator or terminal dot.
+Packaging tests covered missing and malformed inputs, rollback after a failed replacement, and a clean retry. The
+packaged files matched the shipped release byte for byte.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Ardent runs project-installed Markdown and Rust components through Wasmtime. The original outline snapshots pass. Sync
-preserves the last good structure across failed scans and case-only renames, validates installed manifests and paths,
-and bounds source reads and diagnostic output. Both release packages and the test scanner match the documented build.
-All 118 host tests, 64 guest tests, formatting, Clippy, the build, and all seven OpenSpec checks passed.
+preserves the last good structure when a package fails and prunes stale structures after complete discovery. The release
+packager stages both packages and restores previous files if a replacement fails. All 121 host tests, 64 guest tests,
+two packaging tests, formatting, Clippy, the build, and seven OpenSpec checks passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
