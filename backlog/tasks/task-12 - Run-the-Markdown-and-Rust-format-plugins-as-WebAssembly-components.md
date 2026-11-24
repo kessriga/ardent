@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-24 11:35'
-updated_date: '2026-11-24 16:07'
+updated_date: '2026-11-24 16:44'
 labels: []
 milestone: m-3
 dependencies:
@@ -64,6 +64,10 @@ if the code survives the move.
 
 5. Fix scan initialization, rename handling, package identity, SIMD determinism, package input limits, diagnostic
    limits, and Rust documentation packaging. Verify regressions and update PR 13.
+
+6. Preserve cache aliases before pruning. Validate disabled manifests and exact package filenames. Bound source reads
+   and trap diagnostics. Fix space-safe release builds, document the WIT world, and expose the native scan error. Run
+   regression, packaging, and workspace checks.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -77,13 +81,20 @@ The Rust 2024 grammar limit reports line 1, column 25 for the documented declara
 Fixed the seven PR review findings. Query preparation has its own bounded call. The host uses deterministic SIMD, bounds
 package reads and guest diagnostics, and validates package directory spelling. Sync preserves current node paths and the
 last good structure through a case-only rename during incomplete discovery. Staging includes the Rust parser notes.
+
+Fixed all eight findings from the second review. Rename recovery and exact package spelling were exercised on
+case-sensitive and case-insensitive APFS. Disabled manifests use the same schema and pattern rules as enabled packages
+without starting the component. Source and diagnostic limits preserve the last good structure and let later files scan.
+An independent guest compiled the documented WIT world and matched the public query scan error. Two clean builds from
+the same paths containing spaces produced identical bytes for all three components. Moving the checkout can change Cargo
+crate hashes.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Ardent runs project-installed Markdown and Rust components through Wasmtime. The original snapshots pass. A 640,035-byte
-Rust file produced identical structures on cold and warm scans. On case-insensitive APFS, an unrelated plugin error and
-a later syntax error preserved the renamed file’s last good structure. Clean staging reproduced both packages, including
-the Rust README. Host and guest tests, formatting, Clippy, the build, and strict OpenSpec validation passed.
+Ardent runs project-installed Markdown and Rust components through Wasmtime. The original outline snapshots pass. Sync
+preserves the last good structure across failed scans and case-only renames, validates installed manifests and paths,
+and bounds source reads and diagnostic output. Both release packages and the test scanner match the documented build.
+All 118 host tests, 64 guest tests, formatting, Clippy, the build, and all seven OpenSpec checks passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
