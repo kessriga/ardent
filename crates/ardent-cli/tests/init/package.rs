@@ -110,3 +110,54 @@ fn rejects_a_named_pipe_in_a_package() -> io::Result<()> {
     posix::mkfifoat(CWD, &pipe, Mode::RUSR | Mode::WUSR)?;
     assert_invalid_package(release.executable(), "data.pipe")
 }
+
+#[test]
+fn requires_exact_spelling_for_release_files() -> io::Result<()> {
+    let release = stage_release()?;
+    let package = release.path().join("plugins/rust");
+    for (expected, renamed) in [
+        ("plugin.yaml", "Plugin.yaml"),
+        ("format.wasm", "Format.wasm"),
+        ("README.md", "Readme.md"),
+    ] {
+        fs::rename(package.join(expected), package.join(renamed))?;
+        assert_invalid_package(release.executable(), expected)?;
+        fs::rename(package.join(renamed), package.join(expected))?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn installs_inside_a_selected_package_without_copying_its_output() -> io::Result<()> {
+    use std::os::unix::fs as unix_fs;
+
+    let release = stage_release()?;
+    let external = temp_dir()?;
+    let package = external.path();
+    for name in ["plugin.yaml", "format.wasm", "README.md"] {
+        fs::write(package.join(name), name)?;
+    }
+    let source = release.path().join("plugins/rust");
+    fs::rename(&source, source.with_file_name("original-rust"))?;
+    unix_fs::symlink(package, source)?;
+    let project = package.join("example");
+    fs::create_dir(&project)?;
+    fs::write(project.join("example.rs"), "fn main() {}")?;
+    let other = package.join("fixture/.ardent");
+    fs::create_dir_all(&other)?;
+    fs::write(other.join("config.yaml"), "schema: 1")?;
+    let expected = snapshot(package)?;
+
+    let output = Command::new(release.executable())
+        .args(["init", "--plugins", "markdown,rust"])
+        .current_dir(&project)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(snapshot(&project.join(".ardent/plugins/rust"))?, expected);
+    Ok(())
+}

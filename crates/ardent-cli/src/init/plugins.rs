@@ -1,4 +1,5 @@
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -41,16 +42,12 @@ impl ReleasePlugin {
         ardent_dir: &Path,
     ) -> Result<(), (PathBuf, io::Error)> {
         let package = source.join(self.name);
-        for file in self.required_files {
-            let path = package.join(file);
-            if !fs::symlink_metadata(&path)
-                .map_err(|err| (path.clone(), err))?
-                .is_file()
-            {
-                return Err(invalid_entry(&path, "expected a regular package file"));
-            }
-        }
-        copy_package_files(&package, &Path::new("plugins").join(self.name), ardent_dir)
+        copy_package_files(
+            &package,
+            &Path::new("plugins").join(self.name),
+            ardent_dir,
+            self.required_files,
+        )
     }
 }
 
@@ -58,22 +55,34 @@ fn copy_package_files(
     source: &Path,
     target: &Path,
     ardent_dir: &Path,
+    required: &[&str],
 ) -> Result<(), (PathBuf, io::Error)> {
+    let mut missing = required.to_vec();
     let entries = fs::read_dir(source).map_err(|err| (source.to_path_buf(), err))?;
     for entry in entries {
         let entry = entry.map_err(|err| (source.to_path_buf(), err))?;
         let path = entry.path();
-        let target = target.join(entry.file_name());
+        let name = entry.file_name();
+        let target = target.join(&name);
         let kind = entry.file_type().map_err(|err| (path.clone(), err))?;
         if kind.is_dir() {
-            copy_package_files(&path, &target, ardent_dir)?;
+            if !same_file::is_same_file(&path, ardent_dir).map_err(|err| (path.clone(), err))? {
+                copy_package_files(&path, &target, ardent_dir, &[])?;
+            }
         } else if kind.is_file() {
+            missing.retain(|file| OsStr::new(file) != name);
             let bytes = fs::read(&path).map_err(|err| (path, err))?;
             layout::write_atomic(ardent_dir, &target, &bytes)
                 .map_err(|err| (ardent_dir.join(target), err))?;
         } else {
             return Err(invalid_entry(&path, "expected a regular file or directory"));
         }
+    }
+    if let Some(name) = missing.first() {
+        return Err(invalid_entry(
+            &source.join(name),
+            "missing regular package file with this exact name",
+        ));
     }
     Ok(())
 }
