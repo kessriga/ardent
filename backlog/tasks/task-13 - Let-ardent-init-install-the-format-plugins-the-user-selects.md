@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-24 11:35'
-updated_date: '2026-11-24 17:50'
+updated_date: '2026-11-24 19:32'
 labels: []
 milestone: m-3
 dependencies:
@@ -54,6 +54,9 @@ installed in `.ardent/plugins/` (TASK-12). Where third-party plugins come from i
 1. Specify terminal and scripted selection, package installation, and config generation in ardent-layout.
 2. Implement selection and copy the chosen release files during init. Preserve existing project checks and rollback.
 3. Exercise init and sync through the CLI, update the README, run the verification gate, and archive the change.
+
+4. Address the review findings: recheck the project root after selection, handle short terminals and interruption, stage
+   the CLI test release, restore the upgrade example, and verify both build profiles.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -63,15 +66,16 @@ For installation scope, see decision-8, “Configuration and cache scope”. A p
 same-named plugin in the user’s XDG configuration, and project settings override overlapping user settings. Installing
 portable plugins and selecting a user or project compilation cache are separate concerns.
 
-Used dialoguer with default features disabled for keyboard selection and terminal cleanup. A pseudo-terminal check
-covered selecting Rust, both formats, no formats, and cancellation. The CLI tests cover package contents, the first
-sync, and retry after an incomplete release.
+The picker uses console directly for key input and keeps the cursor visible. Linux and macOS tests use rustix to drive
+the CLI through a pseudo-terminal. The CLI tests stage the executable beside the release packages in both build
+profiles.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Init installs and enables the release formats chosen in the terminal or with --plugins. All 125 workspace tests,
-formatting and Clippy passed. A relocated release binary passed the picker checks, installed byte-identical packages and
-scanned both Markdown and Rust on its first sync.
+Init installs and enables the selected release plugins. It checks for an enclosing project again after the picker
+closes. The picker works in a two-row terminal and leaves the cursor visible on Ctrl-C. All 128 workspace tests passed
+in debug and release on macOS. Rust formatting, Clippy and strict OpenSpec validation passed. The README upgrade
+commands installed byte-identical packages and scanned Markdown and Rust with the existing configuration.
 <!-- SECTION:FINAL_SUMMARY:END -->
