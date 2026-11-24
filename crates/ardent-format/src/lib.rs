@@ -3,5 +3,5 @@
 mod package;
 mod runtime;
 
-pub use package::{FormatPlugin, PluginError, check_installed_names};
+pub use package::{FormatPlugin, InstalledPackages, PluginError};
 pub use runtime::RuntimeError;

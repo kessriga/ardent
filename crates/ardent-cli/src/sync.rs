@@ -13,7 +13,7 @@ use ardent_core::config::{self, Config, ConfigError};
 use ardent_core::layout::{self, ARDENT_DIR, CACHE_DIR, FILES_DIR, LOCK_FILE, STRUCTURE_FILE};
 use ardent_core::outline::Outline;
 use ardent_core::structure::{self, Stamp, Structure};
-use ardent_format::{self as format, FormatPlugin};
+use ardent_format::{FormatPlugin, InstalledPackages};
 use ignore::gitignore::Gitignore;
 
 use crate::project_root;
@@ -84,11 +84,21 @@ pub fn run(working_dir: &Path) -> Result<Report, SyncError> {
     let overrides = configured_patterns(&root, &config).map_err(config_error)?;
     let _lock = lock(&ardent_dir)?;
     let mut report = Report::default();
-    if let Err(err) = format::check_installed_names(&ardent_dir) {
-        report.errors.push(err.to_string());
-    }
+    let packages = match InstalledPackages::discover(&ardent_dir) {
+        Ok(packages) => packages,
+        Err(err) => {
+            report.errors.push(err.to_string());
+            return Ok(report);
+        }
+    };
+    report.errors.extend(
+        packages
+            .check_other_names(|name| config.formats.contains_key(name))
+            .into_iter()
+            .map(|err| err.to_string()),
+    );
     let (mut plugins, unavailable) =
-        load_plugins(&root, &ardent_dir, overrides, &mut patterns, &mut report);
+        load_plugins(&root, &packages, overrides, &mut patterns, &mut report);
     let files_dir = create_dir(&ardent_dir, FILES_DIR)?;
     let walk = tracked::walk(&root, &patterns);
     report
@@ -160,7 +170,7 @@ fn configured_patterns<'a>(
 
 fn load_plugins<'a>(
     root: &Path,
-    ardent_dir: &Path,
+    packages: &InstalledPackages<'_>,
     overrides: Vec<ConfiguredFormat<'a>>,
     patterns: &mut Patterns<'a>,
     report: &mut Report,
@@ -168,7 +178,7 @@ fn load_plugins<'a>(
     let mut plugins = Vec::new();
     let mut unavailable = HashSet::new();
     for ConfiguredFormat { name, files } in overrides {
-        let plugin = match FormatPlugin::load(ardent_dir, name) {
+        let plugin = match packages.load_format(name) {
             Ok(Some(plugin)) => plugin,
             Ok(None) => {
                 report.warnings.push(format!(
