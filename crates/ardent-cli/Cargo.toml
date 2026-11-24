@@ -13,6 +13,7 @@ ardent-core.workspace = true
 ardent-format.workspace = true
 clap = { version = "4.6.9", features = ["derive"] }
 ignore = "0.4.34"
+same-file = "1.0.6"
 
 [lints]
 workspace = true

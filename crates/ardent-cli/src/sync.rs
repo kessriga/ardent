@@ -16,6 +16,9 @@ use ardent_core::structure::{self, Stamp, Structure};
 use ardent_format::{FormatPlugin, InstalledPackages};
 use ignore::gitignore::Gitignore;
 
+mod cache_names;
+use cache_names::CacheNames;
+
 use crate::project_root;
 use crate::tracked::{self, PatternError, Patterns, TrackedFile};
 
@@ -108,12 +111,22 @@ pub fn run(working_dir: &Path) -> Result<Report, SyncError> {
     report.tracked = walk.files.len();
     // A failed package or walk can omit tracked files. Prune only after complete discovery,
     // before scans reuse paths of case-only renames.
-    if report.errors.is_empty() {
+    let mut cache_names = if report.errors.is_empty() {
         report.removed = prune(&files_dir, &walk.files, &mut report.errors);
-    }
+        None
+    } else {
+        Some(CacheNames::default())
+    };
     for file in &walk.files {
         let plugin = &mut plugins[file.format];
-        match sync_file(&root, &ardent_dir, &file.path, plugin, &unavailable) {
+        match sync_file(
+            &root,
+            &ardent_dir,
+            &file.path,
+            plugin,
+            &unavailable,
+            cache_names.as_mut(),
+        ) {
             Ok(Outcome::Scanned) => report.scanned += 1,
             Ok(Outcome::Unchanged | Outcome::Restamped) => {}
             Err(err) => report
@@ -241,6 +254,7 @@ fn sync_file(
     path: &str,
     plugin: &mut FormatPlugin,
     unavailable: &HashSet<&str>,
+    cache_names: Option<&mut CacheNames>,
 ) -> Result<Outcome, Box<dyn Error>> {
     let mut file = File::open(root.join(path))?;
     let metadata = file.metadata()?;
@@ -254,7 +268,9 @@ fn sync_file(
     {
         return Ok(Outcome::Unchanged);
     }
-    let previous = previous.filter(|(old, _)| built_by(&old.stamp, plugin));
+    // When pruning is deferred, a case-only rename can still resolve to the old structure.
+    let previous = previous
+        .filter(|(old, _)| built_by(&old.stamp, plugin) && old.outline.matches_source_path(path));
     if previous
         .as_ref()
         .is_some_and(|(old, written)| is_unchanged(&old.stamp, size, mtime, *written))
@@ -279,6 +295,9 @@ fn sync_file(
         ),
     };
     let yaml = Structure::new(stamp, outline).to_yaml()?;
+    if let Some(names) = cache_names {
+        names.correct_path(ardent_dir.join(FILES_DIR), path)?;
+    }
     layout::write_atomic(ardent_dir, &structure_path, yaml.as_bytes())?;
     Ok(outcome)
 }

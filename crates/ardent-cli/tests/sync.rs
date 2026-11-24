@@ -720,6 +720,77 @@ fn renamed_file_gets_a_structure_file_under_its_new_name() -> TestResult {
 }
 
 #[test]
+fn case_only_rename_updates_node_paths_when_another_plugin_is_broken() -> TestResult {
+    let project = Project::new()?;
+    let before = "SRC/OLD#.rs";
+    let after = "Src/Old#.rs";
+    let valid = "fn example() {}";
+    project.write(before, valid)?;
+    project.write("SRC/nested/other.rs", "fn other() {}")?;
+    project.write("SRC/notes.md", "# Notes\n")?;
+    project.sync()?.assert_success();
+    let original = project.structure(before)?;
+    let sibling = project.structure("SRC/notes.md")?;
+    let manifest = fs::read(project.path(".ardent/plugins/markdown/plugin.yaml"))?;
+
+    fs::rename(project.path("SRC"), project.path("Src"))?;
+    fs::rename(project.path("Src/OLD#.rs"), project.path(after))?;
+    project.write(".ardent/plugins/markdown/plugin.yaml", "schema: 0")?;
+    project.write(after, "fn example(")?;
+    let failed = project.sync()?;
+    assert_eq!(failed.code(), Some(1));
+    assert!(
+        failed.stderr().contains("syntax error"),
+        "{}",
+        failed.stderr()
+    );
+    assert_eq!(project.structure(before)?, original);
+    assert!(
+        project
+            .structure("Src/nested/other.rs")?
+            .contains("Src/nested/other.rs#fn other")
+    );
+
+    project.write(after, valid)?;
+    let recovered = project.sync()?;
+    assert_eq!(recovered.code(), Some(1));
+    assert!(
+        recovered.stderr().contains("markdown"),
+        "{}",
+        recovered.stderr()
+    );
+    assert!(
+        recovered.stdout().contains("1 scanned"),
+        "{}",
+        recovered.stdout()
+    );
+    let last_good = project.structure(after)?;
+    assert!(last_good.contains(r"Src/Old\#.rs#fn example"));
+    assert_eq!(project.structure("SRC/notes.md")?, sibling);
+    let cache = snapshot(&project.path(".ardent/cache/files"))?;
+    assert!(cache.contains_key(Path::new("Src/Old#.rs/structure.yaml")));
+    assert!(cache.contains_key(Path::new("Src/nested/other.rs/structure.yaml")));
+
+    let unchanged = project.sync()?;
+    assert!(
+        unchanged.stdout().contains("0 scanned"),
+        "{}",
+        unchanged.stdout()
+    );
+
+    fs::write(
+        project.path(".ardent/plugins/markdown/plugin.yaml"),
+        manifest,
+    )?;
+    project.write(after, "fn example(")?;
+    let next = project.sync()?;
+    assert_eq!(next.code(), Some(1));
+    assert!(next.stderr().contains("syntax error"), "{}", next.stderr());
+    assert_eq!(project.structure(after)?, last_good);
+    Ok(())
+}
+
+#[test]
 fn invalid_pattern_in_the_configuration_fails_and_writes_nothing() -> TestResult {
     let project = Project::new()?;
     let config = fs::read_to_string(project.path(".ardent/config.yaml"))?;

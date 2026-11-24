@@ -107,6 +107,7 @@ dependencies = [
  "ardent-format",
  "clap",
  "ignore",
+ "same-file",
  "tempfile",
 ]
 
