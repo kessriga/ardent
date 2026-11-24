@@ -3,6 +3,7 @@
 mod plugins;
 mod selection;
 
+use std::env;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -18,6 +19,7 @@ const GITIGNORE: &str = "/cache/\n";
 /// Why `ardent init` created no project.
 pub enum InitError {
     Selection(String),
+    DirectoryMoved(PathBuf),
     /// The directory already contains a file or directory named `.ardent`. Nothing changed.
     AlreadyExists(PathBuf),
     /// A parent directory is already a project root. Nothing changed.
@@ -41,6 +43,11 @@ impl fmt::Display for InitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Selection(message) => f.write_str(message),
+            Self::DirectoryMoved(path) => write!(
+                f,
+                "working directory {} moved during plugin selection; run init again",
+                path.display()
+            ),
             Self::AlreadyExists(path) => {
                 write!(f, "{} already exists; nothing changed", path.display())
             }
@@ -65,18 +72,26 @@ impl fmt::Display for InitError {
     }
 }
 
-/// Creates `.ardent/` with its initial files in `project_dir`, and returns the path of `.ardent/`.
+/// Initializes the current working directory. `project_dir` is its absolute path at startup.
 pub fn run(project_dir: &Path, names: Option<&str>) -> Result<PathBuf, InitError> {
     let ardent_dir = project_dir.join(ARDENT_DIR);
     refuse_existing_project(project_dir, &ardent_dir)?;
     let selected = selection::select(names).map_err(InitError::Selection)?;
     if names.is_none() {
-        // Another init may have created an enclosing project while the picker was open.
+        let current = env::current_dir().map_err(|source| InitError::Io {
+            path: project_dir.to_owned(),
+            source,
+        })?;
+        if current != project_dir {
+            return Err(InitError::DirectoryMoved(project_dir.to_owned()));
+        }
         refuse_existing_project(project_dir, &ardent_dir)?;
     }
-    create_ardent_dir(&ardent_dir)?;
-    write_initial_files(&ardent_dir, &selected)
-        .map_err(|(path, source)| roll_back(&ardent_dir, path, source))?;
+    // Relative writes and rollback stay in the process's working directory even if it is renamed.
+    let destination = Path::new(ARDENT_DIR);
+    create_ardent_dir(destination)?;
+    write_initial_files(destination, &selected)
+        .map_err(|(path, source)| roll_back(destination, path, source))?;
     Ok(ardent_dir)
 }
 

@@ -161,3 +161,24 @@ fn accepts_split_arrows_in_normal_and_application_cursor_modes() -> io::Result<(
     }
     Ok(())
 }
+
+#[test]
+fn refuses_a_working_directory_replaced_during_selection() -> io::Result<()> {
+    let parent = temp_dir()?;
+    let project = parent.path().join("checkout");
+    let moved = parent.path().join("moved");
+    fs::create_dir(&project)?;
+    let (status, output) = interact(&project, 24, |terminal| {
+        fs::rename(&project, &moved)?;
+        fs::create_dir(&project)?;
+        terminal.write_all(b"\r")
+    })?;
+    assert!(!status.success(), "{status}: {output}");
+    assert!(
+        output.contains("moved during plugin selection"),
+        "{status}: {output}"
+    );
+    assert!(!project.join(".ardent").exists());
+    assert!(!moved.join(".ardent").exists());
+    Ok(())
+}
