@@ -16,6 +16,12 @@ console = { version = "0.16.6", default-features = false, features = ["std"] }
 ignore = "0.4.34"
 same-file = "1.0.6"
 
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.6", features = ["termios"] }
+
+[target.'cfg(windows)'.dependencies]
+winapi-util = "0.1.11"
+
 [lints]
 workspace = true
 

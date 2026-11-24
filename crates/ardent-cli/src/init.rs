@@ -1,6 +1,7 @@
 //! `ardent init`: make a directory an Ardent project with the initial content of the spec `ardent-layout`.
 
 mod plugins;
+mod selection;
 
 use std::fmt;
 use std::fs;
@@ -68,7 +69,7 @@ impl fmt::Display for InitError {
 pub fn run(project_dir: &Path, names: Option<&str>) -> Result<PathBuf, InitError> {
     let ardent_dir = project_dir.join(ARDENT_DIR);
     refuse_existing_project(project_dir, &ardent_dir)?;
-    let selected = plugins::select(names).map_err(InitError::Selection)?;
+    let selected = selection::select(names).map_err(InitError::Selection)?;
     if names.is_none() {
         // Another init may have created an enclosing project while the picker was open.
         refuse_existing_project(project_dir, &ardent_dir)?;

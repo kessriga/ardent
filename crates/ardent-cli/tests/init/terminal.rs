@@ -142,3 +142,22 @@ fn refuses_a_parent_project_created_during_selection() -> io::Result<()> {
     assert!(!child.join(".ardent").exists());
     Ok(())
 }
+
+#[test]
+fn accepts_split_arrows_in_normal_and_application_cursor_modes() -> io::Result<()> {
+    for prefix in [b'[', b'O'] {
+        let project = temp_dir()?;
+        let (status, output) = interact(project.path(), 24, |terminal| {
+            terminal.write_all(b"\x1b")?;
+            thread::sleep(Duration::from_millis(100));
+            terminal.write_all(&[prefix])?;
+            thread::sleep(Duration::from_millis(100));
+            terminal.write_all(b"B \r")
+        })?;
+        assert!(status.success(), "{status}: {output}");
+        let packages = project.path().join(".ardent/plugins");
+        assert!(packages.join("rust/format.wasm").is_file());
+        assert!(!packages.join("markdown").exists());
+    }
+    Ok(())
+}
