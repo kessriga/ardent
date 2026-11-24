@@ -22,7 +22,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Make the working directory an Ardent project by creating `.ardent/` in it
-    Init,
+    Init {
+        /// Install these comma-separated format plugins (e.g. markdown,rust). Omit to select in a terminal.
+        #[arg(long, value_name = "NAMES")]
+        plugins: Option<String>,
+    },
     /// Bring the structure of each tracked source file in `.ardent/cache/` up to date
     Sync,
 }
@@ -34,13 +38,13 @@ fn main() -> ExitCode {
         Err(err) => return fail(format_args!("cannot read the working directory: {err}")),
     };
     match command {
-        Command::Init => init(working_dir),
+        Command::Init { plugins } => init(working_dir, plugins.as_deref()),
         Command::Sync => sync(working_dir),
     }
 }
 
-fn init(project_dir: PathBuf) -> ExitCode {
-    match init::run(&project_dir) {
+fn init(project_dir: PathBuf, plugins: Option<&str>) -> ExitCode {
+    match init::run(&project_dir, plugins) {
         Ok(ardent_dir) => {
             // The project exists now, so a closed stdout must not turn this run into a failure.
             let _ = writeln!(io::stdout(), "Created {}", ardent_dir.display());

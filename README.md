@@ -23,23 +23,32 @@ can address a function or a section by its place in a tree rather than by line n
 
 ## How it should work
 
-Run `ardent init` in the root directory of a project. It creates a `.ardent/` directory with a `config.yaml` and a
-`.gitignore`. It refuses to run where `.ardent` already exists or inside another Ardent project. The configuration
-selects the plugins and the files that Ardent tracks. To enable scanning after init, copy one or both release packages
-from the Ardent checkout into the project. For example, from the project root, with `ARDENT_SOURCE` set to the path of
-the Ardent checkout, run:
+Keep the release's `plugins/` directory beside the `ardent` executable. Run `ardent init` in the project root. Use the
+arrow keys to move between Markdown and Rust, Space to toggle each format, and Enter to confirm. Press q or Ctrl-C to
+cancel. Init copies the selected packages into `.ardent/plugins/` and enables them in `.ardent/config.yaml`. It refuses
+to run where `.ardent` already exists or inside another Ardent project.
+
+In MSYS and Cygwin terminals that use pipes, enter the format names separated by commas at the prompt.
+
+In a script, pass the format names explicitly. Use `--plugins ''` to start with an empty selection.
 
 ```sh
-mkdir -p .ardent/plugins
-cp -R "$ARDENT_SOURCE/plugins/markdown" "$ARDENT_SOURCE/plugins/rust" .ardent/plugins/
-ardent sync
+ardent init --plugins markdown,rust && ardent sync
 ```
 
-When upgrading an existing project, install its packages before the first sync. Sync prunes cached structures for files
-it no longer tracks. Commit the installed packages with the project. Each includes a `plugin.yaml` manifest and a
-`format.wasm` component. Sync warns for each configured format whose package is missing. If a package fails
-verification, sync reports the format, keeps existing structures, scans files for healthy formats and exits with status
-1.
+When upgrading an existing project, copy any missing packages listed under `formats` in `.ardent/config.yaml` before the
+first sync. Sync prunes cached structures for files it no longer tracks. For example, if both packages are missing, set
+`ARDENT_RELEASE` to the directory that contains the release executable and run these commands from the project root.
+
+```sh
+mkdir -p .ardent/plugins &&
+  cp -R "$ARDENT_RELEASE/plugins/markdown" "$ARDENT_RELEASE/plugins/rust" .ardent/plugins/ &&
+  ardent sync
+```
+
+Commit the installed packages with the project. Each includes a `plugin.yaml` manifest and a `format.wasm` component.
+Sync warns for each configured format whose package is missing. If a package fails verification, sync reports the
+format, keeps existing structures, scans files for healthy formats and exits with status 1.
 
 For each tracked file, Ardent keeps:
 

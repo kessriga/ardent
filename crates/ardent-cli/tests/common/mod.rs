@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 
 use tempfile::TempDir;
 
@@ -21,6 +22,56 @@ pub fn temp_dir() -> io::Result<TempDir> {
         )));
     }
     Ok(dir)
+}
+
+pub struct Release {
+    dir: TempDir,
+    executable: PathBuf,
+}
+
+impl Release {
+    pub fn path(&self) -> &Path {
+        self.dir.path()
+    }
+
+    pub fn executable(&self) -> &Path {
+        &self.executable
+    }
+}
+
+/// Stages the release on the Cargo binary's filesystem so it works with a noexec temporary directory.
+pub fn stage_release() -> io::Result<Release> {
+    let binary = Path::new(env!("CARGO_BIN_EXE_ardent"));
+    let parent = binary
+        .parent()
+        .ok_or_else(|| io::Error::other("Cargo binary has no parent directory"))?;
+    let dir = tempfile::tempdir_in(parent)?;
+    let executable = dir
+        .path()
+        .join(format!("ardent{}", std::env::consts::EXE_SUFFIX));
+    let release = Release { dir, executable };
+    if fs::hard_link(binary, release.executable()).is_err() {
+        fs::copy(binary, release.executable())?;
+    }
+    let plugins = release.path().join("plugins");
+    fs::create_dir(&plugins)?;
+    for (path, contents) in snapshot(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins"))?
+    {
+        match contents {
+            Some(bytes) => fs::write(plugins.join(path), bytes)?,
+            None => fs::create_dir(plugins.join(path))?,
+        }
+    }
+    Ok(release)
+}
+
+pub fn run_init(project: &Path, args: &[&str]) -> io::Result<Output> {
+    let release = stage_release()?;
+    Command::new(release.executable())
+        .arg("init")
+        .args(args)
+        .current_dir(project)
+        .output()
 }
 
 pub fn snapshot(root: &Path) -> io::Result<Tree> {
