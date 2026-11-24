@@ -58,6 +58,7 @@ impl Runtime {
         let mut config = Config::new();
         config
             .consume_fuel(true)
+            .relaxed_simd_deterministic(true)
             .cranelift_nan_canonicalization(true);
         // A read-only home can still run portable components without a compilation cache.
         config.cache(Cache::new(CacheConfig::new()).ok());
@@ -198,6 +199,7 @@ mod tests {
     fn wasi_only_supplies_deterministic_process_inputs() -> TestResult {
         let bytes = probe_bytes()?;
         let mut runtime = Runtime::compile(&bytes)?;
+        assert!(runtime.compiled.engine().get_relaxed_simd_deterministic());
         let first = runtime.scan("file", b"deterministic")?;
         assert!(
             first[0]
