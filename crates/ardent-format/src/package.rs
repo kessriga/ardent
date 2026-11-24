@@ -45,7 +45,7 @@ enum Manifest {
         name: String,
         #[serde(rename = "version")]
         _version: String,
-        component: PathBuf,
+        component: String,
     },
 }
 
@@ -56,7 +56,7 @@ struct FormatManifest {
     _schema: u32,
     name: String,
     version: String,
-    component: PathBuf,
+    component: String,
     #[serde(default)]
     files: Vec<String>,
     #[serde(default)]
@@ -78,8 +78,10 @@ impl Manifest {
             } => (name, component),
         };
         check_manifest_name(path, name, directory_name)?;
-        if component.file_name().is_none()
-            || !component
+        // Path::components removes trailing separators and "/.", which require a directory.
+        let last_part = component.rsplit(std::path::is_separator).next();
+        if matches!(last_part, Some("" | "."))
+            || !Path::new(component)
                 .components()
                 .all(|part| matches!(part, Component::Normal(_) | Component::CurDir))
         {
@@ -204,7 +206,7 @@ impl FormatPlugin {
             return Err(invalid(&path, "expected kind format, found view"));
         };
         let manifest_hash = structure::content_hash(&manifest_bytes);
-        let component_path = package_file(dir, &manifest.component)?;
+        let component_path = package_file(dir, Path::new(&manifest.component))?;
         let bytes = read_file(&component_path, MAX_COMPONENT_BYTES)?;
         let format_hash = structure::content_hash(&bytes);
         let record = format!(
@@ -764,6 +766,35 @@ mod tests {
             package_file(dir.path(), Path::new("./wasm/scanner"))?,
             dir.path().join("wasm/scanner")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn manifest_component_path_must_end_in_a_file_name() -> TestResult {
+        let ardent = tempfile::tempdir()?;
+        let dir = install_rust(ardent.path())?;
+        let manifest = dir.join("plugin.yaml");
+        let original = fs::read_to_string(&manifest)?;
+        fs::create_dir(dir.join("nested"))?;
+        fs::rename(dir.join("format.wasm"), dir.join("nested/format.wasm"))?;
+        let packages = InstalledPackages::discover(ardent.path())?;
+        let component = "./nested/format.wasm";
+        fs::write(&manifest, original.replace("format.wasm", component))?;
+        assert!(packages.load_format("rust")?.is_some());
+        assert!(packages.check_other_manifests(|_| false).is_empty());
+
+        for separator in ['/', std::path::MAIN_SEPARATOR] {
+            for suffix in ["", "."] {
+                let invalid = format!("{component}{separator}{suffix}");
+                fs::write(&manifest, original.replace("format.wasm", &invalid))?;
+                assert!(packages.load_format("rust").is_err(), "{invalid}");
+                assert_eq!(
+                    packages.check_other_manifests(|_| false).len(),
+                    1,
+                    "{invalid}"
+                );
+            }
+        }
         Ok(())
     }
 
