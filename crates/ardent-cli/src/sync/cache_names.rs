@@ -1,74 +1,77 @@
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// Physical directory names during deferred pruning. A successful scan must leave a path that the next prune keeps.
-#[derive(Default)]
-pub(super) struct CacheNames(HashMap<PathBuf, HashSet<OsString>>);
+use same_file::Handle;
 
-impl CacheNames {
-    pub(super) fn correct_path(
-        &mut self,
-        mut parent: PathBuf,
-        source_path: &str,
-    ) -> io::Result<()> {
-        for name in Path::new(source_path).iter() {
-            let path = parent.join(name);
-            match fs::symlink_metadata(&path) {
-                Ok(metadata) if metadata.is_dir() => {}
-                Ok(_) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::NotADirectory,
-                        format!("{} is not a directory", path.display()),
-                    ));
+use crate::tracked::TrackedFile;
+
+/// The immediate child names from tracked source paths, with the spelling returned by the source walk.
+#[derive(Default)]
+pub(super) struct CacheNames<'a>(HashMap<&'a str, HashSet<&'a str>>);
+
+impl<'a> CacheNames<'a> {
+    pub(super) fn from_files(files: &'a [TrackedFile]) -> Self {
+        let mut dirs = Self::default();
+        for file in files {
+            let mut path = file.path.as_str();
+            loop {
+                let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
+                if !dirs.0.entry(parent).or_default().insert(name) || parent.is_empty() {
+                    break;
                 }
-                Err(err) if err.kind() == io::ErrorKind::NotFound => {
-                    // The atomic write creates the remaining directories with the source spelling.
-                    if let Some(names) = self.0.get_mut(&parent) {
-                        names.insert(name.to_owned());
-                    }
-                    return Ok(());
-                }
-                Err(err) => return Err(err),
+                path = parent;
             }
-            self.correct_entry(&parent, name, &path)?;
-            parent = path;
         }
-        Ok(())
+        dirs
     }
 
-    fn correct_entry(&mut self, parent: &Path, name: &OsStr, path: &Path) -> io::Result<()> {
-        let names = match self.0.entry(parent.to_owned()) {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => entry.insert(
-                fs::read_dir(parent)?
-                    .map(|entry| entry.map(|entry| entry.file_name()))
-                    .collect::<io::Result<_>>()?,
-            ),
-        };
-        if names.contains(name) {
+    pub(super) fn has_children(&self, source_path: &str) -> bool {
+        self.0.contains_key(source_path)
+    }
+
+    pub(super) fn align(
+        &mut self,
+        dir: &Path,
+        source_path: &str,
+        entries: &mut [(fs::FileType, PathBuf)],
+    ) -> io::Result<()> {
+        let Some(mut missing) = self.0.remove(source_path) else {
             return Ok(());
+        };
+        let mut candidates = Vec::new();
+        for (kind, path) in entries {
+            if kind.is_dir()
+                && !path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| missing.remove(n))
+            {
+                candidates.push(path);
+            }
         }
-        let old = names
-            .iter()
-            .find(|actual| {
-                let candidate = parent.join(actual);
-                fs::symlink_metadata(&candidate).is_ok_and(|metadata| metadata.is_dir())
-                    && same_file::is_same_file(&candidate, path).unwrap_or(false)
-            })
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("cannot locate cache directory {}", path.display()),
-                )
-            })?
-            .clone();
-        fs::rename(parent.join(&old), path)?;
-        names.remove(&old);
-        names.insert(name.to_owned());
+        for name in missing {
+            if candidates.is_empty() {
+                break;
+            }
+            let desired = dir.join(name);
+            match fs::symlink_metadata(&desired) {
+                Ok(metadata) if metadata.is_dir() => {}
+                Ok(_) => continue,
+                Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+                Err(err) => return Err(err),
+            }
+            // An existing directory with a different spelling aliases the tracked path on this volume.
+            let desired_dir = Handle::from_path(&desired)?;
+            let index = candidates
+                .iter()
+                .position(|path| Handle::from_path(path).is_ok_and(|actual| actual == desired_dir))
+                .ok_or_else(|| io::Error::other(format!("cannot locate {}", desired.display())))?;
+            let actual = candidates.swap_remove(index);
+            fs::rename(&*actual, &desired)?;
+            *actual = desired;
+        }
         Ok(())
     }
 }

@@ -109,24 +109,15 @@ pub fn run(working_dir: &Path) -> Result<Report, SyncError> {
         .extend(walk.warnings.iter().map(ToString::to_string));
     report.errors.extend(walk.errors.iter().cloned());
     report.tracked = walk.files.len();
-    // A failed package or walk can omit tracked files. Prune only after complete discovery,
-    // before scans reuse paths of case-only renames.
-    let mut cache_names = if report.errors.is_empty() {
-        report.removed = prune(&files_dir, &walk.files, &mut report.errors);
-        None
+    let stale = if report.errors.is_empty() {
+        StaleStructures::Remove
     } else {
-        Some(CacheNames::default())
+        StaleStructures::Keep
     };
+    report.removed = reconcile_cache(&files_dir, &walk.files, stale, &mut report.errors);
     for file in &walk.files {
         let plugin = &mut plugins[file.format];
-        match sync_file(
-            &root,
-            &ardent_dir,
-            &file.path,
-            plugin,
-            &unavailable,
-            cache_names.as_mut(),
-        ) {
+        match sync_file(&root, &ardent_dir, &file.path, plugin, &unavailable) {
             Ok(Outcome::Scanned) => report.scanned += 1,
             Ok(Outcome::Unchanged | Outcome::Restamped) => {}
             Err(err) => report
@@ -254,7 +245,6 @@ fn sync_file(
     path: &str,
     plugin: &mut FormatPlugin,
     unavailable: &HashSet<&str>,
-    cache_names: Option<&mut CacheNames>,
 ) -> Result<Outcome, Box<dyn Error>> {
     let mut file = File::open(root.join(path))?;
     let metadata = file.metadata()?;
@@ -268,7 +258,7 @@ fn sync_file(
     {
         return Ok(Outcome::Unchanged);
     }
-    // When pruning is deferred, a case-only rename can still resolve to the old structure.
+    // The cache directory can have its new spelling while the last good outline still has its old path.
     let previous = previous
         .filter(|(old, _)| built_by(&old.stamp, plugin) && old.outline.matches_source_path(path));
     if previous
@@ -295,9 +285,6 @@ fn sync_file(
         ),
     };
     let yaml = Structure::new(stamp, outline).to_yaml()?;
-    if let Some(names) = cache_names {
-        names.correct_path(ardent_dir.join(FILES_DIR), path)?;
-    }
     layout::write_atomic(ardent_dir, &structure_path, yaml.as_bytes())?;
     Ok(outcome)
 }
@@ -323,11 +310,24 @@ fn built_by(stamp: &Stamp, plugin: &FormatPlugin) -> bool {
         && stamp.format_hash == plugin.format_hash
 }
 
-/// Deletes the structure files in `files_dir` of source files that are not tracked, and returns how many.
-fn prune(files_dir: &Path, files: &[TrackedFile], errors: &mut Vec<String>) -> usize {
-    let tracked: HashSet<&str> = files.iter().map(|file| file.path.as_str()).collect();
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StaleStructures {
+    Remove,
+    Keep,
+}
+
+/// Aligns directory spelling with tracked paths before pruning or scanning. A failed scan keeps its previous structure.
+fn reconcile_cache(
+    files_dir: &Path,
+    files: &[TrackedFile],
+    stale: StaleStructures,
+    errors: &mut Vec<String>,
+) -> usize {
+    let tracked = files.iter().map(|file| file.path.as_str()).collect();
     let mut pruner = Pruner {
-        tracked: &tracked,
+        tracked,
+        names: CacheNames::from_files(files),
+        stale,
         removed: 0,
         errors,
     };
@@ -335,31 +335,38 @@ fn prune(files_dir: &Path, files: &[TrackedFile], errors: &mut Vec<String>) -> u
     pruner.removed
 }
 
-/// Deletes the structure files of source files that are not tracked, and the directories under `cache/files/` that
-/// become empty.
 struct Pruner<'a> {
-    tracked: &'a HashSet<&'a str>,
+    tracked: HashSet<&'a str>,
+    names: CacheNames<'a>,
+    stale: StaleStructures,
     removed: usize,
     errors: &'a mut Vec<String>,
 }
 
 impl Pruner<'_> {
-    /// Prunes `dir`, the directory of `source_path` under `cache/files/`, or `cache/files/` itself when `source_path`
-    /// is empty.
     fn prune(&mut self, dir: &Path, source_path: &str) {
-        let entries = match fs::read_dir(dir) {
+        if self.stale == StaleStructures::Keep && !self.names.has_children(source_path) {
+            return;
+        }
+        let entries = fs::read_dir(dir).and_then(|dir| {
+            dir.map(|entry| {
+                let entry = entry?;
+                Ok((entry.file_type()?, entry.path()))
+            })
+            .collect::<io::Result<Vec<_>>>()
+        });
+        let mut entries = match entries {
             Ok(entries) => entries,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return,
             Err(err) => return self.errors.push(format!("{}: {err}", dir.display())),
         };
-        for entry in entries {
-            match entry.and_then(|entry| Ok((entry.file_type()?, entry))) {
-                Ok((file_type, entry)) => self.prune_entry(file_type, &entry.path(), source_path),
-                Err(err) => self.errors.push(format!("{}: {err}", dir.display())),
-            }
+        if let Err(err) = self.names.align(dir, source_path, &mut entries) {
+            return self.errors.push(format!("{}: {err}", dir.display()));
         }
-        if !source_path.is_empty() {
-            // Fails, as intended, when the directory still holds files.
+        for (file_type, path) in entries {
+            self.prune_entry(file_type, &path, source_path);
+        }
+        if self.stale == StaleStructures::Remove && !source_path.is_empty() {
             let _ = fs::remove_dir(dir);
         }
     }
@@ -374,7 +381,10 @@ impl Pruner<'_> {
                 parent => format!("{parent}/{name}"),
             };
             self.prune(path, &child);
-        } else if name == STRUCTURE_FILE && !self.tracked.contains(source_path) {
+        } else if self.stale == StaleStructures::Remove
+            && name == STRUCTURE_FILE
+            && !self.tracked.contains(source_path)
+        {
             match fs::remove_file(path) {
                 Ok(()) => self.removed += 1,
                 Err(err) => self.errors.push(format!("{}: {err}", path.display())),

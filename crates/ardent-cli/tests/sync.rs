@@ -791,6 +791,43 @@ fn case_only_rename_updates_node_paths_when_another_plugin_is_broken() -> TestRe
 }
 
 #[test]
+fn failed_scan_after_case_only_rename_preserves_last_good_structure_through_recovery() -> TestResult
+{
+    let project = Project::new()?;
+    let before = "Old/lib.rs";
+    let after = "OLD/Lib.rs";
+    project.write(before, "fn example() {}")?;
+    project.sync()?.assert_success();
+    let original = project.structure(before)?;
+    let manifest = project.path(".ardent/plugins/markdown/plugin.yaml");
+    let good_manifest = fs::read(&manifest)?;
+
+    fs::rename(project.path("Old"), project.path("OLD"))?;
+    fs::rename(project.path("OLD/lib.rs"), project.path(after))?;
+    let aliases = project.path(before).exists();
+    project.write(after, "fn example(")?;
+    fs::write(&manifest, "schema: 0")?;
+    let partial = project.sync()?;
+    assert_eq!(partial.code(), Some(1));
+    assert!(partial.stderr().contains("syntax error"));
+    assert_eq!(project.structure(before)?, original);
+
+    fs::write(manifest, good_manifest)?;
+    let repaired = project.sync()?;
+    assert_eq!(repaired.code(), Some(1));
+    assert!(repaired.stderr().contains("syntax error"));
+    if aliases {
+        assert_eq!(project.structure(after)?, original);
+        let cache = snapshot(&project.path(".ardent/cache/files"))?;
+        assert!(cache.contains_key(Path::new("OLD/Lib.rs/structure.yaml")));
+    } else {
+        assert!(!project.structure_path(before).exists());
+        assert!(!project.structure_path(after).exists());
+    }
+    Ok(())
+}
+
+#[test]
 fn invalid_pattern_in_the_configuration_fails_and_writes_nothing() -> TestResult {
     let project = Project::new()?;
     let config = fs::read_to_string(project.path(".ardent/config.yaml"))?;
