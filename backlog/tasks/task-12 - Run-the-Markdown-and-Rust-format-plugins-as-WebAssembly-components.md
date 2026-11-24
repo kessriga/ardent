@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-24 11:35'
-updated_date: '2026-11-24 13:39'
+updated_date: '2026-11-24 16:07'
 labels: []
 milestone: m-3
 dependencies:
@@ -61,6 +61,9 @@ if the code survives the move.
    invalidation, missing packages, syntax errors and trap recovery.
 4. Document manual installation and the Rust parser limit, verify the CLI dependency tree and project gate, then archive
    the change with the implementation.
+
+5. Fix scan initialization, rename handling, package identity, SIMD determinism, package input limits, diagnostic
+   limits, and Rust documentation packaging. Verify regressions and update PR 13.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -70,13 +73,17 @@ The CLI uses Wasmtime 49.0.7 with the repository Rust 1.96 toolchain. Both relea
 snapshots. CLI tests cover missing and broken packages, overlapping formats during failed verification, same-version
 rebuilds, isolated traps, and malformed nodes. A clean project scanned 117 repository files, then zero on the next sync.
 The Rust 2024 grammar limit reports line 1, column 25 for the documented declaration and keeps the prior structure.
+
+Fixed the seven PR review findings. Query preparation has its own bounded call. The host uses deterministic SIMD, bounds
+package reads and guest diagnostics, and validates package directory spelling. Sync preserves current node paths and the
+last good structure through a case-only rename during incomplete discovery. Staging includes the Rust parser notes.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Ardent runs project-installed Markdown and Rust WebAssembly components through Wasmtime. It verifies packages before
-discovery, validates returned nodes, skips runtime startup for verified current files, and preserves the last good
-structure on a failed scan. Both original snapshot suites passed unchanged. Verification passed for 104 host tests, 62
-guest tests including a doctest, host and guest formatting and Clippy, and all seven main specs.
+Ardent runs project-installed Markdown and Rust components through Wasmtime. The original snapshots pass. A 640,035-byte
+Rust file produced identical structures on cold and warm scans. On case-insensitive APFS, an unrelated plugin error and
+a later syntax error preserved the renamed file’s last good structure. Clean staging reproduced both packages, including
+the Rust README. Host and guest tests, formatting, Clippy, the build, and strict OpenSpec validation passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
