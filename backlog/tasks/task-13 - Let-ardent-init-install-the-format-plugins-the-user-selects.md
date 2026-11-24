@@ -4,7 +4,7 @@ title: Let ardent init install the format plugins the user selects
 status: To Do
 assignee: []
 created_date: '2026-11-24 11:35'
-updated_date: '2026-11-24 13:03'
+updated_date: '2026-11-24 13:08'
 labels: []
 milestone: m-3
 dependencies:
@@ -14,6 +14,9 @@ references:
   - >-
     backlog/decisions/decision-8 -
     Run-format-plugins-as-WebAssembly-components.md
+  - >-
+    backlog/tasks/task-14 -
+    Support-XDG-plugins-and-settings-with-user-or-project-compilation-caches.md
 priority: medium
 type: feature
 ordinal: 13000
