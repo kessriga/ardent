@@ -1,19 +1,15 @@
 # Building the format plugins
 
-Run the commands below from the repository root. Install the Rust target `wasm32-wasip2` and WASI SDK 34. Set
-`WASI_SDK_PATH` to the unpacked SDK. The C compiler in the SDK builds tree-sitter and the two grammars.
+Run the commands below from the repository root. The release components use Rust 1.96.0 and WASI SDK 34. Set
+`WASI_SDK_PATH` to the unpacked SDK. Its C compiler builds tree-sitter and the two grammars.
 
 ```sh
-rustup target add wasm32-wasip2
-export CC_wasm32_wasip2="$WASI_SDK_PATH/bin/clang"
-export AR_wasm32_wasip2="$WASI_SDK_PATH/bin/llvm-ar"
-cargo_registry=${CARGO_HOME:-$HOME/.cargo}
-export RUSTFLAGS="--remap-path-prefix=$PWD=/ardent --remap-path-prefix=$cargo_registry=/cargo"
-export RUSTFLAGS="$RUSTFLAGS --remap-path-prefix=$(rustc --print sysroot)=/rust"
-export CFLAGS_wasm32_wasip2="-ffile-prefix-map=$cargo_registry=/cargo -ffile-prefix-map=$WASI_SDK_PATH=/wasi-sdk"
-cargo build --locked --release --target wasm32-wasip2 --manifest-path guests/Cargo.toml --target-dir target/guests \
-    -p ardent-markdown-component -p ardent-rust-component
+rustup toolchain install 1.96.0 --target wasm32-wasip2
+python3 guests/build.py
 ```
+
+For a byte-for-byte rebuild, use the same checkout, registry and toolchain paths. Cargo includes paths in crate hashes,
+so builds in different directories can produce different component bytes.
 
 Use a Python environment with `wasmtime==51.0.0` to package the components. This command reads the metadata from each
 component's `describe` export and writes the installable packages under `plugins/`. The Rust package includes the
@@ -23,11 +19,9 @@ parser-limit documentation from `guests/rust/README.md`.
 python guests/package.py target/guests/wasm32-wasip2/release plugins
 ```
 
-To rebuild the component that exercises failure paths in the CLI integration tests, use the same environment.
+The build also produces the scanner for the CLI integration tests. Copy it to the fixture directory after rebuilding.
 
 ```sh
-cargo build --locked --release --target wasm32-wasip2 --manifest-path guests/Cargo.toml --target-dir target/guests \
-    -p test-scanner
 cp target/guests/wasm32-wasip2/release/test_scanner.wasm crates/ardent-cli/tests/components/test-scanner.wasm
 ```
 
@@ -40,8 +34,8 @@ cargo test --locked --workspace --manifest-path guests/Cargo.toml --target-dir t
 ## Selecting the scanner world
 
 The WIT package defines two worlds. A scanner that generates bindings with `wit-bindgen` must select `format-plugin`. If
-your crate previously called `wit_bindgen::generate!()`, keep the WIT file in its `wit/` directory and change the call
-to:
+your crate previously called `wit_bindgen::generate!()`, keep the WIT file in its `wit/` directory and select the
+scanner world explicitly.
 
 ```rust
 wit_bindgen::generate!({ world: "format-plugin" });
@@ -57,10 +51,9 @@ execution. Clocks report the epoch or zero, and random values are repeatable. Ea
 random bytes. The scanner sees empty arguments and environment variables. Calls that require files, sockets or blocking
 I/O trap.
 
-The host accepts manifests up to 1 MiB and components up to 64 MiB. A scan accepts at most 64 MiB of source.
-If a source exceeds that limit, sync keeps its last good structure and continues with the next file. The host reports
-the cause of each trap, escapes control characters in scanner diagnostics and limits the diagnostic text to 1,024 UTF-8
-bytes.
+The host accepts manifests up to 1 MiB and components up to 64 MiB. A scan accepts at most 64 MiB of source. If a source
+exceeds that limit, sync keeps its last good structure and continues with the next file. The host reports the cause of
+each trap, escapes control characters in scanner diagnostics and limits the diagnostic text to 1,024 UTF-8 bytes.
 
 The host gives instantiation and each call 5 billion units of Wasmtime fuel. The packaged parsers export the optional
 `ardent:format/query-preparation@0.1.0` interface. The host calls its `prepare` function once before the first scan in
