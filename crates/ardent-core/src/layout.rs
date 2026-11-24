@@ -32,8 +32,12 @@ pub fn structure_path(source_path: &str) -> String {
 /// `relative_path` often derives from a source path in a cloned repository, so it must consist of normal names only:
 /// an absolute path or a `..` fails with `InvalidInput`. A symlink on the way to the target fails as `create_dir`
 /// describes. A missing `ardent_dir` fails with `NotFound`, and the call then creates nothing.
-pub fn write_atomic(ardent_dir: &Path, relative_path: &str, contents: &[u8]) -> io::Result<()> {
-    let relative_path = checked_relative_path(relative_path)?;
+pub fn write_atomic(
+    ardent_dir: &Path,
+    relative_path: impl AsRef<Path>,
+    contents: &[u8],
+) -> io::Result<()> {
+    let relative_path = checked_relative_path(relative_path.as_ref())?;
     let target = ardent_dir.join(relative_path);
     if !fs::metadata(ardent_dir)?.is_dir() {
         return Err(io::Error::new(
@@ -68,7 +72,7 @@ pub fn remove_empty_cache(ardent_dir: &Path) -> io::Result<()> {
 /// into `.ardent/`, and Ardent would then write and delete files outside the project. Each error names the directory
 /// that failed.
 pub fn create_dir(ardent_dir: &Path, relative_path: &str) -> io::Result<PathBuf> {
-    create_real_dirs(ardent_dir, checked_relative_path(relative_path)?)
+    create_real_dirs(ardent_dir, checked_relative_path(Path::new(relative_path))?)
 }
 
 fn create_real_dirs(ardent_dir: &Path, relative_path: &Path) -> io::Result<PathBuf> {
@@ -102,15 +106,14 @@ fn tmp_dir(ardent_dir: &Path) -> PathBuf {
     ardent_dir.join(CACHE_DIR).join(TMP_DIR)
 }
 
-fn checked_relative_path(relative_path: &str) -> io::Result<&Path> {
-    let path = Path::new(relative_path);
+fn checked_relative_path(path: &Path) -> io::Result<&Path> {
     let mut components = path.components().peekable();
     if components.peek().is_some() && components.all(|c| matches!(c, Component::Normal(_))) {
         Ok(path)
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("{relative_path:?} is not a relative path inside .ardent/"),
+            format!("{path:?} is not a relative path inside .ardent/"),
         ))
     }
 }

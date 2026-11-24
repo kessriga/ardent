@@ -8,17 +8,17 @@ use console::{Key, Term};
 
 pub(super) struct ReleasePlugin {
     pub(super) name: &'static str,
-    files: &'static [&'static str],
+    required_files: &'static [&'static str],
 }
 
 const RELEASE: &[ReleasePlugin] = &[
     ReleasePlugin {
         name: "markdown",
-        files: &["plugin.yaml", "format.wasm"],
+        required_files: &["plugin.yaml", "format.wasm"],
     },
     ReleasePlugin {
         name: "rust",
-        files: &["plugin.yaml", "format.wasm", "README.md"],
+        required_files: &["plugin.yaml", "format.wasm", "README.md"],
     },
 ];
 
@@ -123,7 +123,9 @@ fn show_choices(term: &mut Term, checked: &[bool], focus: usize) -> io::Result<(
 pub(super) fn release_dir() -> Result<PathBuf, (PathBuf, io::Error)> {
     let executable =
         env::current_exe().map_err(|err| (PathBuf::from("current executable"), err))?;
-    let dir = executable.with_file_name("plugins");
+    let dir = fs::canonicalize(&executable)
+        .map_err(|err| (executable, err))?
+        .with_file_name("plugins");
     #[cfg(debug_assertions)]
     if !dir.try_exists().map_err(|err| (dir.clone(), err))? {
         return Ok(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins"));
@@ -137,13 +139,47 @@ impl ReleasePlugin {
         source: &Path,
         ardent_dir: &Path,
     ) -> Result<(), (PathBuf, io::Error)> {
-        for file in self.files {
-            let path = source.join(self.name).join(file);
+        let package = source.join(self.name);
+        for file in self.required_files {
+            let path = package.join(file);
+            if !fs::symlink_metadata(&path)
+                .map_err(|err| (path.clone(), err))?
+                .is_file()
+            {
+                return Err(invalid_entry(&path, "expected a regular package file"));
+            }
+        }
+        copy_package_files(&package, &Path::new("plugins").join(self.name), ardent_dir)
+    }
+}
+
+fn copy_package_files(
+    source: &Path,
+    target: &Path,
+    ardent_dir: &Path,
+) -> Result<(), (PathBuf, io::Error)> {
+    let entries = fs::read_dir(source).map_err(|err| (source.to_path_buf(), err))?;
+    for entry in entries {
+        let entry = entry.map_err(|err| (source.to_path_buf(), err))?;
+        let path = entry.path();
+        let target = target.join(entry.file_name());
+        let kind = entry.file_type().map_err(|err| (path.clone(), err))?;
+        if kind.is_dir() {
+            copy_package_files(&path, &target, ardent_dir)?;
+        } else if kind.is_file() {
             let bytes = fs::read(&path).map_err(|err| (path, err))?;
-            let target = format!("plugins/{}/{file}", self.name);
             layout::write_atomic(ardent_dir, &target, &bytes)
                 .map_err(|err| (ardent_dir.join(target), err))?;
+        } else {
+            return Err(invalid_entry(&path, "expected a regular file or directory"));
         }
-        Ok(())
     }
+    Ok(())
+}
+
+fn invalid_entry(path: &Path, message: &'static str) -> (PathBuf, io::Error) {
+    (
+        path.to_path_buf(),
+        io::Error::new(io::ErrorKind::InvalidData, message),
+    )
 }

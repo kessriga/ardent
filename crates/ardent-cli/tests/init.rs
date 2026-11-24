@@ -1,6 +1,8 @@
 //! Runs `ardent init` in temporary directories and compares the directory trees before and after.
 
 mod common;
+#[path = "init/package.rs"]
+mod package;
 
 use std::fs;
 use std::io;

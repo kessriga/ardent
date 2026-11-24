@@ -222,7 +222,7 @@ impl FormatPlugin {
             let runtime = verify_component(&bytes, &manifest, &component_path, &path)?;
             layout::write_atomic(
                 ardent_dir,
-                &format!("{VERIFIED_DIR}/{filename}"),
+                format!("{VERIFIED_DIR}/{filename}"),
                 record.as_bytes(),
             )
             .map_err(|source| io_error(record_path, source))?;
