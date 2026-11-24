@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 use std::fs::{self, File};
-use std::io::{self, Read};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -13,11 +13,16 @@ use ardent_core::config::{self, Config, ConfigError};
 use ardent_core::layout::{self, ARDENT_DIR, CACHE_DIR, FILES_DIR, LOCK_FILE, STRUCTURE_FILE};
 use ardent_core::outline::Outline;
 use ardent_core::structure::{self, Stamp, Structure};
-use ardent_format::engine::{FormatPlugin, PluginError};
-use ardent_format::{markdown, rust};
+use ardent_format::patterns::{self, PatternError};
+use ardent_format::{FormatPlugin, InstalledPackages, MAX_SOURCE_BYTES};
+use ignore::gitignore::Gitignore;
+
+mod cache_names;
+mod source;
+use cache_names::CacheNames;
 
 use crate::project_root;
-use crate::tracked::{self, FormatPatterns, PatternError, Patterns, TrackedFile};
+use crate::tracked::{self, Patterns, TrackedFile};
 
 /// Why a sync did not run. Nothing in `.ardent/` changed, except that the lock file may exist.
 pub enum SyncError {
@@ -36,10 +41,6 @@ pub enum SyncError {
         path: PathBuf,
         source: PatternError,
     },
-    Plugin {
-        name: String,
-        source: PluginError,
-    },
 }
 
 impl fmt::Display for SyncError {
@@ -54,7 +55,6 @@ impl fmt::Display for SyncError {
             Self::CreateDir(source) => write!(f, "{source}"),
             Self::Config { path, source } => write!(f, "{}: {source}", path.display()),
             Self::Pattern { path, source } => write!(f, "{}: {source}", path.display()),
-            Self::Plugin { name, source } => write!(f, "built-in format plugin {name}: {source}"),
         }
     }
 }
@@ -81,17 +81,29 @@ pub fn run(working_dir: &Path) -> Result<Report, SyncError> {
     let root = find_root(working_dir)?;
     let ardent_dir = root.join(ARDENT_DIR);
     let config = read_config(&ardent_dir)?;
-    let plugins = builtin_plugins()?;
-    let mut report = Report::default();
-    let formats = enabled_formats(&config, &plugins, &mut report.warnings);
-    let patterns =
-        Patterns::new(&root, &formats.patterns(), &config.exclude).map_err(|source| {
-            SyncError::Pattern {
-                path: ardent_dir.join(config::FILE_NAME),
-                source,
-            }
-        })?;
+    let config_error = |source| SyncError::Pattern {
+        path: ardent_dir.join(config::FILE_NAME),
+        source,
+    };
+    let mut patterns = Patterns::new(&root, &config.exclude).map_err(config_error)?;
+    let overrides = configured_patterns(&root, &config).map_err(config_error)?;
     let _lock = lock(&ardent_dir)?;
+    let mut report = Report::default();
+    let packages = match InstalledPackages::discover(&ardent_dir) {
+        Ok(packages) => packages,
+        Err(err) => {
+            report.errors.push(err.to_string());
+            return Ok(report);
+        }
+    };
+    report.errors.extend(
+        packages
+            .check_other_manifests(|name| config.formats.contains_key(name))
+            .into_iter()
+            .map(|err| err.to_string()),
+    );
+    let (mut plugins, unavailable) =
+        load_plugins(&root, &packages, overrides, &mut patterns, &mut report);
     let files_dir = create_dir(&ardent_dir, FILES_DIR)?;
     let walk = tracked::walk(&root, &patterns);
     report
@@ -99,18 +111,20 @@ pub fn run(working_dir: &Path) -> Result<Report, SyncError> {
         .extend(walk.warnings.iter().map(ToString::to_string));
     report.errors.extend(walk.errors.iter().cloned());
     report.tracked = walk.files.len();
-    // An incomplete walk lists too few files, so it must not delete the structure of the files it missed. Pruning comes
-    // before the scans: where file names ignore letter case, `Readme.md` would otherwise reuse the directory of the
-    // old `README.md`, which pruning then deletes.
-    if walk.errors.is_empty() {
-        report.removed = prune(&files_dir, &walk.files, &mut report.errors);
-    }
+    let stale = if unavailable.is_empty() && walk.errors.is_empty() {
+        StaleStructures::Remove
+    } else {
+        StaleStructures::Keep
+    };
+    report.removed = reconcile_cache(&files_dir, &walk.files, stale, &mut report.errors);
     for file in &walk.files {
-        let plugin = formats.plugins[file.format];
-        match sync_file(&root, &ardent_dir, &file.path, plugin) {
+        let plugin = &mut plugins[file.format];
+        match sync_file(&root, &ardent_dir, &file.path, plugin, &unavailable) {
             Ok(Outcome::Scanned) => report.scanned += 1,
             Ok(Outcome::Unchanged | Outcome::Restamped) => {}
-            Err(err) => report.errors.push(format!("{}: {err}", file.path)),
+            Err(err) => report
+                .errors
+                .push(format!("{}: {err} (format {})", file.path, plugin.name)),
         }
     }
     Ok(report)
@@ -133,65 +147,69 @@ fn read_config(ardent_dir: &Path) -> Result<Config, SyncError> {
     Config::from_yaml(&text).map_err(|source| SyncError::Config { path, source })
 }
 
-fn builtin_plugins() -> Result<Vec<FormatPlugin>, SyncError> {
-    Ok(vec![
-        builtin(markdown::NAME, markdown::plugin())?,
-        builtin(rust::NAME, rust::plugin())?,
-    ])
+struct ConfiguredFormat<'a> {
+    name: &'a str,
+    files: Option<Gitignore>,
 }
 
-fn builtin(
-    name: &str,
-    plugin: Result<FormatPlugin, PluginError>,
-) -> Result<FormatPlugin, SyncError> {
-    plugin.map_err(|source| SyncError::Plugin {
-        name: name.to_string(),
-        source,
-    })
-}
-
-/// The enabled formats that have a plugin, with their file patterns. `TrackedFile::format` indexes both lists.
-struct EnabledFormats<'a> {
-    plugins: Vec<&'a FormatPlugin>,
-    files: Vec<&'a [String]>,
-}
-
-impl EnabledFormats<'_> {
-    fn patterns(&self) -> Vec<FormatPatterns<'_>> {
-        self.plugins
-            .iter()
-            .zip(&self.files)
-            .map(|(plugin, files)| FormatPatterns {
-                name: &plugin.name,
-                files,
-            })
-            .collect()
-    }
-}
-
-/// Picks the plugin of each format that `config.yaml` enables, and warns about each format without a plugin.
-fn enabled_formats<'a>(
+/// Validate project overrides before creating the lock or verification records.
+fn configured_patterns<'a>(
+    root: &Path,
     config: &'a Config,
-    plugins: &'a [FormatPlugin],
-    warnings: &mut Vec<String>,
-) -> EnabledFormats<'a> {
-    let mut enabled = EnabledFormats {
-        plugins: Vec::new(),
-        files: Vec::new(),
-    };
+) -> Result<Vec<ConfiguredFormat<'a>>, PatternError> {
+    let mut overrides = Vec::new();
     for (name, settings) in &config.formats {
-        let Some(plugin) = plugins.iter().find(|plugin| &plugin.name == name) else {
-            warnings.push(format!(
-                "the format `{name}` has no plugin; Ardent tracks no file for it"
-            ));
-            continue;
-        };
-        enabled.plugins.push(plugin);
-        enabled
+        if let Some(prefixes) = &settings.prefixes {
+            for files in prefixes.values() {
+                patterns::compile(root, files)?;
+            }
+        }
+        let files = settings
             .files
-            .push(settings.files.as_deref().unwrap_or(&plugin.default_files));
+            .as_ref()
+            .map(|files| patterns::compile(root, files))
+            .transpose()?;
+        overrides.push(ConfiguredFormat { name, files });
     }
-    enabled
+    Ok(overrides)
+}
+
+fn load_plugins<'a>(
+    root: &Path,
+    packages: &InstalledPackages<'_>,
+    overrides: Vec<ConfiguredFormat<'a>>,
+    patterns: &mut Patterns<'a>,
+    report: &mut Report,
+) -> (Vec<FormatPlugin>, HashSet<&'a str>) {
+    let mut plugins = Vec::new();
+    let mut unavailable = HashSet::new();
+    for ConfiguredFormat { name, files } in overrides {
+        let plugin = match packages.load_format(name) {
+            Ok(Some(plugin)) => plugin,
+            Ok(None) => {
+                report.warnings.push(format!(
+                    "the format `{name}` has no plugin; Ardent tracks no file for it"
+                ));
+                continue;
+            }
+            Err(err) => {
+                unavailable.insert(name);
+                report.errors.push(format!("format plugin {name}: {err}"));
+                continue;
+            }
+        };
+        match patterns::compile_defaults(root, &plugin.default_files, &plugin.default_prefixes) {
+            Ok(defaults) => {
+                patterns.add(name, files.unwrap_or(defaults));
+                plugins.push(plugin);
+            }
+            Err(err) => {
+                unavailable.insert(name);
+                report.errors.push(format!("format plugin {name}: {err}"));
+            }
+        }
+    }
+    (plugins, unavailable)
 }
 
 /// Takes the lock of the spec `ardent-layout`, which the operating system releases when the process ends.
@@ -220,24 +238,33 @@ fn sync_file(
     root: &Path,
     ardent_dir: &Path,
     path: &str,
-    plugin: &FormatPlugin,
+    plugin: &mut FormatPlugin,
+    unavailable: &HashSet<&str>,
 ) -> Result<Outcome, Box<dyn Error>> {
-    let mut file = File::open(root.join(path))?;
+    let file = File::open(root.join(path))?;
     let metadata = file.metadata()?;
     let (size, mtime) = (metadata.len(), metadata.modified()?);
     let structure_path = layout::structure_path(path);
-    let previous = read_structure(&ardent_dir.join(&structure_path))
-        .filter(|(old, _)| built_by(&old.stamp, plugin));
+    let previous = read_structure(&ardent_dir.join(&structure_path));
+    // Incomplete discovery can hide a pattern conflict with the previous owner.
+    if previous
+        .as_ref()
+        .is_some_and(|(old, _)| unavailable.contains(old.stamp.format.as_str()))
+    {
+        return Ok(Outcome::Unchanged);
+    }
+    // The cache directory can have its new spelling while the last good outline still has its old path.
+    let previous = previous
+        .filter(|(old, _)| built_by(&old.stamp, plugin) && old.outline.matches_source_path(path));
     if previous
         .as_ref()
         .is_some_and(|(old, written)| is_unchanged(&old.stamp, size, mtime, *written))
     {
         return Ok(Outcome::Unchanged);
     }
-    let mut source = Vec::new();
-    file.read_to_end(&mut source)?;
+    let source = source::read(file, size, MAX_SOURCE_BYTES)?;
     let stamp = Stamp {
-        size,
+        size: source.len() as u64,
         mtime,
         hash: structure::content_hash(&source),
         format: plugin.name.clone(),
@@ -247,7 +274,7 @@ fn sync_file(
     let (outline, outcome) = match previous {
         Some((old, _)) if old.stamp.hash == stamp.hash => (old.outline, Outcome::Restamped),
         _ => (
-            Outline::build(path, &source, &plugin.scan(&source)?),
+            Outline::build(path, &source, &plugin.scan(path, &source)?),
             Outcome::Scanned,
         ),
     };
@@ -277,11 +304,24 @@ fn built_by(stamp: &Stamp, plugin: &FormatPlugin) -> bool {
         && stamp.format_hash == plugin.format_hash
 }
 
-/// Deletes the structure files in `files_dir` of source files that are not tracked, and returns how many.
-fn prune(files_dir: &Path, files: &[TrackedFile], errors: &mut Vec<String>) -> usize {
-    let tracked: HashSet<&str> = files.iter().map(|file| file.path.as_str()).collect();
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StaleStructures {
+    Remove,
+    Keep,
+}
+
+/// Aligns directory spelling with tracked paths before pruning or scanning. A failed scan keeps its previous structure.
+fn reconcile_cache(
+    files_dir: &Path,
+    files: &[TrackedFile],
+    stale: StaleStructures,
+    errors: &mut Vec<String>,
+) -> usize {
+    let tracked = files.iter().map(|file| file.path.as_str()).collect();
     let mut pruner = Pruner {
-        tracked: &tracked,
+        tracked,
+        names: CacheNames::from_files(files),
+        stale,
         removed: 0,
         errors,
     };
@@ -289,31 +329,38 @@ fn prune(files_dir: &Path, files: &[TrackedFile], errors: &mut Vec<String>) -> u
     pruner.removed
 }
 
-/// Deletes the structure files of source files that are not tracked, and the directories under `cache/files/` that
-/// become empty.
 struct Pruner<'a> {
-    tracked: &'a HashSet<&'a str>,
+    tracked: HashSet<&'a str>,
+    names: CacheNames<'a>,
+    stale: StaleStructures,
     removed: usize,
     errors: &'a mut Vec<String>,
 }
 
 impl Pruner<'_> {
-    /// Prunes `dir`, the directory of `source_path` under `cache/files/`, or `cache/files/` itself when `source_path`
-    /// is empty.
     fn prune(&mut self, dir: &Path, source_path: &str) {
-        let entries = match fs::read_dir(dir) {
+        if self.stale == StaleStructures::Keep && !self.names.has_children(source_path) {
+            return;
+        }
+        let entries = fs::read_dir(dir).and_then(|dir| {
+            dir.map(|entry| {
+                let entry = entry?;
+                Ok((entry.file_type()?, entry.path()))
+            })
+            .collect::<io::Result<Vec<_>>>()
+        });
+        let mut entries = match entries {
             Ok(entries) => entries,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return,
             Err(err) => return self.errors.push(format!("{}: {err}", dir.display())),
         };
-        for entry in entries {
-            match entry.and_then(|entry| Ok((entry.file_type()?, entry))) {
-                Ok((file_type, entry)) => self.prune_entry(file_type, &entry.path(), source_path),
-                Err(err) => self.errors.push(format!("{}: {err}", dir.display())),
-            }
+        if let Err(err) = self.names.align(dir, source_path, &mut entries) {
+            return self.errors.push(format!("{}: {err}", dir.display()));
         }
-        if !source_path.is_empty() {
-            // Fails, as intended, when the directory still holds files.
+        for (file_type, path) in entries {
+            self.prune_entry(file_type, &path, source_path);
+        }
+        if self.stale == StaleStructures::Remove && !source_path.is_empty() {
             let _ = fs::remove_dir(dir);
         }
     }
@@ -328,7 +375,10 @@ impl Pruner<'_> {
                 parent => format!("{parent}/{name}"),
             };
             self.prune(path, &child);
-        } else if name == STRUCTURE_FILE && !self.tracked.contains(source_path) {
+        } else if self.stale == StaleStructures::Remove
+            && name == STRUCTURE_FILE
+            && !self.tracked.contains(source_path)
+        {
             match fs::remove_file(path) {
                 Ok(()) => self.removed += 1,
                 Err(err) => self.errors.push(format!("{}: {err}", path.display())),

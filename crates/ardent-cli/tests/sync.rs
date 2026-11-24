@@ -81,6 +81,21 @@ struct Project {
 
 impl Project {
     fn new() -> io::Result<Self> {
+        let project = Self::without_plugins()?;
+        for name in ["markdown", "rust"] {
+            let package = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../plugins")
+                .join(name);
+            let installed = project.path(".ardent/plugins").join(name);
+            fs::create_dir_all(&installed)?;
+            for file in ["plugin.yaml", "format.wasm"] {
+                fs::copy(package.join(file), installed.join(file))?;
+            }
+        }
+        Ok(project)
+    }
+
+    fn without_plugins() -> io::Result<Self> {
         let project = Self { dir: temp_dir()? };
         let output = project.ardent_in(project.root(), "init")?;
         if !output.status.success() {
@@ -345,6 +360,213 @@ fn unreadable_source_file_does_not_stop_the_others() -> TestResult {
 }
 
 #[test]
+fn new_project_warns_until_packages_are_installed() -> TestResult {
+    let project = Project::without_plugins()?;
+    let run = project.sync()?;
+    run.assert_success();
+    for name in ["markdown", "rust"] {
+        assert!(
+            run.stderr()
+                .contains(&format!("the format `{name}` has no plugin"))
+        );
+    }
+    assert!(run.stdout().contains("0 tracked files: 0 scanned"));
+    Ok(())
+}
+
+#[test]
+fn failed_verification_preserves_structures_and_continues_sync() -> TestResult {
+    let project = Project::new()?;
+    project.write("lib.rs", "fn hello() {}")?;
+    project.sync()?.assert_success();
+    let rust = project.structure("lib.rs")?;
+    let stale = project.structure("README.md")?;
+    fs::remove_file(project.path("README.md"))?;
+    project.write("docs/spec.md", "# Revised\n")?;
+    project.write(
+        ".ardent/config.yaml",
+        "schema: 1\nformats:\n  rust: {}\n  markdown: {files: ['*.md', '*.rs']}\n",
+    )?;
+    let manifest = project.path(".ardent/plugins/rust/plugin.yaml");
+    fs::write(
+        &manifest,
+        fs::read_to_string(&manifest)?.replace("*.rs", "*.txt"),
+    )?;
+
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1), "{}", run.stderr());
+    assert!(run.stderr().contains("rust"));
+    assert_eq!(project.structure("lib.rs")?, rust);
+    assert_eq!(project.structure("README.md")?, stale);
+    assert!(
+        project
+            .structure("docs/spec.md")?
+            .contains("docs/spec.md#Revised")
+    );
+    Ok(())
+}
+
+#[test]
+fn invalid_disabled_manifest_still_prunes_deleted_files() -> TestResult {
+    let project = Project::new()?;
+    project.sync()?.assert_success();
+    fs::remove_file(project.path("README.md"))?;
+    project.write(".ardent/plugins/unused/plugin.yaml", "schema: 2\n")?;
+
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1));
+    assert!(run.stderr().contains("unused"), "{}", run.stderr());
+    assert!(run.stdout().contains("1 removed"), "{}", run.stdout());
+    assert!(!project.structure_path("README.md").exists());
+    assert!(project.structure_path("docs/spec.md").is_file());
+    Ok(())
+}
+
+#[test]
+fn mis_cased_package_preserves_its_structure_when_another_format_matches() -> TestResult {
+    let project = Project::new()?;
+    project.write("lib.rs", "fn hello() {}\n")?;
+    project.sync()?.assert_success();
+    let original = project.structure("lib.rs")?;
+    fs::rename(
+        project.path(".ardent/plugins/rust"),
+        project.path(".ardent/plugins/Rust"),
+    )?;
+    project.write(
+        ".ardent/config.yaml",
+        "schema: 1\nformats:\n  rust: {}\n  markdown: {files: ['*.md', '*.rs']}\n",
+    )?;
+
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1));
+    assert!(
+        run.stderr().contains("expected spelling"),
+        "{}",
+        run.stderr()
+    );
+    assert_eq!(project.structure("lib.rs")?, original);
+    Ok(())
+}
+
+#[test]
+fn same_version_component_replacement_invalidates_stamps() -> TestResult {
+    use ardent_core::structure;
+    use std::io::Write;
+
+    let project = Project::new()?;
+    project.sync()?.assert_success();
+    let package = project.path(".ardent/plugins/markdown/format.wasm");
+    // An empty custom section changes the component bytes while retaining its exports.
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&package)?
+        .write_all(&[0, 1, 0])?;
+    let hash = structure::content_hash(&fs::read(package)?);
+    let run = project.sync()?;
+    run.assert_success();
+    assert!(run.stdout().contains("2 scanned"));
+    assert!(
+        project
+            .structure("README.md")?
+            .contains(&format!("format_hash: {hash}"))
+    );
+
+    project.edit_structure(
+        "README.md",
+        &hash,
+        "f44946daaae00ba28ceea81715b037f6b691458a901d5ac95a012af336cc5831",
+    )?;
+    assert!(
+        project
+            .sync()?
+            .assert_success()
+            .stdout()
+            .contains("1 scanned")
+    );
+    Ok(())
+}
+
+#[test]
+fn oversized_source_preserves_its_structure_and_the_next_file_scans() -> TestResult {
+    let project = Project::new()?;
+    let first = "a.rs";
+    project.write(first, "fn first() {}")?;
+    project.sync()?.assert_success();
+    let last_good = project.structure(first)?;
+    fs::File::options()
+        .write(true)
+        .open(project.path(first))?
+        .set_len(ardent_format::MAX_SOURCE_BYTES as u64 + 1)?;
+    project.write("b.rs", "fn next() {}")?;
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1));
+    assert!(
+        run.stderr().contains("a.rs: source exceeds"),
+        "{}",
+        run.stderr()
+    );
+    assert_eq!(project.structure(first)?, last_good);
+    assert!(project.structure("b.rs")?.contains("b.rs#fn next"));
+    Ok(())
+}
+
+#[test]
+fn scan_failures_keep_stamps_and_allow_the_next_file_to_run() -> TestResult {
+    let project = Project::new()?;
+    project.write(
+        ".ardent/config.yaml",
+        "schema: 1\nformats: {probe: {}, markdown: {}}",
+    )?;
+    project.write(
+        ".ardent/plugins/probe/plugin.yaml",
+        "schema: 1\nname: probe\nversion: 0.1.0\nkind: format\ncomponent: format.wasm\nfiles: ['*.probe']",
+    )?;
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/components/test-scanner.wasm");
+    fs::copy(fixture, project.path(".ardent/plugins/probe/format.wasm"))?;
+    for name in ["a.probe", "b.probe"] {
+        project.write(name, "good")?;
+    }
+    project.sync()?.assert_success();
+    let a = project.structure("a.probe")?;
+    let b = project.structure("b.probe")?;
+    project.write("a.probe", "trap")?;
+    project.write("b.probe", "invalid")?;
+    project.write("c.probe", "good")?;
+    project.write("new.md", "# New\n")?;
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1), "{}", run.stderr());
+    for name in ["a.probe", "b.probe"] {
+        assert!(run.stderr().contains(name), "{}", run.stderr());
+    }
+    assert_eq!(run.stderr().lines().count(), 2, "{}", run.stderr());
+    assert!(run.stderr().contains("unreachable"), "{}", run.stderr());
+    assert_eq!(project.structure("a.probe")?, a);
+    assert_eq!(project.structure("b.probe")?, b);
+    assert!(project.structure("c.probe")?.contains("c.probe#text"));
+    assert!(project.structure("new.md")?.contains("new.md#New"));
+    Ok(())
+}
+
+#[test]
+fn rust_2024_safe_declaration_preserves_the_previous_structure() -> TestResult {
+    let project = Project::new()?;
+    project.write("ffi.rs", "unsafe extern \"C\" { pub fn f(); }")?;
+    project.sync()?.assert_success();
+    let previous = project.structure("ffi.rs")?;
+    project.write("ffi.rs", "unsafe extern \"C\" { pub safe fn f(); }")?;
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1), "{}", run.stderr());
+    assert!(
+        run.stderr()
+            .contains("ffi.rs: syntax error at line 1, column 25"),
+        "{}",
+        run.stderr()
+    );
+    assert_eq!(project.structure("ffi.rs")?, previous);
+    Ok(())
+}
+
+#[test]
 fn format_without_a_plugin_gives_a_warning() -> TestResult {
     let project = Project::new()?;
     let config = project.path(".ardent/config.yaml");
@@ -562,6 +784,114 @@ fn renamed_file_gets_a_structure_file_under_its_new_name() -> TestResult {
             .structure("Readme.md")?
             .contains("path: Readme.md\n")
     );
+    Ok(())
+}
+
+#[test]
+fn case_only_rename_updates_node_paths_when_another_plugin_is_broken() -> TestResult {
+    let project = Project::new()?;
+    let before = "SRC/OLD#.rs";
+    let after = "Src/Old#.rs";
+    let valid = "fn example() {}";
+    project.write(before, valid)?;
+    project.write("SRC/nested/other.rs", "fn other() {}")?;
+    project.write("SRC/notes.md", "# Notes\n")?;
+    project.sync()?.assert_success();
+    let original = project.structure(before)?;
+    let sibling = project.structure("SRC/notes.md")?;
+    let manifest = fs::read(project.path(".ardent/plugins/markdown/plugin.yaml"))?;
+
+    fs::rename(project.path("SRC"), project.path("Src"))?;
+    fs::rename(project.path("Src/OLD#.rs"), project.path(after))?;
+    project.write(".ardent/plugins/markdown/plugin.yaml", "schema: 0")?;
+    project.write(after, "fn example(")?;
+    let failed = project.sync()?;
+    assert_eq!(failed.code(), Some(1));
+    assert!(
+        failed.stderr().contains("syntax error"),
+        "{}",
+        failed.stderr()
+    );
+    assert_eq!(project.structure(before)?, original);
+    assert!(
+        project
+            .structure("Src/nested/other.rs")?
+            .contains("Src/nested/other.rs#fn other")
+    );
+
+    project.write(after, valid)?;
+    let recovered = project.sync()?;
+    assert_eq!(recovered.code(), Some(1));
+    assert!(
+        recovered.stderr().contains("markdown"),
+        "{}",
+        recovered.stderr()
+    );
+    assert!(
+        recovered.stdout().contains("1 scanned"),
+        "{}",
+        recovered.stdout()
+    );
+    let last_good = project.structure(after)?;
+    assert!(last_good.contains(r"Src/Old\#.rs#fn example"));
+    assert_eq!(project.structure("SRC/notes.md")?, sibling);
+    let cache = snapshot(&project.path(".ardent/cache/files"))?;
+    assert!(cache.contains_key(Path::new("Src/Old#.rs/structure.yaml")));
+    assert!(cache.contains_key(Path::new("Src/nested/other.rs/structure.yaml")));
+
+    let unchanged = project.sync()?;
+    assert!(
+        unchanged.stdout().contains("0 scanned"),
+        "{}",
+        unchanged.stdout()
+    );
+
+    fs::write(
+        project.path(".ardent/plugins/markdown/plugin.yaml"),
+        manifest,
+    )?;
+    project.write(after, "fn example(")?;
+    let next = project.sync()?;
+    assert_eq!(next.code(), Some(1));
+    assert!(next.stderr().contains("syntax error"), "{}", next.stderr());
+    assert_eq!(project.structure(after)?, last_good);
+    Ok(())
+}
+
+#[test]
+fn failed_scan_after_case_only_rename_preserves_last_good_structure_through_recovery() -> TestResult
+{
+    let project = Project::new()?;
+    let before = "Old/lib.rs";
+    let after = "OLD/Lib.rs";
+    project.write(before, "fn example() {}")?;
+    project.sync()?.assert_success();
+    let original = project.structure(before)?;
+    let manifest = project.path(".ardent/plugins/markdown/plugin.yaml");
+    let good_manifest = fs::read(&manifest)?;
+
+    fs::rename(project.path("Old"), project.path("OLD"))?;
+    fs::rename(project.path("OLD/lib.rs"), project.path(after))?;
+    let aliases = project.path(before).exists();
+    project.write(after, "fn example(")?;
+    fs::write(&manifest, "schema: 0")?;
+    let partial = project.sync()?;
+    assert_eq!(partial.code(), Some(1));
+    assert!(partial.stderr().contains("syntax error"));
+    assert_eq!(project.structure(before)?, original);
+
+    fs::write(manifest, good_manifest)?;
+    let repaired = project.sync()?;
+    assert_eq!(repaired.code(), Some(1));
+    assert!(repaired.stderr().contains("syntax error"));
+    if aliases {
+        assert_eq!(project.structure(after)?, original);
+        let cache = snapshot(&project.path(".ardent/cache/files"))?;
+        assert!(cache.contains_key(Path::new("OLD/Lib.rs/structure.yaml")));
+    } else {
+        assert!(!project.structure_path(before).exists());
+        assert!(!project.structure_path(after).exists());
+    }
     Ok(())
 }
 

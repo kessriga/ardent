@@ -131,9 +131,8 @@ digits; and `format`, `format_version`, and `format_hash` of the format plugin.
 
 ### Requirement: Format hash
 
-For an installed format component (decision-8), `format_hash` SHALL be the BLAKE3 hash of the complete `format.wasm`
-file, as 64 lowercase hex digits. For an M1 built-in plugin, it SHALL be the hash of the query text followed by the name
-and version of the grammar crate.
+For every format plugin, `format_hash` SHALL be the BLAKE3 hash of the complete `format.wasm` file, as 64 lowercase hex
+digits.
 
 #### Scenario: Changed query
 

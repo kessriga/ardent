@@ -44,6 +44,13 @@ pub struct Outline {
 }
 
 impl Outline {
+    /// Whether the root node records the given source path, including its current spelling.
+    pub fn matches_source_path(&self, source_path: &str) -> bool {
+        self.nodes
+            .first()
+            .is_some_and(|root| root.path == escape(source_path, SOURCE_PATH_SPECIALS))
+    }
+
     /// Builds the outline of the source file at `source_path` from the top-level nodes that a format plugin found in
     /// `source`. Adds the root node, and gives every node its node path and fingerprint.
     pub fn build(source_path: &str, source: &[u8], top_level: &[ScannedNode]) -> Self {

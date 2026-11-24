@@ -84,7 +84,8 @@ impl Config {
     }
 }
 
-fn check_plugin_name(name: &str) -> Result<(), ConfigError> {
+/// Checks that a plugin name is valid for configuration and project package lookup.
+pub fn check_plugin_name(name: &str) -> Result<(), ConfigError> {
     let mut chars = name.chars();
     let valid = chars.next().is_some_and(|c| c.is_ascii_lowercase())
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');

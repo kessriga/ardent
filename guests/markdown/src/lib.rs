@@ -1,26 +1,44 @@
-//! The built-in Markdown format plugin (spec `markdown-format`). Its grammar links natively through `tree-sitter-md`,
-//! and its outline query is the file `markdown/outline.scm`.
+//! The Markdown format component.
 
-use crate::engine::{self, FormatPlugin, PluginError};
+#![cfg(any(test, target_arch = "wasm32"))]
 
-pub const NAME: &str = "markdown";
-const VERSION: &str = "0.1.0";
-const DEFAULT_FILES: &[&str] = &["*.md", "*.markdown"];
-const QUERY: &str = include_str!("markdown/outline.scm");
-/// The grammar crate and its version, which `Cargo.toml` pins exactly, for the format hash.
-const GRAMMAR_CRATE: &str = "tree-sitter-md";
-const GRAMMAR_VERSION: &str = "0.5.4";
+use ardent_format_guest::{self as guest, PluginError, QueryEngine};
+use guest::scanner::{Guest, Metadata, Node, ScanError};
 
-pub fn plugin() -> Result<FormatPlugin, PluginError> {
-    FormatPlugin::new(
-        NAME,
-        VERSION,
-        DEFAULT_FILES,
-        tree_sitter_md::LANGUAGE.into(),
-        QUERY,
-        engine::builtin_format_hash(QUERY, GRAMMAR_CRATE, GRAMMAR_VERSION),
-    )
+struct Component;
+
+fn plugin() -> Result<QueryEngine, PluginError> {
+    QueryEngine::new(tree_sitter_md::LANGUAGE.into(), include_str!("outline.scm"))
 }
+
+thread_local! {
+    static ENGINE: Result<QueryEngine, PluginError> = plugin();
+}
+
+impl guest::query::Guest for Component {
+    fn prepare() {
+        ENGINE.with(|_| ());
+    }
+}
+
+impl Guest for Component {
+    fn describe() -> Metadata {
+        guest::metadata(
+            "markdown",
+            env!("CARGO_PKG_VERSION"),
+            &["*.md", "*.markdown"],
+        )
+    }
+
+    fn scan(source: Vec<u8>) -> Result<Vec<Node>, ScanError> {
+        ENGINE.with(|engine| guest::scan(engine.as_ref(), &source))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+guest::export!(Component with_types_in guest);
+#[cfg(target_arch = "wasm32")]
+guest::query::export!(Component with_types_in guest::query);
 
 #[cfg(test)]
 mod tests {
@@ -29,12 +47,6 @@ mod tests {
     use ardent_core::outline::{Node, Outline};
 
     use super::*;
-
-    #[test]
-    fn grammar_version_is_the_pinned_version() {
-        let pin = format!("{GRAMMAR_CRATE} = \"={GRAMMAR_VERSION}\"");
-        assert!(include_str!("../Cargo.toml").contains(&pin), "{pin}");
-    }
 
     type TestResult = Result<(), Box<dyn Error>>;
 
@@ -57,13 +69,13 @@ mod tests {
 
     #[test]
     fn identity() -> TestResult {
-        let plugin = plugin()?;
+        let meta = Component::describe();
         assert_eq!(
-            (plugin.name.as_str(), plugin.version.as_str()),
+            (meta.name.as_str(), meta.version.as_str()),
             ("markdown", "0.1.0")
         );
-        assert_eq!(plugin.default_files, ["*.md", "*.markdown"]);
-        assert_eq!(plugin.format_hash.len(), 64);
+        assert_eq!(meta.files, ["*.md", "*.markdown"]);
+        assert!(meta.prefixes.is_empty());
         Ok(())
     }
 

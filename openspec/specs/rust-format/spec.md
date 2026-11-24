@@ -2,19 +2,19 @@
 
 ## Purpose
 
-Defines the built-in Rust format plugin: its name, version, and default file patterns, which items and members of a Rust
+Defines the packaged Rust format plugin: its name, version, and default file patterns, which items and members of a Rust
 file become nodes of the outline, their kinds and labels, and which doc comments and attributes belong to a node.
 
 ## Requirements
 
 ### Requirement: Plugin identity
 
-The built-in Rust format plugin SHALL have the name `rust` and the version `0.1.0`. Its default file pattern SHALL be
+The packaged Rust format component SHALL have the name `rust` and the version `0.1.0`. Its default file pattern SHALL be
 `*.rs`.
 
 #### Scenario: Stamp of a Rust file
 
-- **WHEN** a sync scans `src/engine.rs` with the built-in Rust plugin
+- **WHEN** a sync scans `src/engine.rs` with the installed Rust component
 - **THEN** the stamp of its structure file has `format: rust` and `format_version: 0.1.0`
 
 ### Requirement: Item nodes
@@ -153,3 +153,14 @@ NOT be nodes. Their text SHALL stay in the range of the node that contains them.
 
 - **WHEN** `src/main.rs` has `use std::fs;` and `fn main() { let text = fs::read_to_string("a").unwrap(); }`
 - **THEN** the outline has two nodes, `src/main.rs` and `src/main.rs#fn main`
+
+### Requirement: Documented parser limit
+
+The Rust plugin documentation SHALL identify the Rust 2024 `safe` item syntax in `unsafe extern` blocks that
+tree-sitter-rust 0.24.2 rejects. It SHALL explain how this affects sync.
+
+#### Scenario: Valid declaration rejected by the grammar
+
+- **WHEN** a user looks up the diagnostic for `unsafe extern "C" { pub safe fn f(); }`
+- **THEN** the documentation identifies the grammar limitation and explains that sync keeps the last good structure and
+  exits with status 1

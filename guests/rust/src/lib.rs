@@ -1,26 +1,43 @@
-//! The built-in Rust format plugin (spec `rust-format`). Its grammar links natively through `tree-sitter-rust`, and its
-//! outline query is the file `rust/outline.scm`.
+//! The Rust format component.
 
-use crate::engine::{self, FormatPlugin, PluginError};
+#![cfg(any(test, target_arch = "wasm32"))]
 
-pub const NAME: &str = "rust";
-const VERSION: &str = "0.1.0";
-const DEFAULT_FILES: &[&str] = &["*.rs"];
-const QUERY: &str = include_str!("rust/outline.scm");
-/// The grammar crate and its version, which `Cargo.toml` pins exactly, for the format hash.
-const GRAMMAR_CRATE: &str = "tree-sitter-rust";
-const GRAMMAR_VERSION: &str = "0.24.2";
+use ardent_format_guest::{self as guest, PluginError, QueryEngine};
+use guest::scanner::{Guest, Metadata, Node, ScanError};
 
-pub fn plugin() -> Result<FormatPlugin, PluginError> {
-    FormatPlugin::new(
-        NAME,
-        VERSION,
-        DEFAULT_FILES,
+struct Component;
+
+fn plugin() -> Result<QueryEngine, PluginError> {
+    QueryEngine::new(
         tree_sitter_rust::LANGUAGE.into(),
-        QUERY,
-        engine::builtin_format_hash(QUERY, GRAMMAR_CRATE, GRAMMAR_VERSION),
+        include_str!("outline.scm"),
     )
 }
+
+thread_local! {
+    static ENGINE: Result<QueryEngine, PluginError> = plugin();
+}
+
+impl guest::query::Guest for Component {
+    fn prepare() {
+        ENGINE.with(|_| ());
+    }
+}
+
+impl Guest for Component {
+    fn describe() -> Metadata {
+        guest::metadata("rust", env!("CARGO_PKG_VERSION"), &["*.rs"])
+    }
+
+    fn scan(source: Vec<u8>) -> Result<Vec<Node>, ScanError> {
+        ENGINE.with(|engine| guest::scan(engine.as_ref(), &source))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+guest::export!(Component with_types_in guest);
+#[cfg(target_arch = "wasm32")]
+guest::query::export!(Component with_types_in guest::query);
 
 #[cfg(test)]
 mod tests {
@@ -30,12 +47,6 @@ mod tests {
     use ardent_core::outline::{Node, Outline};
 
     use super::*;
-
-    #[test]
-    fn grammar_version_is_the_pinned_version() {
-        let pin = format!("{GRAMMAR_CRATE} = \"={GRAMMAR_VERSION}\"");
-        assert!(include_str!("../Cargo.toml").contains(&pin), "{pin}");
-    }
 
     type TestResult = Result<(), Box<dyn Error>>;
 
@@ -69,13 +80,13 @@ mod tests {
 
     #[test]
     fn identity() -> TestResult {
-        let plugin = plugin()?;
+        let meta = Component::describe();
         assert_eq!(
-            (plugin.name.as_str(), plugin.version.as_str()),
+            (meta.name.as_str(), meta.version.as_str()),
             ("rust", "0.1.0")
         );
-        assert_eq!(plugin.default_files, ["*.rs"]);
-        assert_eq!(plugin.format_hash.len(), 64);
+        assert_eq!(meta.files, ["*.rs"]);
+        assert!(meta.prefixes.is_empty());
         Ok(())
     }
 

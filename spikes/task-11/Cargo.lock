@@ -46,6 +46,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ardent-format-guest"
+version = "0.1.0"
+dependencies = [
+ "ardent-core",
+ "tree-sitter",
+ "wit-bindgen",
+]
+
+[[package]]
 name = "arraydeque"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -428,10 +437,8 @@ name = "rust-format-spike"
 version = "0.1.0"
 dependencies = [
  "ardent-core",
- "blake3",
- "tree-sitter",
+ "ardent-format-guest",
  "tree-sitter-rust",
- "wit-bindgen",
 ]
 
 [[package]]

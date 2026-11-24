@@ -1,20 +1,14 @@
 //! The tracked files of a project (spec `ardent-layout`, "Tracked files"): each file that the patterns of exactly one
 //! enabled format match, outside git's ignore rules, the `exclude` patterns, `.ardent/`, and nested projects.
 
-use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use ardent_core::layout::ARDENT_DIR;
-use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use ardent_format::patterns::{self, PatternError};
+use ignore::gitignore::Gitignore;
 use ignore::{DirEntry, WalkBuilder};
-
-/// The name and the file patterns of one enabled format.
-pub struct FormatPatterns<'a> {
-    pub name: &'a str,
-    pub files: &'a [String],
-}
 
 /// A tracked file: its source path, relative to the project root with `/` between parts, and the index of its format.
 #[derive(Debug, PartialEq, Eq)]
@@ -89,18 +83,6 @@ impl Walk {
     }
 }
 
-/// A pattern in `config.yaml` that is not valid gitignore syntax.
-#[derive(Debug)]
-pub struct PatternError(ignore::Error);
-
-impl fmt::Display for PatternError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid pattern: {}", self.0)
-    }
-}
-
-impl Error for PatternError {}
-
 /// The compiled patterns of `config.yaml`: the `files` patterns of each enabled format, and the `exclude` patterns.
 pub struct Patterns<'a> {
     formats: Vec<(&'a str, Gitignore)>,
@@ -109,19 +91,15 @@ pub struct Patterns<'a> {
 
 impl<'a> Patterns<'a> {
     /// Fails when a pattern is not valid gitignore syntax.
-    pub fn new(
-        root: &Path,
-        formats: &[FormatPatterns<'a>],
-        exclude: &[String],
-    ) -> Result<Self, PatternError> {
-        let formats = formats
-            .iter()
-            .map(|format| Ok((format.name, matcher(root, format.files)?)))
-            .collect::<Result<_, _>>()?;
+    pub fn new(root: &Path, exclude: &[String]) -> Result<Self, PatternError> {
         Ok(Self {
-            formats,
-            exclude: matcher(root, exclude)?,
+            formats: Vec::new(),
+            exclude: patterns::compile(root, exclude)?,
         })
+    }
+
+    pub fn add(&mut self, name: &'a str, files: Gitignore) {
+        self.formats.push((name, files));
     }
 
     /// The indexes of the formats whose `files` patterns match `relative` itself, not one of its parent directories.
@@ -234,14 +212,6 @@ impl Filter {
     }
 }
 
-fn matcher(root: &Path, patterns: &[String]) -> Result<Gitignore, PatternError> {
-    let mut builder = GitignoreBuilder::new(root);
-    for pattern in patterns {
-        builder.add_line(None, pattern).map_err(PatternError)?;
-    }
-    builder.build().map_err(PatternError)
-}
-
 /// The source path of `relative` with `/` between its parts on every platform, or `None` when it is not UTF-8.
 fn source_path(relative: &Path) -> Option<String> {
     let parts: Option<Vec<&str>> = relative
@@ -253,6 +223,7 @@ fn source_path(relative: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
     use std::fs;
     use std::io;
 
@@ -272,14 +243,9 @@ mod tests {
 
     fn tracked(root: &Path, exclude: &[&str]) -> Result<Walk, Box<dyn Error>> {
         let markdown = patterns(&["*.md", "*.markdown"]);
-        let formats = [FormatPatterns {
-            name: "markdown",
-            files: &markdown,
-        }];
-        Ok(walk(
-            root,
-            &Patterns::new(root, &formats, &patterns(exclude))?,
-        ))
+        let mut rules = Patterns::new(root, &patterns(exclude))?;
+        rules.add("markdown", patterns::compile(root, &markdown)?);
+        Ok(walk(root, &rules))
     }
 
     fn paths(walk: &Walk) -> Vec<&str> {
@@ -429,20 +395,10 @@ mod tests {
         let project = tempfile::tempdir()?;
         write(project.path(), "notes.md")?;
         let (markdown, notes) = (patterns(&["*.md"]), patterns(&["notes.*"]));
-        let formats = [
-            FormatPatterns {
-                name: "markdown",
-                files: &markdown,
-            },
-            FormatPatterns {
-                name: "notes",
-                files: &notes,
-            },
-        ];
-        let walk = walk(
-            project.path(),
-            &Patterns::new(project.path(), &formats, &[])?,
-        );
+        let mut rules = Patterns::new(project.path(), &[])?;
+        rules.add("markdown", patterns::compile(project.path(), &markdown)?);
+        rules.add("notes", patterns::compile(project.path(), &notes)?);
+        let walk = walk(project.path(), &rules);
         assert!(walk.files.is_empty());
         assert_eq!(
             walk.warnings,
@@ -511,7 +467,7 @@ mod tests {
     #[test]
     fn rejects_an_invalid_pattern() -> io::Result<()> {
         let project = tempfile::tempdir()?;
-        assert!(Patterns::new(project.path(), &[], &patterns(&["[z-a]"])).is_err());
+        assert!(Patterns::new(project.path(), &patterns(&["[z-a]"])).is_err());
         Ok(())
     }
 }

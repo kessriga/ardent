@@ -35,7 +35,9 @@ stop and ask me. Do not settle a core design question inside implementation code
 ## Code layout
 
 - `crates/ardent-core`: the document model. No terminal, file-watching, or plugin-runtime dependencies.
-- `crates/ardent-format`: the outline engine and the built-in format plugins. It holds the tree-sitter dependency.
+- `crates/ardent-format`: the Wasmtime host. It verifies installed packages and validates scan results.
+- `guests/`: the shared tree-sitter query engine and the Markdown and Rust components. When changing guests, follow
+  `guests/README.md` to run their tests and rebuild the release packages in `plugins/`.
 - `crates/ardent-cli`: the `ardent` binary. It depends on `ardent-core` and `ardent-format`.
 - Dependency direction: `ardent-core ← ardent-format ← ardent-cli`. Add crates (for example a TUI crate or a plugin
   host) when a task needs them, and keep the direction acyclic with `ardent-core` at the bottom.
@@ -77,18 +79,22 @@ create Backlog tasks or milestones, or rewrite Git history.
 
 This project uses Backlog.md for task and project management.
 
-**At the beginning of each conversation in this project, run `backlog instructions overview` before answering or taking action. Re-read it only if you have not read it yet in the current conversation.**
+**At the beginning of each conversation in this project, run `backlog instructions overview` before answering or taking
+action. Re-read it only if you have not read it yet in the current conversation.**
 
 Use the overview to decide whether to search, read, create, or update Backlog tasks.
 
 Before task lifecycle actions, read the matching detailed guide:
 - `backlog instructions task-creation` before creating or splitting tasks
-- `backlog instructions task-execution` before planning, changing status or assignee, adding a plan or implementation notes, or implementing task work
-- `backlog instructions task-finalization` before checking acceptance criteria, writing final summaries, or moving tasks to terminal statuses
+- `backlog instructions task-execution` before planning, changing status or assignee, adding a plan or implementation
+  notes, or implementing task work
+- `backlog instructions task-finalization` before checking acceptance criteria, writing final summaries, or moving tasks
+  to terminal statuses
 
 Use `backlog <command> --help` before running unfamiliar commands. Help shows options, fields, and examples.
 
-Do not edit Backlog task, draft, document, decision, or milestone markdown files directly. Use the `backlog` CLI so metadata, relationships, and history stay consistent.
+Do not edit Backlog task, draft, document, decision, or milestone markdown files directly. Use the `backlog` CLI so
+metadata, relationships, and history stay consistent.
 
 </CRITICAL_INSTRUCTION>
 <!-- BACKLOG.MD GUIDELINES END -->
