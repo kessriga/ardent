@@ -5,7 +5,7 @@ use std::ops::Range;
 use ardent_core::outline::ScannedNode;
 
 mod engine;
-pub use engine::{PluginError, QueryEngine};
+pub use engine::{PluginError, QueryEngine, ScanError as QueryScanError};
 
 wit_bindgen::generate!({ path: "../../wit", world: "format-plugin", pub_export_macro: true });
 
@@ -31,7 +31,7 @@ pub fn scan(
 ) -> Result<Vec<Node>, ScanError> {
     let engine = engine.map_err(|error| ScanError::Failure(error.to_string()))?;
     let roots = engine.scan(source).map_err(|error| match error {
-        engine::ScanError::Syntax { line, column } => ScanError::Syntax(Position {
+        QueryScanError::Syntax { line, column } => ScanError::Syntax(Position {
             line: line as u32,
             column: column as u32,
         }),

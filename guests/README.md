@@ -37,6 +37,19 @@ Run the guest query and grammar tests on the native target.
 cargo test --locked --workspace --manifest-path guests/Cargo.toml --target-dir target/guests
 ```
 
+## Selecting the scanner world
+
+The WIT package defines two worlds. A scanner that generates bindings with `wit-bindgen` must select `format-plugin`. If
+your crate previously called `wit_bindgen::generate!()`, keep the WIT file in its `wit/` directory and change the call
+to:
+
+```rust
+wit_bindgen::generate!({ world: "format-plugin" });
+```
+
+A query-based scanner can also export `query-setup` for separate query preparation. See
+[`guests/rust/src/lib.rs`](rust/src/lib.rs) for an implementation using the shared guest bindings.
+
 ## Host limits for format plugins
 
 A scanner receives source bytes and the WASI 0.2 clock, random and environment functions it needs for deterministic

@@ -126,7 +126,20 @@ impl QueryEngine {
     }
 
     /// Parses `source` and returns the top-level nodes of its outline, each with its descendants, in document order.
-    /// A file with a syntax error gives no nodes (decision-7).
+    /// Match [`QueryScanError::Syntax`](crate::QueryScanError::Syntax) to display the first syntax error.
+    ///
+    /// ```
+    /// use ardent_format_guest::{QueryEngine, QueryScanError};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let engine = QueryEngine::new(tree_sitter_rust::LANGUAGE.into(), "(function_item) @node")?;
+    /// assert!(matches!(
+    ///     engine.scan(b"fn broken("),
+    ///     Err(QueryScanError::Syntax { line: 1, column }) if column > 0
+    /// ));
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn scan(&self, source: &[u8]) -> Result<Vec<ScannedNode>, ScanError> {
         let mut parser = Parser::new();
         parser
