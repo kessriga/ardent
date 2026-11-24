@@ -55,6 +55,9 @@ def package(build_directory, destination):
             raise ValueError(f"{name} component declared its name as {metadata.name!r}")
         directory = destination / name
         directory.mkdir(parents=True, exist_ok=True)
+        if name == "rust":
+            readme = Path(__file__).resolve().parent / "rust" / "README.md"
+            (directory / "README.md").write_bytes(readme.read_bytes())
         (directory / "format.wasm").write_bytes(component_bytes)
         (directory / "plugin.yaml").write_text(
             manifest(metadata),
