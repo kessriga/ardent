@@ -2,6 +2,10 @@
 
 import argparse
 import json
+import shutil
+import tempfile
+from contextlib import ExitStack
+from functools import partial
 from pathlib import Path
 
 from wasmtime import Engine, Store, WasiConfig
@@ -44,7 +48,7 @@ def manifest(metadata):
     return "\n".join(lines) + "\n"
 
 
-def package(build_directory, destination):
+def stage_packages(build_directory, staging):
     engine = Engine()
     linker = Linker(engine)
     linker.add_wasip2()
@@ -53,16 +57,46 @@ def package(build_directory, destination):
         metadata = describe(engine, linker, component_bytes)
         if metadata.name != name:
             raise ValueError(f"{name} component declared its name as {metadata.name!r}")
-        directory = destination / name
+        directory = staging / name
         directory.mkdir(parents=True, exist_ok=True)
         if name == "rust":
             readme = Path(__file__).resolve().parent / "rust" / "README.md"
-            (directory / "README.md").write_bytes(readme.read_bytes())
+            shutil.copyfile(readme, directory / "README.md")
         (directory / "format.wasm").write_bytes(component_bytes)
-        (directory / "plugin.yaml").write_text(
-            manifest(metadata),
-            encoding="utf-8",
-        )
+        (directory / "plugin.yaml").write_text(manifest(metadata), encoding="utf-8")
+
+
+def install(staging, destination, backups):
+    with ExitStack() as rollback:
+        for directory in staging.iterdir():
+            installed = destination / directory.name
+            if not installed.exists():
+                installed.mkdir()
+                rollback.callback(installed.rmdir)
+            for source in directory.iterdir():
+                target = installed / source.name
+                if target.exists() or target.is_symlink():
+                    backup = backups / f"{directory.name}-{source.name}"
+                    shutil.copy2(target, backup, follow_symlinks=False)
+                    undo = partial(backup.replace, target)
+                else:
+                    undo = target.unlink
+                source.replace(target)
+                rollback.callback(undo)
+        rollback.pop_all()
+
+
+def package(build_directory, destination):
+    new_release = not destination.exists()
+    parent = destination.parent if new_release else destination
+    parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=parent) as temporary:
+        staging = Path(temporary) / "packages"
+        stage_packages(build_directory, staging)
+        if new_release:
+            staging.rename(destination)
+        else:
+            install(staging, destination, Path(temporary))
 
 
 if __name__ == "__main__":

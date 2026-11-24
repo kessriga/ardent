@@ -12,7 +12,7 @@ For a byte-for-byte rebuild, use the same checkout, registry and toolchain paths
 so builds in different directories can produce different component bytes.
 
 Use a Python environment with `wasmtime==51.0.0` to package the components. This command reads the metadata from each
-component's `describe` export and writes the installable packages under `plugins/`. The Rust package includes the
+component's `describe` export and stages both packages before updating `plugins/`. The Rust package includes the
 parser-limit documentation from `guests/rust/README.md`.
 
 ```sh
@@ -25,10 +25,12 @@ The build also produces the scanner for the CLI integration tests. Copy it to th
 cp target/guests/wasm32-wasip2/release/test_scanner.wasm crates/ardent-cli/tests/components/test-scanner.wasm
 ```
 
-Run the guest query and grammar tests on the native target.
+Run the native query and grammar tests with Cargo. Run the packaging tests in the same Python environment used to build
+the packages.
 
 ```sh
 cargo test --locked --workspace --manifest-path guests/Cargo.toml --target-dir target/guests
+python -B -m unittest guests.test_package
 ```
 
 ## Selecting the scanner world
