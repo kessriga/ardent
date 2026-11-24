@@ -14,8 +14,8 @@ wasmtime::component::bindgen!({ path: "../../wit", world: "format-plugin" });
 use exports::ardent::format::scanner::{self, ScanError};
 
 pub(crate) const INTERFACE: &str = "ardent:format/scanner@0.1.0";
+const DIAGNOSTIC_BYTES: usize = 1024;
 const MEMORY_BYTES: usize = 64 << 20;
-// Compiling the Rust outline query on its first scan consumes about 1.9 billion fuel.
 const CALL_FUEL: u64 = 5_000_000_000;
 
 #[derive(Debug, Error)]
@@ -34,6 +34,22 @@ impl From<wasmtime::Error> for RuntimeError {
     fn from(error: wasmtime::Error) -> Self {
         Self::Runtime(error)
     }
+}
+
+fn failure_message(message: &str) -> String {
+    let mut display = String::with_capacity(message.len().min(DIAGNOSTIC_BYTES));
+    for ch in message.chars() {
+        match ch {
+            '"' | '\'' | '\\' => display.push(ch),
+            _ => display.extend(ch.escape_debug()),
+        }
+        if display.len() > DIAGNOSTIC_BYTES {
+            display.truncate(display.floor_char_boundary(DIAGNOSTIC_BYTES - 3));
+            display.push_str("...");
+            break;
+        }
+    }
+    display
 }
 
 pub(crate) struct Metadata {
@@ -135,7 +151,9 @@ impl Runtime {
         })?;
         match result {
             Ok(nodes) => nodes::tree(nodes, path, source.len()),
-            Err(ScanError::Failure(message)) => Err(RuntimeError::Failure(message)),
+            Err(ScanError::Failure(message)) => {
+                Err(RuntimeError::Failure(failure_message(&message)))
+            }
             Err(ScanError::Syntax(
                 scanner::Position { line: 0, .. } | scanner::Position { column: 0, .. },
             )) => Err(RuntimeError::Invalid("syntax positions count from one")),
@@ -193,6 +211,20 @@ mod tests {
         assert!(runtime.active.is_none());
         assert_eq!(runtime.scan("file", b"next")?.len(), 1);
         Ok(())
+    }
+
+    #[test]
+    fn guest_failures_fit_one_line_and_preserve_unicode() {
+        let quoted_path = r#"can't parse "C:\src\main.rs""#;
+        assert_eq!(failure_message(quoted_path), quoted_path);
+        assert_eq!(failure_message("é\r\n\u{1b}é"), r"é\r\n\u{1b}é");
+        let fits = "é".repeat(DIAGNOSTIC_BYTES / 2);
+        assert_eq!(failure_message(&fits), fits);
+        let truncated = failure_message(&format!("{fits}é"));
+        assert_eq!(
+            truncated,
+            format!("{}...", "é".repeat((DIAGNOSTIC_BYTES - 3) / 2))
+        );
     }
 
     #[test]
