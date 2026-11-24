@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 
 use tempfile::TempDir;
 
@@ -21,6 +22,34 @@ pub fn temp_dir() -> io::Result<TempDir> {
         )));
     }
     Ok(dir)
+}
+
+/// Stages the Cargo binary and its release packages side by side, as distributed.
+pub fn stage_release(dir: &Path) -> io::Result<PathBuf> {
+    let binary = Path::new(env!("CARGO_BIN_EXE_ardent"));
+    let staged = dir.join(format!("ardent{}", std::env::consts::EXE_SUFFIX));
+    if fs::hard_link(binary, &staged).is_err() {
+        fs::copy(binary, &staged)?;
+    }
+    let plugins = dir.join("plugins");
+    fs::create_dir(&plugins)?;
+    for (path, contents) in snapshot(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins"))?
+    {
+        match contents {
+            Some(bytes) => fs::write(plugins.join(path), bytes)?,
+            None => fs::create_dir(plugins.join(path))?,
+        }
+    }
+    Ok(staged)
+}
+
+pub fn run_init(project: &Path, args: &[&str]) -> io::Result<Output> {
+    let release = tempfile::tempdir()?;
+    Command::new(stage_release(release.path())?)
+        .arg("init")
+        .args(args)
+        .current_dir(project)
+        .output()
 }
 
 pub fn snapshot(root: &Path) -> io::Result<Tree> {

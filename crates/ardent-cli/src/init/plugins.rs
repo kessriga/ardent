@@ -1,10 +1,10 @@
 use std::env;
 use std::fs;
-use std::io::{self, IsTerminal};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use ardent_core::layout;
-use dialoguer::MultiSelect;
+use console::{Key, Term};
 
 pub(super) struct ReleasePlugin {
     pub(super) name: &'static str,
@@ -46,20 +46,78 @@ pub(super) fn select(names: Option<&str>) -> Result<Vec<&'static ReleasePlugin>,
         return Ok(selected);
     }
 
-    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+    let term = Term::stderr();
+    if !io::stdin().is_terminal() || !term.is_term() {
         return Err(
             "pass --plugins (for example, --plugins markdown,rust) outside a terminal".into(),
         );
     }
-    let indices = MultiSelect::new()
-        .with_prompt("Format plugins (↑/↓ to move, Space to select, Enter to confirm, q to cancel)")
-        .items(&available)
-        .interact_opt()
+    pick(term)
         .map_err(|err| {
             format!("cannot read plugin selection: {err}. Use --plugins to select by name")
         })?
-        .ok_or("plugin selection cancelled")?;
-    Ok(indices.into_iter().map(|index| &RELEASE[index]).collect())
+        .ok_or_else(|| "plugin selection cancelled".into())
+}
+
+fn pick(mut term: Term) -> io::Result<Option<Vec<&'static ReleasePlugin>>> {
+    term.write_line(
+        "Format plugins (arrows to move, Space to select, Enter to confirm, q to cancel)",
+    )?;
+    let mut checked = [false; RELEASE.len()];
+    let mut focus = 0;
+    let confirmed = loop {
+        show_choices(&mut term, &checked, focus)?;
+        match term.read_key_raw()? {
+            Key::ArrowUp | Key::ArrowLeft | Key::BackTab | Key::Char('k') => {
+                focus = (focus + RELEASE.len() - 1) % RELEASE.len();
+            }
+            Key::ArrowDown | Key::ArrowRight | Key::Tab | Key::Char('j') => {
+                focus = (focus + 1) % RELEASE.len();
+            }
+            Key::Char(' ') => checked[focus] = !checked[focus],
+            Key::Char('a') => {
+                let select_all = checked.contains(&false);
+                checked.fill(select_all);
+            }
+            Key::Enter => break true,
+            Key::Char('q') | Key::Escape | Key::CtrlC => break false,
+            _ => {}
+        }
+    };
+    term.write_line("")?;
+    Ok(confirmed.then(|| {
+        RELEASE
+            .iter()
+            .zip(checked)
+            .filter_map(|(plugin, selected)| selected.then_some(plugin))
+            .collect()
+    }))
+}
+
+fn show_choices(term: &mut Term, checked: &[bool], focus: usize) -> io::Result<()> {
+    let choices: Vec<_> = RELEASE
+        .iter()
+        .enumerate()
+        .map(|(index, plugin)| {
+            let pointer = if index == focus { '>' } else { ' ' };
+            let mark = if checked[index] { 'x' } else { ' ' };
+            format!("{pointer}[{mark}] {}", plugin.name)
+        })
+        .collect();
+    let row = choices.join("  ");
+    let width = usize::from(term.size().1);
+    let visible = if row.len() < width {
+        &row
+    } else {
+        &choices[focus]
+    };
+    if visible.len() >= width {
+        return Err(io::Error::other(
+            "terminal is too narrow for the plugin picker",
+        ));
+    }
+    term.clear_line()?;
+    write!(term, "{visible}")
 }
 
 pub(super) fn release_dir() -> Result<PathBuf, (PathBuf, io::Error)> {

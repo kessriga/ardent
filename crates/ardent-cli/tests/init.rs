@@ -5,18 +5,14 @@ mod common;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Stdio};
 
 use ardent_core::config::Config;
-use common::{snapshot, temp_dir};
+use common::{run_init, snapshot, stage_release, temp_dir};
 
-fn run_init(dir: &Path, args: &[&str]) -> io::Result<Output> {
-    Command::new(env!("CARGO_BIN_EXE_ardent"))
-        .arg("init")
-        .args(args)
-        .current_dir(dir)
-        .output()
-}
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "init/terminal.rs"]
+mod terminal;
 
 /// Runs `ardent init` in `dir` and checks that it fails with `message` and changes nothing under `root`.
 fn assert_refused(dir: &Path, root: &Path, message: &str) -> io::Result<()> {
@@ -119,14 +115,10 @@ fn rejects_unknown_names_before_installing_any_package() -> io::Result<()> {
 fn incomplete_release_rolls_back_and_allows_retry() -> io::Result<()> {
     let release = temp_dir()?;
     let project = temp_dir()?;
-    let exe = release
-        .path()
-        .join(format!("ardent{}", std::env::consts::EXE_SUFFIX));
-    fs::copy(env!("CARGO_BIN_EXE_ardent"), &exe)?;
+    let exe = stage_release(release.path())?;
     let markdown = release.path().join("plugins/markdown");
-    fs::create_dir_all(&markdown)?;
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/markdown");
-    fs::copy(source.join("plugin.yaml"), markdown.join("plugin.yaml"))?;
+    fs::remove_file(markdown.join("format.wasm"))?;
     let mut init = Command::new(exe);
     init.args(["init", "--plugins", "markdown"])
         .current_dir(project.path());
@@ -188,7 +180,8 @@ fn names_the_project_in_the_directory_before_one_above_it() -> io::Result<()> {
 #[test]
 fn succeeds_when_stdout_is_closed() -> io::Result<()> {
     let project = temp_dir()?;
-    let mut child = Command::new(env!("CARGO_BIN_EXE_ardent"))
+    let release = temp_dir()?;
+    let mut child = Command::new(stage_release(release.path())?)
         .args(["init", "--plugins", "markdown,rust"])
         .current_dir(project.path())
         .stdout(Stdio::piped())

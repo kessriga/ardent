@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, SystemTime};
 
-use common::{Tree, snapshot, temp_dir};
+use common::{Tree, run_init, snapshot, temp_dir};
 use tempfile::TempDir;
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -82,10 +82,7 @@ struct Project {
 impl Project {
     fn new() -> io::Result<Self> {
         let project = Self { dir: temp_dir()? };
-        let output = Command::new(env!("CARGO_BIN_EXE_ardent"))
-            .args(["init", "--plugins", "markdown,rust"])
-            .current_dir(project.root())
-            .output()?;
+        let output = run_init(project.root(), &["--plugins", "markdown,rust"])?;
         if !output.status.success() {
             return Err(io::Error::other(
                 String::from_utf8_lossy(&output.stderr).into_owned(),

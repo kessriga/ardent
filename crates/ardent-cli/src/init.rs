@@ -69,6 +69,10 @@ pub fn run(project_dir: &Path, names: Option<&str>) -> Result<PathBuf, InitError
     let ardent_dir = project_dir.join(ARDENT_DIR);
     refuse_existing_project(project_dir, &ardent_dir)?;
     let selected = plugins::select(names).map_err(InitError::Selection)?;
+    if names.is_none() {
+        // Another init may have created an enclosing project while the picker was open.
+        refuse_existing_project(project_dir, &ardent_dir)?;
+    }
     create_ardent_dir(&ardent_dir)?;
     write_initial_files(&ardent_dir, &selected)
         .map_err(|(path, source)| roll_back(&ardent_dir, path, source))?;
