@@ -407,6 +407,32 @@ fn failed_verification_preserves_structures_and_continues_sync() -> TestResult {
 }
 
 #[test]
+fn mis_cased_package_preserves_its_structure_when_another_format_matches() -> TestResult {
+    let project = Project::new()?;
+    project.write("lib.rs", "fn hello() {}\n")?;
+    project.sync()?.assert_success();
+    let original = project.structure("lib.rs")?;
+    fs::rename(
+        project.path(".ardent/plugins/rust"),
+        project.path(".ardent/plugins/Rust"),
+    )?;
+    project.write(
+        ".ardent/config.yaml",
+        "schema: 1\nformats:\n  rust: {}\n  markdown: {files: ['*.md', '*.rs']}\n",
+    )?;
+
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1));
+    assert!(
+        run.stderr().contains("expected spelling"),
+        "{}",
+        run.stderr()
+    );
+    assert_eq!(project.structure("lib.rs")?, original);
+    Ok(())
+}
+
+#[test]
 fn same_version_component_replacement_invalidates_stamps() -> TestResult {
     use ardent_core::structure;
     use std::io::Write;

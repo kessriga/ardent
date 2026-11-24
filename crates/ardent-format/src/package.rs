@@ -165,13 +165,13 @@ impl<'a> InstalledPackages<'a> {
     /// Loads an enabled format under the project's sync lock. A missing directory gives `Ok(None)`.
     pub fn load_format(&self, name: &str) -> Result<Option<FormatPlugin>, PluginError> {
         config::check_plugin_name(name)?;
-        let dir = self.ardent_dir.join("plugins").join(name);
-        if !directory_exists(&dir)? {
-            return Ok(None);
-        }
         let plugins = self.ardent_dir.join("plugins");
-        exact_entry(&plugins, &self.names, OsStr::new(name))?
-            .ok_or_else(|| invalid(&dir, "package directory changed during discovery"))?;
+        let Some(dir) = exact_entry(&plugins, &self.names, OsStr::new(name))? else {
+            return Ok(None);
+        };
+        if !directory_exists(&dir)? {
+            return Err(invalid(&dir, "package directory changed during discovery"));
+        }
         FormatPlugin::load_directory(self.ardent_dir, &dir, name).map(Some)
     }
 }
@@ -618,15 +618,11 @@ mod tests {
         let errors = packages.check_other_manifests(|name| name == "rust");
         assert_eq!(errors.len(), 1);
         assert!(errors[0].to_string().contains("Rust"));
-        if dir.exists() {
-            let err = packages
-                .load_format("rust")
-                .err()
-                .ok_or("accepted a case alias")?;
-            assert!(err.to_string().contains("spelling"));
-        } else {
-            assert!(packages.load_format("rust")?.is_none());
-        }
+        let err = packages
+            .load_format("rust")
+            .err()
+            .ok_or("expected a spelling error for the renamed package")?;
+        assert!(err.to_string().contains("spelling"));
         assert!(!ardent.path().join(VERIFIED_DIR).exists());
         Ok(())
     }
