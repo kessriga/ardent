@@ -81,23 +81,11 @@ struct Project {
 
 impl Project {
     fn new() -> io::Result<Self> {
-        let project = Self::without_plugins()?;
-        for name in ["markdown", "rust"] {
-            let package = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../plugins")
-                .join(name);
-            let installed = project.path(".ardent/plugins").join(name);
-            fs::create_dir_all(&installed)?;
-            for file in ["plugin.yaml", "format.wasm"] {
-                fs::copy(package.join(file), installed.join(file))?;
-            }
-        }
-        Ok(project)
-    }
-
-    fn without_plugins() -> io::Result<Self> {
         let project = Self { dir: temp_dir()? };
-        let output = project.ardent_in(project.root(), "init")?;
+        let output = Command::new(env!("CARGO_BIN_EXE_ardent"))
+            .args(["init", "--plugins", "markdown,rust"])
+            .current_dir(project.root())
+            .output()?;
         if !output.status.success() {
             return Err(io::Error::other(
                 String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -360,8 +348,9 @@ fn unreadable_source_file_does_not_stop_the_others() -> TestResult {
 }
 
 #[test]
-fn new_project_warns_until_packages_are_installed() -> TestResult {
-    let project = Project::without_plugins()?;
+fn sync_warns_when_configured_packages_are_missing() -> TestResult {
+    let project = Project::new()?;
+    fs::remove_dir_all(project.path(".ardent/plugins"))?;
     let run = project.sync()?;
     run.assert_success();
     for name in ["markdown", "rust"] {

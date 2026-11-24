@@ -100,7 +100,7 @@ pub fn check_plugin_name(name: &str) -> Result<(), ConfigError> {
 mod tests {
     use super::*;
 
-    /// The configuration that `ardent init` writes, from the spec `ardent-layout`.
+    /// Projects created by earlier versions of `ardent init` have explicit file patterns.
     const INITIAL: &str = r#"schema: 1
 formats:
   markdown:

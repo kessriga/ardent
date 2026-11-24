@@ -1,5 +1,7 @@
 //! `ardent init`: make a directory an Ardent project with the initial content of the spec `ardent-layout`.
 
+mod plugins;
+
 use std::fmt;
 use std::fs;
 use std::io;
@@ -7,31 +9,24 @@ use std::path::{Path, PathBuf};
 
 use ardent_core::layout::{self, ARDENT_DIR, CACHE_DIR};
 
+use self::plugins::ReleasePlugin;
 use crate::project_root;
 
 const GITIGNORE: &str = "/cache/\n";
-const CONFIG: &str = r#"schema: 1
-formats:
-  markdown:
-    files:
-      - "*.md"
-      - "*.markdown"
-  rust:
-    files:
-      - "*.rs"
-views: {}
-exclude: []
-"#;
 
 /// Why `ardent init` created no project.
 pub enum InitError {
+    Selection(String),
     /// The directory already contains a file or directory named `.ardent`. Nothing changed.
     AlreadyExists(PathBuf),
     /// A parent directory is already a project root. Nothing changed.
     InsideProject(PathBuf),
     /// The file system failed at `path`. Nothing changed: either init had not started, or it removed the `.ardent/` it
     /// had started.
-    Io { path: PathBuf, source: io::Error },
+    Io {
+        path: PathBuf,
+        source: io::Error,
+    },
     /// The file system failed at `path`, and init could not remove the `.ardent/` it had started.
     Incomplete {
         path: PathBuf,
@@ -44,6 +39,7 @@ pub enum InitError {
 impl fmt::Display for InitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Selection(message) => f.write_str(message),
             Self::AlreadyExists(path) => {
                 write!(f, "{} already exists; nothing changed", path.display())
             }
@@ -69,11 +65,12 @@ impl fmt::Display for InitError {
 }
 
 /// Creates `.ardent/` with its initial files in `project_dir`, and returns the path of `.ardent/`.
-pub fn run(project_dir: &Path) -> Result<PathBuf, InitError> {
+pub fn run(project_dir: &Path, names: Option<&str>) -> Result<PathBuf, InitError> {
     let ardent_dir = project_dir.join(ARDENT_DIR);
     refuse_existing_project(project_dir, &ardent_dir)?;
+    let selected = plugins::select(names).map_err(InitError::Selection)?;
     create_ardent_dir(&ardent_dir)?;
-    write_initial_files(&ardent_dir)
+    write_initial_files(&ardent_dir, &selected)
         .map_err(|(path, source)| roll_back(&ardent_dir, path, source))?;
     Ok(ardent_dir)
 }
@@ -104,12 +101,26 @@ fn create_ardent_dir(ardent_dir: &Path) -> Result<(), InitError> {
     })
 }
 
-fn write_initial_files(ardent_dir: &Path) -> Result<(), (PathBuf, io::Error)> {
-    for (name, contents) in [(".gitignore", GITIGNORE), ("config.yaml", CONFIG)] {
+fn write_initial_files(
+    ardent_dir: &Path,
+    selected: &[&ReleasePlugin],
+) -> Result<(), (PathBuf, io::Error)> {
+    let mut config = String::from("schema: 1\nformats:");
+    if selected.is_empty() {
+        config.push_str(" {}\n");
+    } else {
+        let source = plugins::release_dir()?;
+        config.push('\n');
+        for plugin in selected {
+            plugin.install(&source, ardent_dir)?;
+            config.push_str(&format!("  {}: {{}}\n", plugin.name));
+        }
+    }
+    config.push_str("views: {}\nexclude: []\n");
+    for (name, contents) in [(".gitignore", GITIGNORE), ("config.yaml", config.as_str())] {
         layout::write_atomic(ardent_dir, name, contents.as_bytes())
             .map_err(|source| (ardent_dir.join(name), source))?;
     }
-    // After init, `.ardent/` holds only the two files; the first sync creates the cache again.
     layout::remove_empty_cache(ardent_dir).map_err(|source| (ardent_dir.join(CACHE_DIR), source))
 }
 
