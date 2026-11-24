@@ -113,13 +113,12 @@ fn rejects_unknown_names_before_installing_any_package() -> io::Result<()> {
 
 #[test]
 fn incomplete_release_rolls_back_and_allows_retry() -> io::Result<()> {
-    let release = temp_dir()?;
+    let release = stage_release()?;
     let project = temp_dir()?;
-    let exe = stage_release(release.path())?;
     let markdown = release.path().join("plugins/markdown");
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/markdown");
     fs::remove_file(markdown.join("format.wasm"))?;
-    let mut init = Command::new(exe);
+    let mut init = Command::new(release.executable());
     init.args(["init", "--plugins", "markdown"])
         .current_dir(project.path());
     let failure = init.output()?;
@@ -180,8 +179,8 @@ fn names_the_project_in_the_directory_before_one_above_it() -> io::Result<()> {
 #[test]
 fn succeeds_when_stdout_is_closed() -> io::Result<()> {
     let project = temp_dir()?;
-    let release = temp_dir()?;
-    let mut child = Command::new(stage_release(release.path())?)
+    let release = stage_release()?;
+    let mut child = Command::new(release.executable())
         .args(["init", "--plugins", "markdown,rust"])
         .current_dir(project.path())
         .stdout(Stdio::piped())

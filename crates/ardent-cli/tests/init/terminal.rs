@@ -44,11 +44,11 @@ fn interact(
     rows: u16,
     input: impl FnOnce(&mut File) -> io::Result<()>,
 ) -> io::Result<(ExitStatus, String)> {
-    let release = temp_dir()?;
+    let release = stage_release()?;
     let (mut master, slave) = open_terminal(rows)?;
     let input_modes = LocalModes::ICANON | LocalModes::ISIG | LocalModes::ECHO;
     let initial_modes = termios::tcgetattr(&slave)?.local_modes & input_modes;
-    let mut child = Command::new(stage_release(release.path())?)
+    let mut child = Command::new(release.executable())
         .arg("init")
         .current_dir(project)
         .stdin(slave.try_clone()?)
@@ -100,7 +100,7 @@ fn selects_rust_in_a_short_terminal_and_after_resizing() -> io::Result<()> {
             resize(terminal, 2)?;
             terminal.write_all(b"\x1b[B \r")
         })?;
-        assert!(status.success(), "{output}");
+        assert!(status.success(), "{status}: {output}");
         let packages = project.path().join(".ardent/plugins");
         assert!(packages.join("rust/format.wasm").is_file());
         assert!(!packages.join("markdown").exists());
@@ -112,7 +112,7 @@ fn selects_rust_in_a_short_terminal_and_after_resizing() -> io::Result<()> {
 fn interrupt_leaves_the_cursor_visible_and_creates_no_project() -> io::Result<()> {
     let project = temp_dir()?;
     let (status, output) = interact(project.path(), 24, |terminal| terminal.write_all(b"\x03"))?;
-    assert!(!status.success());
+    assert_eq!(status.code(), Some(1), "{status}: {output}");
     assert!(output.contains("cancelled"), "{output}");
     assert!(
         output.rfind("\x1b[?25l") <= output.rfind("\x1b[?25h"),
@@ -131,7 +131,7 @@ fn refuses_a_parent_project_created_during_selection() -> io::Result<()> {
         fs::create_dir(parent.path().join(".ardent"))?;
         terminal.write_all(b"\r")
     })?;
-    assert!(!status.success());
+    assert_eq!(status.code(), Some(1), "{status}: {output}");
     assert!(
         output.contains(&format!(
             "inside the Ardent project at {}",
