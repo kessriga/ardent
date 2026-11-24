@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-24 11:35'
-updated_date: '2026-11-24 20:27'
+updated_date: '2026-11-24 20:57'
 labels: []
 milestone: m-3
 dependencies:
@@ -61,6 +61,9 @@ installed in `.ardent/plugins/` (TASK-12). Where third-party plugins come from i
 5. Fix executable and working directory resolution, install complete release packages, stop scripts when setup fails,
    support both arrow encodings and Windows pipe terminals, and stage test executables under Cargo. Verify these cases
    and both build profiles.
+
+6. Restore terminal settings on external termination, require exact release filenames, and exclude the installation
+   directory from the package walk. Cover all three paths with CLI tests.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -78,11 +81,12 @@ project directories can disallow execution.
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Init installs the selected packages beside their configuration, including ancillary files. Launching through a symlink
-finds the release packages. The picker handles split arrow sequences and refuses a working directory replaced before
-confirmation. The README commands stop before sync when setup fails.
+Init installs and enables the selected release packages, including ancillary files. It resolves executable symlinks,
+requires the exact spelling of package filenames, and skips its own output when the project is inside a package. The
+picker handles split arrow sequences, restores the Unix terminal on termination, and refuses a working directory
+replaced before confirmation. The README commands stop before sync when setup fails.
 
-All 135 workspace tests passed in debug and release on macOS. All 19 init integration tests also passed with execution
-blocked in the temporary project directory. The workspace and test targets passed compilation checks for Windows x86-64
-and Linux ARM64. The README examples preserved cached structures after setup and copy failures.
+All 138 workspace tests passed in debug and release on macOS. The release binary restored terminal settings for four
+signals during both an idle read and a partial arrow sequence. All workspace and test targets passed compilation checks
+for Linux ARM64 and Windows x86-64.
 <!-- SECTION:FINAL_SUMMARY:END -->
