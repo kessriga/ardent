@@ -29,7 +29,11 @@ pub(super) fn select(names: Option<&str>) -> Result<Vec<&'static ReleasePlugin>,
     {
         return pick_by_name(io::stdin().lock(), io::stderr().lock());
     }
-    pick(term)
+    #[cfg(unix)]
+    let result = unix_keys::with_raw_input(|read_key| pick(term, read_key));
+    #[cfg(not(unix))]
+    let result = pick(term.clone(), || term.read_key_raw());
+    result
         .map_err(|err| {
             format!("cannot read plugin selection: {err}. Use --plugins to select by name")
         })?
@@ -87,7 +91,10 @@ fn pick_by_name(
     parse_names(line.trim())
 }
 
-fn pick(mut term: Term) -> io::Result<Option<Vec<&'static ReleasePlugin>>> {
+fn pick(
+    mut term: Term,
+    mut read_key: impl FnMut() -> io::Result<Key>,
+) -> io::Result<Option<Vec<&'static ReleasePlugin>>> {
     term.write_line(
         "Format plugins (arrows to move, Space to select, Enter to confirm, q to cancel)",
     )?;
@@ -95,10 +102,7 @@ fn pick(mut term: Term) -> io::Result<Option<Vec<&'static ReleasePlugin>>> {
     let mut focus = 0;
     let confirmed = loop {
         show_choices(&mut term, &checked, focus)?;
-        #[cfg(unix)]
-        let key = unix_keys::read()?;
-        #[cfg(not(unix))]
-        let key = term.read_key_raw()?;
+        let key = read_key()?;
         match key {
             Key::ArrowUp | Key::ArrowLeft | Key::BackTab | Key::Char('k') => {
                 focus = (focus + RELEASE.len() - 1) % RELEASE.len();

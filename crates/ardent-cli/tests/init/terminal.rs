@@ -1,12 +1,14 @@
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
+use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use rustix::fs::{self as posix, Mode, OFlags};
 use rustix::io::{self as fd, FdFlags};
+use rustix::process::{self, Pid, Signal};
 use rustix::pty::{self, OpenptFlags};
 use rustix::termios::{self, LocalModes, Winsize};
 
@@ -42,7 +44,7 @@ fn open_terminal(rows: u16) -> io::Result<(File, File)> {
 fn interact(
     project: &Path,
     rows: u16,
-    input: impl FnOnce(&mut File) -> io::Result<()>,
+    input: impl FnOnce(&mut File, &Child) -> io::Result<()>,
 ) -> io::Result<(ExitStatus, String)> {
     let release = stage_release()?;
     let (mut master, slave) = open_terminal(rows)?;
@@ -73,7 +75,7 @@ fn interact(
             .contains(LocalModes::ICANON)
             && let Some(send) = send.take()
         {
-            send(&mut master)?;
+            send(&mut master, &child)?;
         }
         if start.elapsed() > Duration::from_secs(10) {
             child.kill()?;
@@ -96,7 +98,7 @@ fn interact(
 fn selects_rust_in_a_short_terminal_and_after_resizing() -> io::Result<()> {
     for rows in [2, 24] {
         let project = temp_dir()?;
-        let (status, output) = interact(project.path(), rows, |terminal| {
+        let (status, output) = interact(project.path(), rows, |terminal, _| {
             resize(terminal, 2)?;
             terminal.write_all(b"\x1b[B \r")
         })?;
@@ -111,7 +113,9 @@ fn selects_rust_in_a_short_terminal_and_after_resizing() -> io::Result<()> {
 #[test]
 fn interrupt_leaves_the_cursor_visible_and_creates_no_project() -> io::Result<()> {
     let project = temp_dir()?;
-    let (status, output) = interact(project.path(), 24, |terminal| terminal.write_all(b"\x03"))?;
+    let (status, output) = interact(project.path(), 24, |terminal, _| {
+        terminal.write_all(b"\x03")
+    })?;
     assert_eq!(status.code(), Some(1), "{status}: {output}");
     assert!(output.contains("cancelled"), "{output}");
     assert!(
@@ -127,7 +131,7 @@ fn refuses_a_parent_project_created_during_selection() -> io::Result<()> {
     let parent = temp_dir()?;
     let child = parent.path().join("child");
     fs::create_dir(&child)?;
-    let (status, output) = interact(&child, 24, |terminal| {
+    let (status, output) = interact(&child, 24, |terminal, _| {
         fs::create_dir(parent.path().join(".ardent"))?;
         terminal.write_all(b"\r")
     })?;
@@ -147,7 +151,7 @@ fn refuses_a_parent_project_created_during_selection() -> io::Result<()> {
 fn accepts_split_arrows_in_normal_and_application_cursor_modes() -> io::Result<()> {
     for prefix in [b'[', b'O'] {
         let project = temp_dir()?;
-        let (status, output) = interact(project.path(), 24, |terminal| {
+        let (status, output) = interact(project.path(), 24, |terminal, _| {
             terminal.write_all(b"\x1b")?;
             thread::sleep(Duration::from_millis(100));
             terminal.write_all(&[prefix])?;
@@ -168,7 +172,7 @@ fn refuses_a_working_directory_replaced_during_selection() -> io::Result<()> {
     let project = parent.path().join("checkout");
     let moved = parent.path().join("moved");
     fs::create_dir(&project)?;
-    let (status, output) = interact(&project, 24, |terminal| {
+    let (status, output) = interact(&project, 24, |terminal, _| {
         fs::rename(&project, &moved)?;
         fs::create_dir(&project)?;
         terminal.write_all(b"\r")
@@ -180,5 +184,19 @@ fn refuses_a_working_directory_replaced_during_selection() -> io::Result<()> {
     );
     assert!(!project.join(".ardent").exists());
     assert!(!moved.join(".ardent").exists());
+    Ok(())
+}
+
+#[test]
+fn termination_signals_restore_the_terminal() -> io::Result<()> {
+    for signal in [Signal::TERM, Signal::INT, Signal::HUP] {
+        let project = temp_dir()?;
+        let (status, _) = interact(project.path(), 24, |_, child| {
+            let pid = Pid::from_child(child);
+            Ok(process::kill_process(pid, signal)?)
+        })?;
+        assert_eq!(status.signal(), Some(signal.as_raw()));
+        assert!(!project.path().join(".ardent").exists());
+    }
     Ok(())
 }

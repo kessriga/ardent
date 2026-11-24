@@ -17,7 +17,8 @@ ignore = "0.4.34"
 same-file = "1.0.6"
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1.6", features = ["termios"] }
+rustix = { version = "1.1.6", features = ["event", "termios"] }
+signal-hook = { version = "0.4.6", default-features = false, features = ["iterator"] }
 
 [target.'cfg(windows)'.dependencies]
 winapi-util = "0.1.11"
@@ -29,4 +30,4 @@ workspace = true
 tempfile.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dev-dependencies]
-rustix = { version = "1.1.6", features = ["pty", "termios"] }
+rustix = { version = "1.1.6", features = ["process", "pty", "termios"] }
