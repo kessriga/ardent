@@ -111,7 +111,7 @@ pub fn run(working_dir: &Path) -> Result<Report, SyncError> {
         .extend(walk.warnings.iter().map(ToString::to_string));
     report.errors.extend(walk.errors.iter().cloned());
     report.tracked = walk.files.len();
-    let stale = if report.errors.is_empty() {
+    let stale = if unavailable.is_empty() && walk.errors.is_empty() {
         StaleStructures::Remove
     } else {
         StaleStructures::Keep

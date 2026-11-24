@@ -407,6 +407,22 @@ fn failed_verification_preserves_structures_and_continues_sync() -> TestResult {
 }
 
 #[test]
+fn invalid_disabled_manifest_still_prunes_deleted_files() -> TestResult {
+    let project = Project::new()?;
+    project.sync()?.assert_success();
+    fs::remove_file(project.path("README.md"))?;
+    project.write(".ardent/plugins/unused/plugin.yaml", "schema: 2\n")?;
+
+    let run = project.sync()?;
+    assert_eq!(run.code(), Some(1));
+    assert!(run.stderr().contains("unused"), "{}", run.stderr());
+    assert!(run.stdout().contains("1 removed"), "{}", run.stdout());
+    assert!(!project.structure_path("README.md").exists());
+    assert!(project.structure_path("docs/spec.md").is_file());
+    Ok(())
+}
+
+#[test]
 fn mis_cased_package_preserves_its_structure_when_another_format_matches() -> TestResult {
     let project = Project::new()?;
     project.write("lib.rs", "fn hello() {}\n")?;
