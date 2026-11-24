@@ -127,7 +127,9 @@ name = "ardent-format"
 version = "0.0.0"
 dependencies = [
  "ardent-core",
+ "ignore",
  "insta",
+ "same-file",
  "serde",
  "tempfile",
  "thiserror 2.0.21",

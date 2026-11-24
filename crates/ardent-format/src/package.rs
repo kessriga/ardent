@@ -11,9 +11,9 @@ use ardent_core::outline::ScannedNode;
 use ardent_core::structure;
 use ardent_core::yaml::{self, ReadError};
 use serde::Deserialize;
-use serde::de::DeserializeOwned;
 use thiserror::Error;
 
+use crate::patterns;
 use crate::runtime::{INTERFACE, Runtime, RuntimeError};
 
 const MAX_MANIFEST_BYTES: u64 = 1 << 20;
@@ -36,13 +36,26 @@ pub enum PluginError {
 }
 
 #[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
+enum Manifest {
+    Format(FormatManifest),
+    View {
+        #[serde(rename = "schema")]
+        _schema: u32,
+        name: String,
+        #[serde(rename = "version")]
+        _version: String,
+        component: PathBuf,
+    },
+}
+
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Manifest {
+struct FormatManifest {
     #[serde(rename = "schema")]
     _schema: u32,
     name: String,
     version: String,
-    kind: String,
     component: PathBuf,
     #[serde(default)]
     files: Vec<String>,
@@ -51,27 +64,32 @@ struct Manifest {
 }
 
 impl Manifest {
-    fn read(path: &Path, name: &str) -> Result<(Self, String), PluginError> {
-        let (manifest, manifest_bytes): (Self, _) = read_manifest(path)?;
-        check_manifest_name(path, &manifest.name, name)?;
-        if manifest.kind != "format" {
+    fn read(path: &Path, directory_name: &str) -> Result<(Self, Vec<u8>), PluginError> {
+        let bytes = read_file(path, MAX_MANIFEST_BYTES)?;
+        let text = str::from_utf8(&bytes).map_err(|err| invalid(path, err.to_string()))?;
+        let manifest: Self = yaml::read(text, 1).map_err(|source| PluginError::Manifest {
+            path: path.to_owned(),
+            source,
+        })?;
+        let (name, component) = match &manifest {
+            Self::Format(format) => (&format.name, &format.component),
+            Self::View {
+                name, component, ..
+            } => (name, component),
+        };
+        check_manifest_name(path, name, directory_name)?;
+        if component.file_name().is_none()
+            || !component
+                .components()
+                .all(|part| matches!(part, Component::Normal(_) | Component::CurDir))
+        {
             return Err(invalid(
                 path,
-                format!("expected kind format, found {:?}", manifest.kind),
+                format!("component path {component:?} must name a file inside the package"),
             ));
         }
-        Ok((manifest, structure::content_hash(&manifest_bytes)))
+        Ok((manifest, bytes))
     }
-}
-
-fn read_manifest<T: DeserializeOwned>(path: &Path) -> Result<(T, Vec<u8>), PluginError> {
-    let bytes = read_file(path, MAX_MANIFEST_BYTES)?;
-    let text = str::from_utf8(&bytes).map_err(|err| invalid(path, err.to_string()))?;
-    let value = yaml::read(text, 1).map_err(|source| PluginError::Manifest {
-        path: path.to_owned(),
-        source,
-    })?;
-    Ok((value, bytes))
 }
 
 fn check_manifest_name(path: &Path, declared: &str, directory: &str) -> Result<(), PluginError> {
@@ -92,31 +110,30 @@ pub struct InstalledPackages<'a> {
 
 impl<'a> InstalledPackages<'a> {
     pub fn discover(ardent_dir: &'a Path) -> Result<Self, PluginError> {
-        let plugins = ardent_dir.join("plugins");
-        let mut names = BTreeSet::new();
-        if directory_exists(&plugins)? {
-            for entry in fs::read_dir(&plugins).map_err(|err| io_error(&plugins, err))? {
-                names.insert(entry.map_err(|err| io_error(&plugins, err))?.file_name());
-            }
-        }
+        let names = if ardent_dir
+            .try_exists()
+            .map_err(|err| io_error(ardent_dir, err))?
+            && let Some(plugins) =
+                exact_entry(ardent_dir, &entry_names(ardent_dir)?, OsStr::new("plugins"))?
+            && directory_exists(&plugins)?
+        {
+            entry_names(&plugins)?
+        } else {
+            BTreeSet::new()
+        };
         Ok(Self { ardent_dir, names })
     }
 
-    /// Enabled formats check identity during loading. Other installed packages still need matching names.
-    pub fn check_other_names(&self, enabled_format: impl Fn(&str) -> bool) -> Vec<PluginError> {
+    /// Enabled formats validate their manifests during loading. Check all remaining installed manifests here.
+    pub fn check_other_manifests(&self, enabled_format: impl Fn(&str) -> bool) -> Vec<PluginError> {
         self.names
             .iter()
             .filter(|name| !name.to_str().is_some_and(&enabled_format))
-            .filter_map(|name| self.check_other_name(name).err())
+            .filter_map(|name| self.check_other_manifest(name).err())
             .collect()
     }
 
-    fn check_other_name(&self, name: &OsStr) -> Result<(), PluginError> {
-        #[derive(Deserialize)]
-        struct Identity {
-            name: String,
-        }
-
+    fn check_other_manifest(&self, name: &OsStr) -> Result<(), PluginError> {
         let dir = self.ardent_dir.join("plugins").join(name);
         if !fs::symlink_metadata(&dir)
             .map_err(|err| io_error(&dir, err))?
@@ -124,19 +141,25 @@ impl<'a> InstalledPackages<'a> {
         {
             return Ok(());
         }
-        let path = dir.join("plugin.yaml");
-        match fs::symlink_metadata(&path) {
-            Ok(metadata) if metadata.is_dir() => return Ok(()),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
-            Err(err) => return Err(io_error(&path, err)),
-            Ok(_) => {}
+        let Some(path) = exact_entry(&dir, &entry_names(&dir)?, OsStr::new("plugin.yaml"))? else {
+            return Ok(());
+        };
+        if fs::symlink_metadata(&path)
+            .map_err(|err| io_error(&path, err))?
+            .is_dir()
+        {
+            return Ok(());
         }
         let name = name
             .to_str()
             .ok_or_else(|| invalid(&dir, "plugin names must be ASCII"))?;
         config::check_plugin_name(name).map_err(|err| invalid(&path, err.to_string()))?;
-        let (identity, _): (Identity, _) = read_manifest(&path)?;
-        check_manifest_name(&path, &identity.name, name)
+        if let (Manifest::Format(format), _) = Manifest::read(&path, name)? {
+            let root = self.ardent_dir.parent().unwrap_or(self.ardent_dir);
+            patterns::compile_defaults(root, &format.files, &format.prefixes)
+                .map_err(|err| invalid(&path, err.to_string()))?;
+        }
+        Ok(())
     }
 
     /// Loads an enabled format under the project's sync lock. A missing directory gives `Ok(None)`.
@@ -146,12 +169,9 @@ impl<'a> InstalledPackages<'a> {
         if !directory_exists(&dir)? {
             return Ok(None);
         }
-        if !self.names.contains(OsStr::new(name)) {
-            return Err(invalid(
-                &dir,
-                format!("package directory spelling must match {name:?} exactly"),
-            ));
-        }
+        let plugins = self.ardent_dir.join("plugins");
+        exact_entry(&plugins, &self.names, OsStr::new(name))?
+            .ok_or_else(|| invalid(&dir, "package directory changed during discovery"))?;
         FormatPlugin::load_directory(self.ardent_dir, &dir, name).map(Some)
     }
 }
@@ -178,8 +198,12 @@ impl FormatPlugin {
     }
 
     fn load_directory(ardent_dir: &Path, dir: &Path, name: &str) -> Result<Self, PluginError> {
-        let path = dir.join("plugin.yaml");
-        let (manifest, manifest_hash) = Manifest::read(&path, name)?;
+        let path = package_file(dir, Path::new("plugin.yaml"))?;
+        let (manifest, manifest_bytes) = Manifest::read(&path, name)?;
+        let Manifest::Format(manifest) = manifest else {
+            return Err(invalid(&path, "expected kind format, found view"));
+        };
+        let manifest_hash = structure::content_hash(&manifest_bytes);
         let component_path = package_file(dir, &manifest.component)?;
         let bytes = read_file(&component_path, MAX_COMPONENT_BYTES)?;
         let format_hash = structure::content_hash(&bytes);
@@ -228,7 +252,7 @@ impl FormatPlugin {
 
 fn verify_component(
     bytes: &[u8],
-    manifest: &Manifest,
+    manifest: &FormatManifest,
     component_path: &Path,
     manifest_path: &Path,
 ) -> Result<Runtime, PluginError> {
@@ -268,12 +292,61 @@ fn package_file(dir: &Path, relative: &Path) -> Result<PathBuf, PluginError> {
                 format!("component path {relative:?} must be inside the package"),
             ));
         };
-        path.push(name);
+        path = exact_entry(&path, &entry_names(&path)?, name)?
+            .ok_or_else(|| io_error(path.join(name), io::ErrorKind::NotFound.into()))?;
         if parts.peek().is_some() && !directory_exists(&path)? {
             return Err(io_error(path, io::ErrorKind::NotFound.into()));
         }
     }
     Ok(path)
+}
+
+fn entry_names(dir: &Path) -> Result<BTreeSet<OsString>, PluginError> {
+    fs::read_dir(dir)
+        .and_then(|entries| entries.map(|entry| Ok(entry?.file_name())).collect())
+        .map_err(|err| io_error(dir, err))
+}
+
+/// Resolve a package entry with the spelling that a case-sensitive checkout will require.
+fn exact_entry(
+    dir: &Path,
+    names: &BTreeSet<OsString>,
+    name: &OsStr,
+) -> Result<Option<PathBuf>, PluginError> {
+    let path = dir.join(name);
+    if names.contains(name) {
+        return Ok(Some(path));
+    }
+    let mismatch = |actual: &OsStr| {
+        invalid(
+            &path,
+            format!("expected spelling {name:?}, found {actual:?}"),
+        )
+    };
+    if let Some(actual) = names
+        .iter()
+        .find(|actual| actual.eq_ignore_ascii_case(name))
+    {
+        return Err(mismatch(actual));
+    }
+    // Filesystems can also equate Unicode spellings and short names.
+    match fs::symlink_metadata(&path) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(io_error(&path, err)),
+        Ok(meta) if !meta.is_file() && !meta.is_dir() => {
+            return Err(invalid(&path, "expected a regular file or directory"));
+        }
+        Ok(_) => {}
+    }
+    for actual in names {
+        let candidate = dir.join(actual);
+        if fs::symlink_metadata(&candidate).is_ok_and(|meta| meta.is_file() || meta.is_dir())
+            && same_file::is_same_file(&candidate, &path).unwrap_or(false)
+        {
+            return Err(mismatch(actual));
+        }
+    }
+    Err(invalid(&path, "package entry changed during discovery"))
 }
 
 fn directory_exists(path: &Path) -> Result<bool, PluginError> {
@@ -371,11 +444,27 @@ mod tests {
     }
 
     #[test]
+    fn plugins_directory_requires_exact_spelling() -> TestResult {
+        let ardent = tempfile::tempdir()?;
+        install_rust(ardent.path())?;
+        fs::rename(ardent.path().join("plugins"), ardent.path().join("Plugins"))?;
+        let error = InstalledPackages::discover(ardent.path())
+            .err()
+            .ok_or("accepted Plugins")?;
+        let message = error.to_string();
+        assert!(
+            message.contains("expected spelling \"plugins\", found \"Plugins\""),
+            "{message}"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn invalid_installed_names_fail_even_when_disabled() -> TestResult {
         let ardent = tempfile::tempdir()?;
         assert!(
             InstalledPackages::discover(ardent.path())?
-                .check_other_names(|_| false)
+                .check_other_manifests(|_| false)
                 .is_empty()
         );
         for name in ["structure", "Bad_Name"] {
@@ -383,11 +472,12 @@ mod tests {
             fs::create_dir_all(&dir)?;
             assert!(
                 InstalledPackages::discover(ardent.path())?
-                    .check_other_names(|_| false)
+                    .check_other_manifests(|_| false)
                     .is_empty()
             );
             fs::write(dir.join("plugin.yaml"), "")?;
-            let errors = InstalledPackages::discover(ardent.path())?.check_other_names(|_| false);
+            let errors =
+                InstalledPackages::discover(ardent.path())?.check_other_manifests(|_| false);
             assert_eq!(errors.len(), 1);
             assert!(errors[0].to_string().contains(name), "{}", errors[0]);
             fs::remove_file(dir.join("plugin.yaml"))?;
@@ -405,12 +495,14 @@ mod tests {
             let write_name = |declared: &str| {
                 fs::write(
                     &manifest,
-                    format!("schema: 1\nname: {declared}\nkind: {kind}\n"),
+                    format!(
+                        "schema: 1\nname: {declared}\nversion: 0.1.0\nkind: {kind}\ncomponent: nested/plugin.wasm\n"
+                    ),
                 )
             };
             write_name("other")?;
             let packages = InstalledPackages::discover(ardent.path())?;
-            let errors = packages.check_other_names(|_| false);
+            let errors = packages.check_other_manifests(|_| false);
             assert_eq!(errors.len(), 1);
             let message = errors[0].to_string();
             assert!(
@@ -420,8 +512,100 @@ mod tests {
                 "{message}"
             );
             write_name(name)?;
-            assert!(packages.check_other_names(|_| false).is_empty());
+            assert!(packages.check_other_manifests(|_| false).is_empty());
         }
+        Ok(())
+    }
+
+    #[test]
+    fn disabled_manifests_follow_the_schema_without_loading_components() -> TestResult {
+        let ardent = tempfile::tempdir()?;
+        let dir = ardent.path().join("plugins/custom");
+        fs::create_dir_all(&dir)?;
+        let packages = InstalledPackages::discover(ardent.path())?;
+        let path = dir.join("plugin.yaml");
+        let valid = "schema: 1\nname: custom\nversion: 1.0.0\nkind: format\ncomponent: nested/plugin.wasm\n";
+        let view = valid.replace("kind: format", "kind: view");
+        for (manifest, reason) in [
+            (valid.replace("version: 1.0.0\n", ""), "version"),
+            (
+                valid.replace("component: nested/plugin.wasm\n", ""),
+                "component",
+            ),
+            (valid.replace("kind: format", "kind: other"), "other"),
+            (format!("{valid}files: 22\n"), "sequence"),
+            (format!("{valid}files: ['[z-a]']\n"), "invalid pattern"),
+            (
+                format!("{valid}prefixes: {{key: ['[z-a]']}}\n"),
+                "invalid pattern",
+            ),
+            (format!("{valid}extra: true\n"), "extra"),
+            (format!("{view}files: []\n"), "files"),
+            (format!("{view}prefixes: {{}}\n"), "prefixes"),
+            (
+                view.replace("nested/plugin.wasm", "../plugin.wasm"),
+                "inside the package",
+            ),
+        ] {
+            fs::write(&path, manifest)?;
+            let errors = packages.check_other_manifests(|_| false);
+            assert_eq!(errors.len(), 1);
+            let message = errors[0].to_string();
+            assert!(
+                message.contains(reason) && message.contains("plugin.yaml"),
+                "{message}"
+            );
+        }
+        for manifest in [valid, &view] {
+            fs::write(&path, manifest)?;
+            assert!(packages.check_other_manifests(|_| false).is_empty());
+        }
+        assert!(!ardent.path().join(VERIFIED_DIR).exists());
+        Ok(())
+    }
+
+    #[test]
+    fn manifest_and_component_names_require_exact_spelling_even_after_verification() -> TestResult {
+        let ardent = tempfile::tempdir()?;
+        let dir = install_rust(ardent.path())?;
+        let manifest = dir.join("plugin.yaml");
+        let original = fs::read_to_string(&manifest)?;
+        fs::create_dir(dir.join("module"))?;
+        fs::rename(dir.join("format.wasm"), dir.join("module/format.wasm"))?;
+        fs::write(
+            &manifest,
+            original.replace("format.wasm", "module/format.wasm"),
+        )?;
+        load_rust(ardent.path())?;
+        for (expected, actual) in [
+            ("plugin.yaml", "Plugin.yaml"),
+            ("module", "Module"),
+            ("module/format.wasm", "module/Format.wasm"),
+        ] {
+            fs::rename(dir.join(expected), dir.join(actual))?;
+            let error = load_rust(ardent.path())
+                .err()
+                .ok_or("accepted a spelling mismatch")?;
+            let message = error.to_string();
+            let actual_name = Path::new(actual)
+                .file_name()
+                .ok_or("invalid fixture name")?;
+            assert!(
+                message.contains(expected) && message.contains(&*actual_name.to_string_lossy()),
+                "{message}"
+            );
+            if expected == "plugin.yaml" {
+                let errors =
+                    InstalledPackages::discover(ardent.path())?.check_other_manifests(|_| false);
+                assert_eq!(errors.len(), 1);
+                assert!(errors[0].to_string().contains("Plugin.yaml"));
+            }
+            fs::rename(dir.join(actual), dir.join(expected))?;
+        }
+        assert!(matches!(
+            load_rust(ardent.path())?.scanner,
+            Scanner::Verified(_)
+        ));
         Ok(())
     }
 
@@ -431,7 +615,7 @@ mod tests {
         let dir = install_rust(ardent.path())?;
         fs::rename(&dir, dir.with_file_name("Rust"))?;
         let packages = InstalledPackages::discover(ardent.path())?;
-        let errors = packages.check_other_names(|name| name == "rust");
+        let errors = packages.check_other_manifests(|name| name == "rust");
         assert_eq!(errors.len(), 1);
         assert!(errors[0].to_string().contains("Rust"));
         if dir.exists() {
@@ -579,6 +763,7 @@ mod tests {
         assert!(package_file(dir.path(), Path::new("../outside")).is_err());
         assert!(package_file(dir.path(), dir.path()).is_err());
         fs::create_dir(dir.path().join("wasm"))?;
+        fs::write(dir.path().join("wasm/scanner"), "")?;
         assert_eq!(
             package_file(dir.path(), Path::new("./wasm/scanner"))?,
             dir.path().join("wasm/scanner")

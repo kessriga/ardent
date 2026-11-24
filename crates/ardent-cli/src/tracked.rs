@@ -1,13 +1,13 @@
 //! The tracked files of a project (spec `ardent-layout`, "Tracked files"): each file that the patterns of exactly one
 //! enabled format match, outside git's ignore rules, the `exclude` patterns, `.ardent/`, and nested projects.
 
-use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use ardent_core::layout::ARDENT_DIR;
-use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use ardent_format::patterns::{self, PatternError};
+use ignore::gitignore::Gitignore;
 use ignore::{DirEntry, WalkBuilder};
 
 /// A tracked file: its source path, relative to the project root with `/` between parts, and the index of its format.
@@ -83,18 +83,6 @@ impl Walk {
     }
 }
 
-/// A pattern in `config.yaml` that is not valid gitignore syntax.
-#[derive(Debug)]
-pub struct PatternError(ignore::Error);
-
-impl fmt::Display for PatternError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid pattern: {}", self.0)
-    }
-}
-
-impl Error for PatternError {}
-
 /// The compiled patterns of `config.yaml`: the `files` patterns of each enabled format, and the `exclude` patterns.
 pub struct Patterns<'a> {
     formats: Vec<(&'a str, Gitignore)>,
@@ -106,7 +94,7 @@ impl<'a> Patterns<'a> {
     pub fn new(root: &Path, exclude: &[String]) -> Result<Self, PatternError> {
         Ok(Self {
             formats: Vec::new(),
-            exclude: matcher(root, exclude)?,
+            exclude: patterns::compile(root, exclude)?,
         })
     }
 
@@ -224,14 +212,6 @@ impl Filter {
     }
 }
 
-pub fn matcher(root: &Path, patterns: &[String]) -> Result<Gitignore, PatternError> {
-    let mut builder = GitignoreBuilder::new(root);
-    for pattern in patterns {
-        builder.add_line(None, pattern).map_err(PatternError)?;
-    }
-    builder.build().map_err(PatternError)
-}
-
 /// The source path of `relative` with `/` between its parts on every platform, or `None` when it is not UTF-8.
 fn source_path(relative: &Path) -> Option<String> {
     let parts: Option<Vec<&str>> = relative
@@ -243,6 +223,7 @@ fn source_path(relative: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
     use std::fs;
     use std::io;
 
@@ -263,7 +244,7 @@ mod tests {
     fn tracked(root: &Path, exclude: &[&str]) -> Result<Walk, Box<dyn Error>> {
         let markdown = patterns(&["*.md", "*.markdown"]);
         let mut rules = Patterns::new(root, &patterns(exclude))?;
-        rules.add("markdown", matcher(root, &markdown)?);
+        rules.add("markdown", patterns::compile(root, &markdown)?);
         Ok(walk(root, &rules))
     }
 
@@ -415,8 +396,8 @@ mod tests {
         write(project.path(), "notes.md")?;
         let (markdown, notes) = (patterns(&["*.md"]), patterns(&["notes.*"]));
         let mut rules = Patterns::new(project.path(), &[])?;
-        rules.add("markdown", matcher(project.path(), &markdown)?);
-        rules.add("notes", matcher(project.path(), &notes)?);
+        rules.add("markdown", patterns::compile(project.path(), &markdown)?);
+        rules.add("notes", patterns::compile(project.path(), &notes)?);
         let walk = walk(project.path(), &rules);
         assert!(walk.files.is_empty());
         assert_eq!(

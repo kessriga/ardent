@@ -13,6 +13,7 @@ use ardent_core::config::{self, Config, ConfigError};
 use ardent_core::layout::{self, ARDENT_DIR, CACHE_DIR, FILES_DIR, LOCK_FILE, STRUCTURE_FILE};
 use ardent_core::outline::Outline;
 use ardent_core::structure::{self, Stamp, Structure};
+use ardent_format::patterns::{self, PatternError};
 use ardent_format::{FormatPlugin, InstalledPackages, MAX_SOURCE_BYTES};
 use ignore::gitignore::Gitignore;
 
@@ -21,7 +22,7 @@ mod source;
 use cache_names::CacheNames;
 
 use crate::project_root;
-use crate::tracked::{self, PatternError, Patterns, TrackedFile};
+use crate::tracked::{self, Patterns, TrackedFile};
 
 /// Why a sync did not run. Nothing in `.ardent/` changed, except that the lock file may exist.
 pub enum SyncError {
@@ -97,7 +98,7 @@ pub fn run(working_dir: &Path) -> Result<Report, SyncError> {
     };
     report.errors.extend(
         packages
-            .check_other_names(|name| config.formats.contains_key(name))
+            .check_other_manifests(|name| config.formats.contains_key(name))
             .into_iter()
             .map(|err| err.to_string()),
     );
@@ -160,13 +161,13 @@ fn configured_patterns<'a>(
     for (name, settings) in &config.formats {
         if let Some(prefixes) = &settings.prefixes {
             for files in prefixes.values() {
-                tracked::matcher(root, files)?;
+                patterns::compile(root, files)?;
             }
         }
         let files = settings
             .files
             .as_ref()
-            .map(|files| tracked::matcher(root, files))
+            .map(|files| patterns::compile(root, files))
             .transpose()?;
         overrides.push(ConfiguredFormat { name, files });
     }
@@ -197,7 +198,7 @@ fn load_plugins<'a>(
                 continue;
             }
         };
-        match plugin_patterns(root, &plugin) {
+        match patterns::compile_defaults(root, &plugin.default_files, &plugin.default_prefixes) {
             Ok(defaults) => {
                 patterns.add(name, files.unwrap_or(defaults));
                 plugins.push(plugin);
@@ -209,13 +210,6 @@ fn load_plugins<'a>(
         }
     }
     (plugins, unavailable)
-}
-
-fn plugin_patterns(root: &Path, plugin: &FormatPlugin) -> Result<Gitignore, PatternError> {
-    for files in plugin.default_prefixes.values() {
-        tracked::matcher(root, files)?;
-    }
-    tracked::matcher(root, &plugin.default_files)
 }
 
 /// Takes the lock of the spec `ardent-layout`, which the operating system releases when the process ends.
