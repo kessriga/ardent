@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use ardent_core::outline::ScannedNode;
+use exports::ardent::format::scanner::{ByteRange, Guest, Metadata, Node, Position, ScanError};
 
 #[path = "../../../crates/ardent-format/src/engine.rs"]
 mod engine;

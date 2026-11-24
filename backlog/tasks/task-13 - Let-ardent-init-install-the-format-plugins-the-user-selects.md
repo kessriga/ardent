@@ -4,12 +4,16 @@ title: Let ardent init install the format plugins the user selects
 status: To Do
 assignee: []
 created_date: '2026-11-24 11:35'
+updated_date: '2026-11-24 13:03'
 labels: []
 milestone: m-3
 dependencies:
   - TASK-12
 references:
   - openspec/specs/ardent-layout/spec.md
+  - >-
+    backlog/decisions/decision-8 -
+    Run-format-plugins-as-WebAssembly-components.md
 priority: medium
 type: feature
 ordinal: 13000
@@ -38,3 +42,11 @@ installed in `.ardent/plugins/` (TASK-12). Where third-party plugins come from i
 - [ ] #3 README and specs match the new behavior
 - [ ] #4 OpenSpec change archived in the same PR when the task has one
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+For installation scope, see decision-8, “Configuration and cache scope”. A project plugin takes precedence over a
+same-named plugin in the user’s XDG configuration, and project settings override overlapping user settings. Installing
+portable plugins and selecting a user or project compilation cache are separate concerns.
+<!-- SECTION:NOTES:END -->

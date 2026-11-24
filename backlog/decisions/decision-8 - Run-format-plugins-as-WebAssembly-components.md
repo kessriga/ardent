@@ -13,11 +13,15 @@ doc-2 records the release build, fixture, and cache measurements.
 ## Decision
 
 The complete WebAssembly Interface Types (WIT) definition is in `spikes/task-11/wit/format.wit`. The package is
-`ardent:format@0.1.0`. The world is `format-plugin`. The package version identifies the interface. The plugin version
-identifies a release of a format plugin.
+`ardent:format@0.1.0`. The world is `format-plugin`. It exports the named interface `ardent:format/scanner@0.1.0`. The
+host resolves this export before calling `describe` or `scan`. An absent or unsupported interface is a plugin load
+error. The version returned by `describe` identifies the plugin release.
 
 - `describe` returns the plugin name, version, default file patterns and default search prefixes. It can run before the
   guest compiles its query.
+- For a given component and source byte sequence, `scan` must return the same nodes, ranges, labels or syntax error on
+  every supported platform, in a fresh instance and after any sequence of previous scans. A plugin may retain a compiled
+  query or other state only if it preserves this result.
 - `scan` accepts source bytes. Success returns nodes in document order, with each parent before its descendants. A
   top-level node has no parent. Other nodes give the zero-based index of their parent. Each node carries its kind,
   label, half-open byte range and label ranges. The host checks parent indices, tree order, containment and source
@@ -34,23 +38,40 @@ identifies a release of a format plugin.
 ### Installed files and fast sync
 
 Install `plugin.yaml` and `format.wasm` in `.ardent/plugins/<name>/` under version control. The manifest retains schema,
-name, version, kind, files and prefixes, and names the component. Generate the manifest's metadata from the release
-component's `describe` export when packaging. When loading it, the host checks the exported metadata against the
-manifest and reports a mismatch. Project configuration overrides the default patterns and prefixes under the existing
-rules. Only enabled project plugins run. The release can ship ready-to-install components separately from the Ardent
-binary.
+name, version, kind, files and prefixes, and names the component. Generate the manifest metadata from the release
+component's `describe` export when packaging.
+
+Before using an enabled format's defaults for discovery or pruning, verify the manifest and component together. Check
+the manifest schema, kind and directory name. Compare its name, version, default patterns and prefixes with `describe`
+from the supported interface. Cache successful verification as derived data, keyed by the manifest bytes, component
+bytes and interface the host supports. Use the same component bytes for hashing, verification and scanning. A missing
+verification record or a change to either file requires a new check, even if the manifest matches no source files. Apply
+project configuration overrides after verification.
+
+On a verification error, report the plugin and return a failure status. Treat discovery as incomplete: skip
+stale-structure deletion for that sync, retain the affected structures and stamps, and continue with files that other
+verified formats can scan. For example, changing only the Rust manifest from `*.rs` to `*.txt` must report a mismatch
+and keep existing Rust structures, even in a project without text files.
 
 For each enabled format, hash the installed component bytes once per sync. Use the full lowercase BLAKE3 hex digest as
 the existing stamp's `format_hash`, alongside format name and plugin version. Compare these before using the source
-metadata shortcut. Read the manifest to select files. A digest change invalidates old structures even when the author
-reuses a version. A missing or old-format stamp requires a scan. A pattern change alone updates tracking according to
-the existing rules.
+metadata shortcut. A digest change invalidates old structures even when the author reuses a version. A missing or
+old-format stamp requires a scan. A change to project pattern overrides updates tracking under the existing rules.
 
-Defer creating Wasmtime until a tracked file actually needs a scan. Enable Wasmtime's per-user compile cache for changed
-files. Create one instance per needed format per sync and build its query at the first scan. Reuse that instance for
-later files. A warm compile cache saves component compilation across processes. The first-scan measurements show why the
-guest still needs to reuse the query inside a process. Keep compiled native code in the runtime's trusted local cache.
-The project ships portable component bytes.
+Start Wasmtime when a format needs verification or a file needs scanning. A sync with verified packages and current
+files needs neither operation. Reuse compiled code from Wasmtime's trusted local cache. Give each active format its own
+store and instance. Build the query on its first scan and reuse it after success or a returned scan error, including a
+syntax error. If a call traps or exhausts its execution budget, keep the failed file's last good structure and stamp.
+Discard that store and instance. Before scanning the next file of that format, instantiate the compiled component in a
+fresh store with a fresh budget. Other formats keep their own instances.
+
+### Configuration and cache scope
+
+TASK-12 starts with project-installed format plugins. The agreed follow-up allows plugins and settings in the user's XDG
+configuration as well as in the project. Project settings take precedence for overlapping keys, and a project plugin
+wins over a user plugin of the same name. Wasmtime's derived compilation cache may be per-user or per-project. The cache
+holds compiled code; the plugin installation holds the portable component and manifest. TASK-13 should account for both
+installation scopes when deciding what initialization copies into a project.
 
 ### Rules carried forward
 

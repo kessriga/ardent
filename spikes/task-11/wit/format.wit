@@ -1,6 +1,6 @@
 package ardent:format@0.1.0;
 
-world format-plugin {
+interface scanner {
     record prefix {
         name: string,
         files: list<string>,
@@ -36,6 +36,10 @@ world format-plugin {
         failure(string),
     }
 
-    export describe: func() -> metadata;
-    export scan: func(source: list<u8>) -> result<list<node>, scan-error>;
+    describe: func() -> metadata;
+    scan: func(source: list<u8>) -> result<list<node>, scan-error>;
+}
+
+world format-plugin {
+    export scanner;
 }

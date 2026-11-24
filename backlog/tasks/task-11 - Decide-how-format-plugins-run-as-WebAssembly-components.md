@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-24 11:34'
-updated_date: '2026-11-24 12:08'
+updated_date: '2026-11-24 13:03'
 labels: []
 milestone: m-3
 dependencies: []
@@ -63,6 +63,9 @@ time is part of this question.
 2. Build an isolated wasm32-wasip2 Rust format plugin outside crates/ and exercise it with Wasmtime.
 3. Measure release startup and repeated scans with the compile cache disabled, empty, and warm.
 4. Record the evidence and submit the component interface, installed files, and stamp rule for owner approval.
+
+5. Resolve review findings on the interface version, early manifest verification, recovery after traps, and scan
+   determinism. Rebuild the component and repeat the release measurements.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -75,8 +78,9 @@ release measurements and reproduction steps.
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Verified the existing Rust engine inside a wasm32-wasip2 component. It returned 11 nodes and reproduced the syntax-error
-position at line 6, column 5. Warm caching reduced median load from 187.57 to 17.45 ms. Decision-8 specifies lazy
-loading and one instance per needed format per sync. All 147 workspace tests passed, along with formatting, Clippy,
-build, and strict validation of six specs. This design spike has no OpenSpec implementation change to archive.
+Decision-8 specifies the versioned scanner export, verification before file discovery and pruning, deterministic scan
+results, and recovery in a fresh store after a trap. The Rust component reproduced 11 fixture nodes and syntax error
+6:5. Across seven runs per condition, median load was 161.38 ms without caching and 14.62 ms with a warm cache. The
+build, formatting, Clippy, 147 workspace tests and strict validation of six specs passed. TASK-12 implements the
+production host. This spike has no OpenSpec implementation change to archive.
 <!-- SECTION:FINAL_SUMMARY:END -->

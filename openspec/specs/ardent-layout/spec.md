@@ -330,8 +330,8 @@ Ardent SHALL NOT read a directory that an `exclude` pattern matches.
 
 ### Requirement: Plugin locations
 
-In M1 the binary supplies the built-in formats. Under decision-8 the host SHALL load enabled plugins only from
-`.ardent/plugins/<name>/`. The release supplies components for installation into that directory.
+In M1 the binary supplies the built-in formats. The initial component host in TASK-12 SHALL load enabled plugins only
+from `.ardent/plugins/<name>/`. The release supplies components for installation into that directory.
 
 #### Scenario: Pinned Markdown plugin
 
@@ -361,9 +361,16 @@ prefixes:
     - "*.html"
 ```
 
-- **THEN** Ardent reads the default file patterns and prefixes from the manifest
-- **AND** when a file needs a scan, Ardent loads `.ardent/plugins/html/format.wasm` and checks its exported metadata
-  against the manifest
+- **THEN** before using its defaults, Ardent SHALL verify the manifest metadata against `describe` on the supported
+  `ardent:format/scanner@0.1.0` export
+- **AND** Ardent MAY reuse a successful check for the same manifest bytes, component bytes and supported interface
+
+#### Scenario: Changed manifest excludes all previously tracked files
+
+- **WHEN** only the Rust manifest changes from `*.rs` to `*.txt`, the component still declares `*.rs`, and the project
+  contains no text files
+- **THEN** the sync SHALL report the mismatch, exit with status 1 and skip stale-structure deletion
+- **AND** the existing Rust structures and stamps SHALL stay unchanged
 
 #### Scenario: View manifest
 

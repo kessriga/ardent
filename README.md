@@ -87,7 +87,8 @@ Run `backlog decision list` to find the design decisions.
 - Decided in decision-4: the layout of `.ardent/` and the YAML schema of each file in it. Every file starts with a
   `schema` version. The specs `ardent-layout` and `ardent-schemas` in `openspec/specs/` give the details.
 - Decision-3 defines view plugins. Ardent finds and rewrites references in their data. Decision-8 defines format plugins
-  as WebAssembly components. Ardent uses the manifest and component hash to check stamps before starting Wasmtime.
+  as WebAssembly components. A sync starts Wasmtime only to verify a changed or previously unverified plugin package or
+  to scan a file.
 - Decided in decision-5, during M1: an outline query can give a node a `level`, and the node then contains the siblings
   after it up to the next one with the same or a smaller level. Markdown headings nest this way.
 

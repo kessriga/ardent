@@ -3,7 +3,7 @@ id: doc-2
 title: Rust format component measurements
 type: other
 created_date: '2026-11-24 12:01'
-updated_date: '2026-11-24 12:07'
+updated_date: '2026-11-24 13:02'
 ---
 ## What ran
 
@@ -13,17 +13,22 @@ existing snapshot suite and receives 11 nodes. The self-check verifies the annot
 its nested `fn count`. The separate broken source from the native test returns line 6, column 5. Production migration
 and full snapshot parity belong to TASK-12.
 
+The host looks up both functions on the versioned export `ardent:format/scanner@0.1.0`. After scanning another source
+file and a file with a syntax error, the original fixture yields the same nodes as the first call. A separate check
+exhausts the guest's execution budget, creates a fresh store and instance from the same compiled component, and verifies
+that the next valid file returns its function node.
+
 ### Release timings
 
 Seven fresh host processes per condition on arm64 macOS 27.2.1, with rustc 1.96.0, WASI SDK 34, CPython 3.14.8, and
-Wasmtime 51.0.0. The component was 2,791,965 bytes. Each empty-cache run used a new directory. Each warm run reused the
+Wasmtime 51.0.0. The component was 2,795,960 bytes. Each empty-cache run used a new directory. Each warm run reused the
 preceding empty run's cache in a fresh process. The table gives medians in milliseconds.
 
 | Compile cache | Load and describe | First scan | Repeated scan |
 | --- | ---: | ---: | ---: |
-| Disabled | 187.57 | 72.06 | 1.50 |
-| Empty | 212.16 | 72.70 | 1.55 |
-| Warm | 17.45 | 71.05 | 1.47 |
+| Disabled | 161.38 | 67.50 | 1.40 |
+| Empty | 177.12 | 68.41 | 1.38 |
+| Warm | 14.62 | 67.39 | 1.39 |
 
 Load covers engine creation, linking WASI, reading and compiling the component or reading cached code, instantiation,
 and metadata retrieval. First scan includes building the query inside the guest. Each process then scanned the same file
@@ -43,6 +48,7 @@ export AR_wasm32_wasip2="$WASI_SDK_PATH/bin/llvm-ar"
 export CARGO_TARGET_DIR="$PWD/target/task-11"
 cargo build --locked --release --target wasm32-wasip2 --manifest-path spikes/task-11/Cargo.toml
 guest="$CARGO_TARGET_DIR/wasm32-wasip2/release/rust_format_spike.wasm"
+python -B spikes/task-11/check_recovery.py "$guest"
 python spikes/task-11/measure.py "$guest"
 cache_dir=$(mktemp -d)
 printf '[cache]\ndirectory = "%s/compiled"\n' "$cache_dir" > "$cache_dir/cache.toml"
@@ -50,8 +56,8 @@ python spikes/task-11/measure.py "$guest" --cache-config "$cache_dir/cache.toml"
 python spikes/task-11/measure.py "$guest" --cache-config "$cache_dir/cache.toml"
 ```
 
-The three invocations measure disabled, empty, and warm caches in that order. The host leaves the cache disabled unless
-supplied with a configuration. See the
+The three invocations of `measure.py` measure disabled, empty, and warm caches in that order. The host leaves the cache
+disabled unless supplied with a configuration. See the
 [Rust target documentation](https://doc.rust-lang.org/rustc/platform-support/wasm32-wasip2.html) and
 [Wasmtime cache documentation](https://docs.wasmtime.dev/cli-cache.html).
 

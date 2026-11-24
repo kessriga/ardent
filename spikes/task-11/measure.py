@@ -20,6 +20,22 @@ def call(store, function, *args):
     return value
 
 
+def instantiate(store, linker, component):
+    store.set_wasi(WasiConfig())
+    instance = linker.instantiate(store, component)
+    interface = instance.get_export_index(store, "ardent:format/scanner@0.1.0")
+    if interface is None:
+        raise ValueError("component does not export ardent:format/scanner@0.1.0")
+
+    def lookup(name):
+        index = instance.get_export_index(store, name, interface)
+        if index is None or (function := instance.get_func(store, index)) is None:
+            raise ValueError(f"scanner is missing the {name} function")
+        return function
+
+    return lookup("describe"), lookup("scan")
+
+
 def measure(component_path, cache_config):
     source = Path("crates/ardent-format/tests/rust/modules.rs").read_bytes()
     start = perf_counter_ns()
@@ -29,13 +45,11 @@ def measure(component_path, cache_config):
     engine = Engine(config)
     linker = Linker(engine)
     linker.add_wasip2()
-    store = Store(engine)
-    store.set_wasi(WasiConfig())
     component = Component.from_file(engine, component_path)
-    instance = linker.instantiate(store, component)
-    metadata = call(store, instance.get_func(store, "describe"))
+    store = Store(engine)
+    describe, scan = instantiate(store, linker, component)
+    metadata = call(store, describe)
     assert (metadata.name, metadata.version, metadata.files) == ("rust", "0.1.0", ["*.rs"])
-    scan = instance.get_func(store, "scan")
     load_ms = elapsed_ms(start)
 
     start = perf_counter_ns()
@@ -56,6 +70,8 @@ def measure(component_path, cache_config):
     broken = b"impl Engine {\n    pub fn run(&self) {}\n\n    fn helper(\n\n    fn after(&self) {}\n}\n"
     error = call(store, scan, broken)
     assert (error.line, error.column) == (6, 5)
+    assert call(store, scan, b"fn other() {}")[0].label == "fn other"
+    assert call(store, scan, source) == nodes
     return dict(load_ms=load_ms, first_scan_ms=first_ms, repeat_scan_ms=median(repeated))
 
 
