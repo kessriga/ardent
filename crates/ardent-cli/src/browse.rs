@@ -1,3 +1,5 @@
+//! Connect the terminal browser to project discovery, sync, and the source files on disk.
+
 use std::fs::{self, File};
 use std::io;
 use std::path::Path;
@@ -14,6 +16,7 @@ mod watch;
 
 pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
     let root = sync::find_root(working_dir).map_err(|err| io::Error::other(err.to_string()))?;
+    // Start watching before the first sync so edits made during that scan also trigger a refresh.
     let mut changes = watch::Changes::new(&root)?;
     let mut failed = false;
     let mut sync_files = || {
@@ -43,6 +46,8 @@ pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
     })
 }
 
+/// Read the source and its cached structure as a pair. A failed scan can leave an older structure
+/// with ranges that still fit inside the current file. Only a matching source hash makes them usable.
 fn load(root: &Path, path: &str) -> io::Result<Document> {
     let cached = root.join(ARDENT_DIR).join(layout::structure_path(path));
     let structure = Structure::from_yaml(&fs::read_to_string(cached)?).map_err(io::Error::other)?;

@@ -16,6 +16,7 @@ pub fn resize(terminal: &File, rows: u16) -> io::Result<()> {
     Ok(termios::tcsetwinsize(terminal, size)?)
 }
 
+/// Return the nonblocking master used by the test and the slave attached to the child process.
 pub fn open_terminal(rows: u16) -> io::Result<(File, File)> {
     let master = pty::openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)?;
     fd::fcntl_setfd(&master, FdFlags::CLOEXEC)?;

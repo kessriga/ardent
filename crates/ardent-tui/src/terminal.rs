@@ -1,3 +1,5 @@
+//! Own the terminal modes for a browser session and dispatch input to its navigation state.
+
 use std::io::{self, IsTerminal, Write};
 use std::time::Duration;
 
@@ -40,6 +42,7 @@ pub(super) fn run(
             }
         })
     })();
+    // Attempt both restorations even if the screen write fails. Deliver a pending signal after cleanup.
     let screen = execute!(output, Show, LeaveAlternateScreen);
     let input = terminal::disable_raw_mode();
     screen?;

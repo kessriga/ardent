@@ -1,3 +1,5 @@
+//! Lay out the file list, outline, and source preview in terminal cells.
+
 use std::borrow::Cow;
 
 use unicode_width::UnicodeWidthChar;
@@ -75,6 +77,7 @@ impl Frame {
         self.rows.push("Source".into());
         self.preview_height = height.saturating_sub(self.rows.len().saturating_sub(1));
         let node = &page.document.outline.nodes[tree.selected];
+        // Slice before decoding. Replacing an invalid UTF-8 byte can change subsequent byte offsets.
         let text = page
             .document
             .bytes
@@ -91,6 +94,7 @@ fn cursor(selected: bool) -> char {
     if selected { '>' } else { ' ' }
 }
 
+/// Map project text to printable characters before measuring or writing it to the terminal.
 fn display(ch: char) -> char {
     match ch {
         '\t' => ' ',

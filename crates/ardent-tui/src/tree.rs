@@ -1,3 +1,5 @@
+//! Keyboard navigation over the nodes of one outline in document order.
+
 use std::collections::HashSet;
 use std::io;
 
@@ -8,6 +10,7 @@ struct Row {
     label: String,
     depth: usize,
     parent: Option<usize>,
+    /// Exclusive end of the subtree in document order. A closed branch skips straight to this index.
     end: usize,
     expanded: bool,
 }
@@ -18,6 +21,7 @@ pub(crate) struct Tree {
 }
 
 impl Tree {
+    /// Index the parent links in node paths. A parent and child can cover the same source range.
     pub(crate) fn new(outline: &Outline) -> io::Result<Self> {
         let nodes = &outline.nodes;
         let invalid =
@@ -102,6 +106,7 @@ impl Tree {
         }
     }
 
+    /// Carry expansion and selection across a sync by node path. Row indices belong to one outline.
     pub(crate) fn restore(&mut self, outline: &Outline, old: &Tree, previous: &Outline) {
         let expanded: HashSet<_> = old
             .rows
@@ -120,6 +125,8 @@ impl Tree {
     }
 }
 
+/// Keep the parent path escaped for lookup and decode the last label for display. Slashes in the source path and
+/// escaped slashes in a label are literal. An unescaped slash after the first unescaped `#` separates labels.
 fn split_path(path: &str) -> (Option<&str>, String) {
     let mut in_outline = false;
     let mut delimiter = None;

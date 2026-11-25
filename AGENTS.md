@@ -38,9 +38,10 @@ stop and ask me. Do not settle a core design question inside implementation code
 - `crates/ardent-format`: the Wasmtime host. It verifies installed packages and validates scan results.
 - `guests/`: the shared tree-sitter query engine and the Markdown and Rust components. When changing guests, follow
   `guests/README.md` to run their tests and rebuild the release packages in `plugins/`.
-- `crates/ardent-cli`: the `ardent` binary. It depends on `ardent-core` and `ardent-format`.
-- Dependency direction: `ardent-core ← ardent-format ← ardent-cli`. Add crates (for example a TUI crate or a plugin
-  host) when a task needs them, and keep the direction acyclic with `ardent-core` at the bottom.
+- `crates/ardent-tui`: keyboard navigation and terminal rendering. It receives outlines and source bytes from the CLI.
+- `crates/ardent-cli`: the `ardent` binary. It owns project discovery, sync, and file watching.
+- Keep `ardent-core` at the bottom of the dependency graph. The CLI uses it directly and through `ardent-format` and
+  `ardent-tui`.
 - Workspace lints deny `unwrap`, `panic!`, and `unsafe`. Return typed errors from library crates.
 
 ## Verification gate

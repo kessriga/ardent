@@ -59,10 +59,11 @@ impl fmt::Display for SyncError {
     }
 }
 
-/// What a sync did. `warnings` and `errors` are messages for standard error; an error means that the sync is
-/// incomplete.
+/// Results of a sync. A project error or a per-file error means that the sync is incomplete.
+/// Warnings alone permit a successful exit.
 #[derive(Default)]
 pub struct Report {
+    /// Tracked source paths in sorted order, including files that failed to scan.
     pub files: Vec<(String, Option<String>)>,
     pub scanned: usize,
     pub removed: usize,

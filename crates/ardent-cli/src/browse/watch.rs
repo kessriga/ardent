@@ -8,6 +8,7 @@ use notify::{
     Config, Event, EventHandler, EventKind, PollWatcher, RecommendedWatcher, RecursiveMode, Watcher,
 };
 
+/// Collect filesystem notifications for the next browser sync. The watcher stays alive for the session.
 pub(super) struct Changes {
     _watcher: Box<dyn Watcher>,
     events: Receiver<notify::Result<()>>,
@@ -40,6 +41,7 @@ impl Changes {
         })
     }
 
+    /// Group pending events into a single sync. Later events share the first event's deadline.
     pub(super) fn ready(&mut self) -> io::Result<bool> {
         for event in self.events.try_iter() {
             event.map_err(io::Error::other)?;
@@ -66,6 +68,7 @@ fn start<W: Watcher + 'static>(
     Ok(Box::new(watcher))
 }
 
+/// Sync writes its own cache. Ignore those notifications, but honor a request to rescan after lost events.
 fn relevant(event: &Event, cache: &Path) -> bool {
     !matches!(event.kind, EventKind::Access(_))
         && (event.need_rescan() || event.paths.iter().any(|path| !path.starts_with(cache)))

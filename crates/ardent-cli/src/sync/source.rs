@@ -1,5 +1,7 @@
 use std::io::{self, Read};
 
+/// Read the full source for a scan or preview, returning an error if it exceeds `limit` bytes.
+/// Pass the observed file size in `size` for an early size check.
 pub(crate) fn read(mut file: impl Read, size: u64, limit: usize) -> io::Result<Vec<u8>> {
     let too_large = || {
         io::Error::new(
