@@ -233,3 +233,88 @@ fn healthy_file_refreshes_with_an_unreadable_ignored_directory() -> io::Result<(
     fs::set_permissions(private, fs::Permissions::from_mode(0o700))?;
     Ok(())
 }
+
+#[test]
+fn losing_a_nested_project_never_syncs_the_enclosing_project() -> io::Result<()> {
+    let project = common::temp_dir()?;
+    let outer = project.path();
+    let inner = outer.join("nested");
+    fs::create_dir(&inner)?;
+    for root in [inner.as_path(), outer] {
+        assert!(
+            common::run_init(root, &["--plugins", "markdown"])?
+                .status
+                .success()
+        );
+    }
+    fs::write(outer.join("parent.md"), "# Parent\n")?;
+    let (mut master, slave) = pty::open_terminal(12)?;
+    let mut session = Session::open(&inner, &slave)?;
+    wait_for(&mut master, "Enter open")?;
+    fs::rename(inner.join(".ardent"), outer.join("moved-inner"))?;
+    wait_for(&mut master, "\x1b[?1049l")?;
+    assert!(!session.0.wait()?.success());
+    assert!(!outer.join(".ardent/cache").exists());
+    Ok(())
+}
+
+#[test]
+fn rechecks_an_open_file_when_a_restore_preserves_its_stamp() -> io::Result<()> {
+    let project = common::temp_dir()?;
+    let root = project.path();
+    assert!(
+        common::run_init(root, &["--plugins", "markdown"])?
+            .status
+            .success()
+    );
+    let notes = root.join("notes.md");
+    fs::write(&notes, "# First\n")?;
+    let time = File::open(&notes)?.metadata()?.modified()?;
+    let (mut master, slave) = pty::open_terminal(12)?;
+    let mut session = Session::open(root, &slave)?;
+    wait_for(&mut master, "Enter open")?;
+    master.write_all(b"\r")?;
+    wait_for(&mut master, "# First")?;
+    let replacement = root.join("replacement");
+    fs::write(&replacement, "# Other\n")?;
+    File::options()
+        .write(true)
+        .open(&replacement)?
+        .set_modified(time)?;
+    fs::rename(replacement, notes)?;
+    wait_for(&mut master, "# Other")?;
+    master.write_all(b"q")?;
+    wait_for(&mut master, "\x1b[?1049l")?;
+    assert!(session.0.wait()?.success());
+    Ok(())
+}
+
+#[test]
+fn restoring_read_permission_recovers_without_another_edit() -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = common::temp_dir()?;
+    let root = project.path();
+    assert!(
+        common::run_init(root, &["--plugins", "markdown"])?
+            .status
+            .success()
+    );
+    let notes = root.join("private.md");
+    fs::write(&notes, "# Readable\n")?;
+    fs::set_permissions(&notes, fs::Permissions::from_mode(0o000))?;
+    if File::open(&notes).is_ok() {
+        return Ok(()); // A privileged process can read a mode-000 file.
+    }
+    let (mut master, slave) = pty::open_terminal(12)?;
+    let mut session = Session::open(root, &slave)?;
+    wait_for(&mut master, "Enter open")?;
+    master.write_all(b"\r")?;
+    wait_for(&mut master, "Permission denied")?;
+    fs::set_permissions(&notes, fs::Permissions::from_mode(0o600))?;
+    wait_for(&mut master, "# Readable")?;
+    master.write_all(b"q")?;
+    wait_for(&mut master, "\x1b[?1049l")?;
+    assert!(session.0.wait()?.success());
+    Ok(())
+}
