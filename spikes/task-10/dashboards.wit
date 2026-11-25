@@ -1,0 +1,35 @@
+package ardent:plugin@0.1.0;
+
+interface dashboards {
+    use types.{field, node-path};
+
+    record descriptor { id: string, title: string }
+    enum status { confirmed, unconfirmed, orphan }
+    record anchor {
+        path: node-path,
+        fingerprint: string,
+        status: status,
+        was: option<node-path>,
+        quote: option<string>,
+        lines: option<string>,
+    }
+    record stored-entry { id: string, created: string, anchor: anchor, fields: list<field> }
+    record derived-entry { node: node-path, fields: list<field> }
+    variant entry { stored(stored-entry), derived(derived-entry) }
+
+    variant target { node(node-path), stored-id(string) }
+    record item { label: string, target: option<target> }
+    record outline-item { item: item, parent: option<u32> }
+    record lane { label: string, cards: list<item> }
+    record row { cells: list<string>, target: option<target> }
+    record table { columns: list<string>, rows: list<row> }
+    variant layout { outline(list<outline-item>), board(list<lane>), table(table) }
+
+    %list: func() -> list<descriptor>;
+    render: func(id: string, now: string, settings: list<field>, entries: list<entry>) -> result<layout, string>;
+}
+
+world dashboard-view {
+    include stored-view;
+    export dashboards;
+}

@@ -113,6 +113,9 @@ Run `backlog decision list` to find the design decisions.
   to scan a file.
 - Decided in decision-5, during M1: an outline query can give a node a `level`, and the node then contains the siblings
   after it up to the next one with the same or a smaller level. Markdown headings nest this way.
+- [Decision-9](backlog/decisions/decision-9%20-%20View-plugins-contribute-read-only-dashboards-that-Ardent-draws.md)
+  defines read-only dashboards. A view plugin supplies an outline, board, or table for Ardent to draw. Recent activity
+  uses the host-written `created` time on stored view entries.
 
 ## Glossary
 
