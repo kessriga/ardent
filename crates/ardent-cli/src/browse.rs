@@ -4,6 +4,7 @@ use std::fs::{self, File};
 use std::io;
 use std::path::Path;
 use std::process::ExitCode;
+use std::thread::{self, JoinHandle};
 
 use ardent_core::layout::{self, ARDENT_DIR};
 use ardent_core::structure::{self, Structure};
@@ -17,26 +18,30 @@ mod watch;
 pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
     let root = sync::find_root(working_dir).map_err(|err| io::Error::other(err.to_string()))?;
     // Start watching before the first sync so edits made during that scan also trigger a refresh.
-    let mut changes = watch::Changes::new(&root)?;
-    let mut failed = false;
-    let mut sync_files = || {
-        let report = sync::run(&root).map_err(|err| io::Error::other(err.to_string()))?;
-        failed = !report.errors.is_empty() || report.files.iter().any(|(_, error)| error.is_some());
-        Ok(FileList {
-            files: report.files,
-            messages: report.errors.into_iter().chain(report.warnings).collect(),
-        })
-    };
-    let files = sync_files()?;
+    let changes = watch::Changes::new(&root)?;
+    let (files, mut failed) = sync_files(&root, Vec::new())?;
+    let mut running: Option<JoinHandle<_>> = None;
     ardent_tui::run(
         files,
         |path| load(&root, path),
         || {
-            if changes.ready()? {
-                sync_files().map(Some)
-            } else {
-                Ok(None)
+            // A sync can wait on another process's lock. The input thread only joins finished workers.
+            if running.as_ref().is_some_and(JoinHandle::is_finished)
+                && let Some(done) = running.take()
+            {
+                let (list, errors) = done
+                    .join()
+                    .map_err(|_| io::Error::other("browser sync worker panicked"))??;
+                failed = errors;
+                return Ok(Some(list));
             }
+            if running.is_none()
+                && let Some(warnings) = changes.ready()?
+            {
+                let root = root.clone();
+                running = Some(thread::Builder::new().spawn(move || sync_files(&root, warnings))?);
+            }
+            Ok(None)
         },
     )?;
     Ok(if failed {
@@ -44,6 +49,24 @@ pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
     } else {
         ExitCode::SUCCESS
     })
+}
+
+fn sync_files(root: &Path, watcher_warnings: Vec<String>) -> io::Result<(FileList, bool)> {
+    let report = sync::run(root).map_err(|err| io::Error::other(err.to_string()))?;
+    let failed = !report.errors.is_empty() || report.files.iter().any(|(_, error)| error.is_some());
+    let messages = report
+        .errors
+        .into_iter()
+        .chain(report.warnings)
+        .chain(watcher_warnings)
+        .collect();
+    Ok((
+        FileList {
+            files: report.files,
+            messages,
+        },
+        failed,
+    ))
 }
 
 /// Read the source and its cached structure as a pair. A failed scan can leave an older structure

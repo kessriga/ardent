@@ -86,9 +86,13 @@ selected node.
 | Escape | Return to the file list. |
 | q | Quit. |
 
-When you save a tracked file in an editor, the browser runs sync and keeps the selected node if its node path still
-exists. A file with a scan error shows a diagnostic. Its source preview returns after a successful scan. Other files
-remain available.
+When you save a tracked file in an editor, the browser runs sync in the background. You can navigate or quit while it
+waits for the project lock. If the watcher cannot read a path, the file list shows a warning and other files stay
+available.
+
+After a refresh, the browser keeps the selected node if its node path still exists. It also keeps your place in the
+source preview if the selected passage is unchanged. A scan error hides the preview until the file parses again. The
+browser then returns to the previous node if it still exists.
 
 ### Supported outlines
 

@@ -119,9 +119,17 @@ fn browses_from_a_subdirectory_and_refreshes_while_open() -> io::Result<()> {
     wait_for(&mut master, "syntax error")?;
     fs::write(&rust, "fn healthy() {}\n")?;
     wait_for(&mut master, "fn healthy() {}")?;
+    master.write_all(b"\x1b[C")?;
+    wait_for(&mut master, ">     fn healthy")?;
     fs::write(&rust, "fn healthy(")?;
     let broken = wait_for(&mut master, "syntax error")?;
     assert!(!broken.contains("fn healthy() {}"), "{broken}");
+    fs::write(&rust, "fn first() {}\nfn healthy() {}\n")?;
+    let repaired = wait_for(&mut master, ">     fn healthy")?;
+    assert!(
+        repaired.contains("fn healthy() {}") && !repaired.contains("fn first() {}"),
+        "{repaired}"
+    );
     fs::remove_file(&rust)?;
     wait_for(&mut master, "Tracked files")?;
     pty::resize(&slave, 8)?;
@@ -150,5 +158,78 @@ fn interruption_restores_an_empty_browser() -> io::Result<()> {
     wait_for(&mut master, "\x1b[?1049l")?;
     assert_eq!(session.0.wait()?.signal(), Some(Signal::TERM.as_raw()));
     assert_eq!(termios::tcgetattr(&slave)?.local_modes, original);
+    Ok(())
+}
+
+#[test]
+fn quit_during_refresh_restores_terminal_before_the_sync_lock_is_released() -> io::Result<()> {
+    let project = common::temp_dir()?;
+    let dir = project.path();
+    assert!(
+        common::run_init(dir, &["--plugins", "markdown"])?
+            .status
+            .success()
+    );
+    fs::write(dir.join("notes.md"), "# First\n")?;
+    let (mut master, slave) = pty::open_terminal(12)?;
+    let original = termios::tcgetattr(&slave)?.local_modes;
+    let mut session = Session::open(dir, &slave)?;
+    wait_for(&mut master, "Enter open")?;
+    fs::write(dir.join("watch-ready.md"), "# Ready\n")?;
+    wait_for(&mut master, "watch-ready.md")?;
+    let lock = File::options()
+        .write(true)
+        .open(dir.join(".ardent/cache/lock"))?;
+    lock.lock()?;
+    fs::write(dir.join("notes.md"), "# Second\n")?;
+    // Allow the polling backend's one-second interval and the event batch deadline to elapse.
+    thread::sleep(Duration::from_secs(2));
+    master.write_all(b"\x1b[B\r")?;
+    wait_for(&mut master, "# Ready")?;
+    master.write_all(b"q")?;
+    wait_for(&mut master, "\x1b[?1049l")?;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Some(status) = session.0.try_wait()? {
+            assert!(status.success(), "{status}");
+            break;
+        }
+        if Instant::now() >= deadline {
+            return Err(io::Error::other("quit waited on the sync lock"));
+        }
+        thread::sleep(Duration::from_millis(15));
+    }
+    assert_eq!(termios::tcgetattr(&slave)?.local_modes, original);
+    Ok(())
+}
+
+#[test]
+fn healthy_file_refreshes_with_an_unreadable_ignored_directory() -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = common::temp_dir()?;
+    let root = project.path();
+    assert!(
+        common::run_init(root, &["--plugins", "markdown"])?
+            .status
+            .success()
+    );
+    fs::write(root.join(".gitignore"), "private/\n")?;
+    let private = root.join("private");
+    fs::create_dir(&private)?;
+    fs::set_permissions(&private, fs::Permissions::from_mode(0o000))?;
+    let notes = root.join("notes.md");
+    fs::write(&notes, "# Before\n")?;
+    let (mut master, slave) = pty::open_terminal(12)?;
+    let mut session = Session::open(root, &slave)?;
+    wait_for(&mut master, "Enter open")?;
+    master.write_all(b"\r")?;
+    wait_for(&mut master, "# Before")?;
+    fs::write(notes, "# After\n")?;
+    wait_for(&mut master, "# After")?;
+    master.write_all(b"q")?;
+    wait_for(&mut master, "\x1b[?1049l")?;
+    assert!(session.0.wait()?.success());
+    fs::set_permissions(private, fs::Permissions::from_mode(0o700))?;
     Ok(())
 }

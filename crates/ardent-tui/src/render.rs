@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 use unicode_width::UnicodeWidthChar;
 
-use crate::{Browser, Page};
+use crate::{Browser, Page, Screen};
 
 pub(super) struct Frame {
     pub rows: Vec<String>,
@@ -21,8 +21,8 @@ impl Frame {
         };
         let body = height.saturating_sub(2);
         let files = &browser.list.files;
-        let help = match &browser.page {
-            None => {
+        let help = match &browser.screen {
+            Screen::Files => {
                 frame.rows.push("Tracked files".into());
                 let available = body.saturating_sub(usize::from(!browser.list.messages.is_empty()));
                 if files.is_empty() {
@@ -40,13 +40,16 @@ impl Frame {
                 }
                 "Up/Down select   Enter open   q quit"
             }
-            Some(result) => {
+            Screen::Outline(page) => {
                 frame.rows.push(files[browser.selected].0.clone());
-                match result {
-                    Ok(page) => frame.outline(page, width, body),
-                    Err(error) => frame.rows.push(error.clone()),
-                }
+                frame.outline(page, width, body);
                 "Arrows navigate   [ ] siblings   PgUp/PgDn source   Esc files   q quit"
+            }
+            Screen::Unavailable { message, .. } => {
+                frame
+                    .rows
+                    .extend([files[browser.selected].0.clone(), message.clone()]);
+                "Esc files   q quit"
             }
         };
         frame.rows.truncate(height.saturating_sub(1));

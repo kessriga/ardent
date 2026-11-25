@@ -10,7 +10,7 @@ use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlt
 use crossterm::{execute, queue};
 
 use crate::render::Frame;
-use crate::{Browser, Document, FileList};
+use crate::{Browser, Document, FileList, Screen};
 
 pub(super) fn run(
     browser: Browser,
@@ -87,7 +87,12 @@ fn event_loop(
                 frame = paint(output, &browser)?;
             }
             Event::Resize(_, _) => {
-                if let Some(Ok(page)) = &mut browser.page {
+                if let Screen::Outline(page)
+                | Screen::Unavailable {
+                    previous: Some(page),
+                    ..
+                } = &mut browser.screen
+                {
                     page.scroll = 0;
                 }
                 frame = paint(output, &browser)?;

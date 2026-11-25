@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-19 16:29'
-updated_date: '2026-11-25 04:04'
+updated_date: '2026-11-25 08:59'
 labels: []
 milestone: m-1
 dependencies:
@@ -50,14 +50,18 @@ sets the crate boundary between the document model and the interface.
 3. Expose ardent browse, render the source preview, and refresh after external edits under decision-2.
 4. Exercise the terminal command, update the README, run the project gate, and archive the OpenSpec change in the
    implementation PR.
+
+5. Fix the four PR review findings. Verify quit under a held sync lock, continued browsing after a watcher path error,
+   node selection after repair, and scroll position after an unrelated edit.
 <!-- SECTION:PLAN:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added ardent browse. Select a tracked file, navigate its outline, and scroll the source text of the selected node. The
-browser refreshes after edits and reports stale or unreadable files while healthy files stay available. The ardent-tui
-crate owns navigation and rendering. Verified with 144 workspace tests, including state transitions and terminal
-sessions on macOS with native notifications and polling. Build, format, Clippy, Markdown, and strict OpenSpec checks
-passed.
+Added ardent browse for navigating tracked files, expanding outline nodes, and reading their source. The ardent-tui
+crate owns navigation and rendering. During live sync the browser accepts input even when another process holds the
+project lock. A watcher error on one path leaves healthy files available. Repairing a file restores its selected node,
+and unrelated edits preserve the scroll position in an unchanged passage. All 150 workspace tests passed on macOS.
+Terminal tests passed with both native notifications and polling. Build, format, Clippy, Rust API documentation,
+Markdown, and strict OpenSpec checks passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
