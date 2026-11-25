@@ -6,40 +6,12 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use rustix::fs::{self as posix, Mode, OFlags};
-use rustix::io::{self as fd, FdFlags};
 use rustix::process::{self, Pid, Signal};
-use rustix::pty::{self, OpenptFlags};
-use rustix::termios::{self, LocalModes, Winsize};
+
+use rustix::termios::{self, LocalModes};
 
 use super::{stage_release, temp_dir};
-
-fn resize(terminal: &File, rows: u16) -> io::Result<()> {
-    let size = Winsize {
-        ws_row: rows,
-        ws_col: 80,
-        ws_xpixel: 0,
-        ws_ypixel: 0,
-    };
-    Ok(termios::tcsetwinsize(terminal, size)?)
-}
-
-fn open_terminal(rows: u16) -> io::Result<(File, File)> {
-    let master = pty::openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)?;
-    fd::fcntl_setfd(&master, FdFlags::CLOEXEC)?;
-    pty::grantpt(&master)?;
-    pty::unlockpt(&master)?;
-    let name = pty::ptsname(&master, Vec::new())?;
-    let slave = File::from(posix::open(
-        name.as_c_str(),
-        OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
-        Mode::empty(),
-    )?);
-    let master = File::from(master);
-    resize(&slave, rows)?;
-    posix::fcntl_setfl(&master, posix::fcntl_getfl(&master)? | OFlags::NONBLOCK)?;
-    Ok((master, slave))
-}
+use crate::pty::{open_terminal, resize};
 
 fn interact(
     project: &Path,

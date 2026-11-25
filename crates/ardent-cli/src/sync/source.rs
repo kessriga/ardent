@@ -1,6 +1,6 @@
 use std::io::{self, Read};
 
-pub(super) fn read(mut file: impl Read, size: u64, limit: usize) -> io::Result<Vec<u8>> {
+pub(crate) fn read(mut file: impl Read, size: u64, limit: usize) -> io::Result<Vec<u8>> {
     let too_large = || {
         io::Error::new(
             io::ErrorKind::InvalidData,

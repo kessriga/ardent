@@ -3,8 +3,8 @@
 Ardent is a terminal outliner for structured text. It reads the files in a project, such as Markdown, Rust, or HTML, and
 shows each file as a tree of nodes, in the same outline form that Roam Research and Tana use.
 
-> **Status:** The CLI provides `ardent init` and `ardent sync`. Markdown and Rust ship as separate WebAssembly
-> components. Install the formats your project uses. Run `backlog milestone list` for milestone progress.
+> **Status:** The CLI provides `ardent init`, `ardent sync`, and `ardent browse`. Markdown and Rust ship as separate
+> WebAssembly components. Install the formats your project uses. Run `backlog milestone list` for milestone progress.
 
 ## Idea
 
@@ -69,6 +69,28 @@ format plugin are unchanged, and it deletes the structure of a file that Ardent 
 ignore rules, and it skips a subdirectory that holds its own `.ardent/` as a separate project. When a file has a syntax
 error, `ardent sync` reports the file with the line and column of the error, keeps the structure from its last scan, and
 exits with status 1.
+
+### Browse a project
+
+Run `ardent browse` in a terminal anywhere inside the project. Ardent runs sync and lists the tracked source files.
+Select a file with Up or Down and press Enter. The outline opens at the file node. The source pane shows the text of the
+selected node.
+
+| Key | Action |
+| --- | --- |
+| Up / Down | Select the previous or next visible row. |
+| Right | Expand a node, then move to its first child. |
+| Left | Collapse a node, or move to its parent. |
+| [ / ] | Move to the previous or next sibling. |
+| Page Up / Page Down | Scroll the source text. |
+| Escape | Return to the file list. |
+| q | Quit. |
+
+When you save a tracked file in an editor, the browser runs sync and keeps the selected node if its node path still
+exists. A file with a scan error shows a diagnostic. Its source preview returns after a successful scan. Other files
+remain available.
+
+### Supported outlines
 
 The outline of a Markdown file holds headings, paragraphs, lists and their items, code blocks, block quotes, tables, and
 front matter. A heading contains the blocks after it, up to the next heading of the same or a higher rank: `## Usage`
@@ -145,6 +167,7 @@ cargo build
 cargo run -p ardent-cli   # the `ardent` binary
 ```
 
-The host workspace has three crates. `ardent-core` holds the document model, structure files and configuration.
-`ardent-format` verifies packages and runs components in Wasmtime. `ardent-cli` builds the `ardent` binary. A separate
-guest workspace builds the two release packages. See the [guest build instructions](guests/README.md).
+The host workspace has four crates. `ardent-core` holds the document model, structure files and configuration.
+`ardent-format` verifies packages and runs components in Wasmtime. `ardent-cli` builds the `ardent` binary. `ardent-tui`
+handles keyboard navigation and draws the browser. A separate guest workspace builds the two release packages. See the
+[guest build instructions](guests/README.md).

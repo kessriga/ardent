@@ -18,7 +18,7 @@ use ardent_format::{FormatPlugin, InstalledPackages, MAX_SOURCE_BYTES};
 use ignore::gitignore::Gitignore;
 
 mod cache_names;
-mod source;
+pub(crate) mod source;
 use cache_names::CacheNames;
 
 use crate::project_root;
@@ -63,7 +63,7 @@ impl fmt::Display for SyncError {
 /// incomplete.
 #[derive(Default)]
 pub struct Report {
-    pub tracked: usize,
+    pub files: Vec<(String, Option<String>)>,
     pub scanned: usize,
     pub removed: usize,
     pub warnings: Vec<String>,
@@ -110,27 +110,27 @@ pub fn run(working_dir: &Path) -> Result<Report, SyncError> {
         .warnings
         .extend(walk.warnings.iter().map(ToString::to_string));
     report.errors.extend(walk.errors.iter().cloned());
-    report.tracked = walk.files.len();
     let stale = if unavailable.is_empty() && walk.errors.is_empty() {
         StaleStructures::Remove
     } else {
         StaleStructures::Keep
     };
     report.removed = reconcile_cache(&files_dir, &walk.files, stale, &mut report.errors);
-    for file in &walk.files {
+    for file in walk.files {
         let plugin = &mut plugins[file.format];
-        match sync_file(&root, &ardent_dir, &file.path, plugin, &unavailable) {
-            Ok(Outcome::Scanned) => report.scanned += 1,
-            Ok(Outcome::Unchanged | Outcome::Restamped) => {}
-            Err(err) => report
-                .errors
-                .push(format!("{}: {err} (format {})", file.path, plugin.name)),
+        let outcome = sync_file(&root, &ardent_dir, &file.path, plugin, &unavailable);
+        if matches!(outcome, Ok(Outcome::Scanned)) {
+            report.scanned += 1;
         }
+        let error = outcome
+            .err()
+            .map(|err| format!("{err} (format {})", plugin.name));
+        report.files.push((file.path, error));
     }
     Ok(report)
 }
 
-fn find_root(working_dir: &Path) -> Result<PathBuf, SyncError> {
+pub(crate) fn find_root(working_dir: &Path) -> Result<PathBuf, SyncError> {
     match project_root::find(working_dir) {
         Ok(Some(root)) => Ok(root),
         Ok(None) => Err(SyncError::NoProject(working_dir.to_path_buf())),
