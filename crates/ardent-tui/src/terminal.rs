@@ -83,10 +83,11 @@ fn event_loop(
                 {
                     return Ok(None::<i32>);
                 }
-                browser.key(key.code, frame.preview_height, frame.more, &load);
+                browser.key(key.code, frame.page_height, frame.more, &load);
                 frame = paint(output, &browser)?;
             }
             Event::Resize(_, _) => {
+                browser.diagnostic_scroll = 0;
                 if let Screen::Outline(page)
                 | Screen::Unavailable {
                     previous: Some(page),

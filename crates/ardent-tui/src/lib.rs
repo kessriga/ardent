@@ -77,6 +77,7 @@ struct Browser {
     list: FileList,
     selected: usize,
     screen: Screen,
+    diagnostic_scroll: usize,
 }
 
 impl Browser {
@@ -110,6 +111,9 @@ impl Browser {
     fn refresh(&mut self, list: FileList, load: &impl Fn(&str) -> io::Result<Document>) {
         let current = self.list.files.get(self.selected).map(|(path, _)| path);
         let index = current.and_then(|path| list.files.binary_search_by(|(p, _)| p.cmp(path)).ok());
+        if self.list.messages != list.messages {
+            self.diagnostic_scroll = 0;
+        }
         self.list = list;
         self.selected =
             index.unwrap_or_else(|| self.selected.min(self.list.files.len().saturating_sub(1)));
@@ -130,6 +134,10 @@ impl Browser {
         match (&mut self.screen, key) {
             (_, KeyCode::Esc) => self.screen = Screen::Files,
             (Screen::Files, KeyCode::Enter) => self.open(load),
+            (Screen::Files, KeyCode::PageUp) => {
+                self.diagnostic_scroll = self.diagnostic_scroll.saturating_sub(height);
+            }
+            (Screen::Files, KeyCode::PageDown) if more => self.diagnostic_scroll += height,
             (Screen::Files, KeyCode::Up) => self.selected = self.selected.saturating_sub(1),
             (Screen::Files, KeyCode::Down) => {
                 self.selected = (self.selected + 1).min(self.list.files.len().saturating_sub(1))
@@ -171,6 +179,7 @@ pub fn run(
         list,
         selected: 0,
         screen: Screen::Files,
+        diagnostic_scroll: 0,
     };
     terminal::run(browser, load, refresh)
 }
@@ -208,11 +217,72 @@ mod tests {
             list: files(None),
             selected: 0,
             screen: Screen::Files,
+            diagnostic_scroll: 0,
         };
         browser.key(KeyCode::Enter, 5, false, &document);
         browser.key(KeyCode::Right, 5, false, &document);
         browser.key(KeyCode::PageDown, 5, true, &document);
         browser
+    }
+
+    #[test]
+    fn file_picker_pages_through_wrapped_diagnostics() {
+        let mut browser = reading_passage();
+        browser.key(KeyCode::Esc, 0, false, &document);
+        browser.list.messages = vec![
+            "a".repeat(61),
+            "second warning".into(),
+            "last warning".into(),
+        ];
+        let first = Frame::draw(&browser, 30, 7);
+        assert!(first.rows.iter().any(|row| row == "> notes.md"));
+        assert!(first.rows.iter().any(|row| row == &"a".repeat(30)));
+        assert!(
+            first
+                .rows
+                .iter()
+                .any(|row| row.contains("PgUp/PgDn messages"))
+        );
+        assert!(first.more);
+        browser.key(KeyCode::PageDown, first.page_height, first.more, &document);
+        let last = Frame::draw(&browser, 30, 7);
+        assert!(!last.more);
+        assert!(last.rows.iter().any(|row| row == "second warning"));
+        assert!(last.rows.iter().any(|row| row == "last warning"));
+        browser.key(KeyCode::PageUp, last.page_height, last.more, &document);
+        assert_eq!(Frame::draw(&browser, 30, 7).rows, first.rows);
+
+        browser.key(KeyCode::PageDown, first.page_height, first.more, &document);
+        let mut changed = files(None);
+        changed.messages.push("new warning".into());
+        browser.refresh(changed, &document);
+        assert!(
+            Frame::draw(&browser, 30, 7)
+                .rows
+                .iter()
+                .any(|row| row == "new warning")
+        );
+    }
+
+    #[test]
+    fn narrow_outline_shows_navigation_and_exit_keys() {
+        let browser = reading_passage();
+        let rows = Frame::draw(&browser, 24, 12).rows;
+        for hint in [
+            "Arrows navigate",
+            "[ ] siblings",
+            "PgUp/PgDn source",
+            "Esc files",
+            "q quit",
+        ] {
+            assert!(
+                rows.iter().any(|row| row.contains(hint)),
+                "{hint:?} missing from {rows:?}"
+            );
+        }
+        assert!(rows.iter().any(|row| row.contains("passage")));
+        assert!(rows.iter().any(|row| row == "line 5"));
+        assert_eq!(Frame::draw(&browser, 1, 1).rows, ["q"]);
     }
 
     #[test]
