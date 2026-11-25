@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-19 16:29'
-updated_date: '2026-11-25 08:59'
+updated_date: '2026-11-25 20:10'
 labels: []
 milestone: m-1
 dependencies:
@@ -53,15 +53,20 @@ sets the crate boundary between the document model and the interface.
 
 5. Fix the four PR review findings. Verify quit under a held sync lock, continued browsing after a watcher path error,
    node selection after repair, and scroll position after an unrelated edit.
+
+6. Pin browser sync to its project, recover from stale stamps and permission changes, watch ancestor ignore rules, and
+   suppress refreshes from ignored build output. Verify all four watch cases and project isolation in temporary
+   projects. Make diagnostics readable at any viewport size, handle CRLF, and keep quit visible in narrow terminals.
 <!-- SECTION:PLAN:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added ardent browse for navigating tracked files, expanding outline nodes, and reading their source. The ardent-tui
-crate owns navigation and rendering. During live sync the browser accepts input even when another process holds the
-project lock. A watcher error on one path leaves healthy files available. Repairing a file restores its selected node,
-and unrelated edits preserve the scroll position in an unchanged passage. All 150 workspace tests passed on macOS.
-Terminal tests passed with both native notifications and polling. Build, format, Clippy, Rust API documentation,
-Markdown, and strict OpenSpec checks passed.
+Added ardent browse for navigating tracked files, expanding outline nodes, and reading their source. The browser keeps
+its project root and stays responsive while sync waits for the project lock. It restores the selected node and reading
+position, rechecks a file restored with its old timestamp, and recovers when read access returns. Git ignore rules
+update the picker. Ignored build writes leave it idle. Diagnostics wrap and page, narrow terminals show exit controls,
+and CRLF source displays correctly. All 160 workspace tests passed on macOS. Terminal checks covered native
+notifications, polling, and deletion during a 400-file import. The CLI passed cargo check for Linux and Windows. Build,
+formatting, Clippy, Rust API documentation, and strict OpenSpec validation passed.
 <!-- SECTION:FINAL_SUMMARY:END -->

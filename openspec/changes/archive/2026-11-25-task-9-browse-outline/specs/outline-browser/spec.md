@@ -20,6 +20,11 @@ file list.
 - **THEN** the browser lists `README.md` and `docs/guide.md` in that order
 - **AND** selecting `docs/guide.md` and pressing Enter opens its file node with its immediate children visible
 
+#### Scenario: Read project diagnostics
+
+- **WHEN** the file list contains diagnostics that exceed the terminal width or height
+- **THEN** the browser wraps their text and the reader can page through every message
+
 #### Scenario: Empty project
 
 - **WHEN** sync finds no tracked source files
@@ -72,6 +77,23 @@ disappeared.
 
 - **WHEN** a reader changes a selected paragraph in an editor and the node path survives the sync
 - **THEN** the browser keeps the paragraph selected and displays its new source text
+
+#### Scenario: Restore a file or its read permission
+
+- **WHEN** a reader replaces an open source file with different content of the same size and modification time
+- **THEN** the browser checks its content and displays the updated outline and preview
+- **AND** restoring read access to an unreadable tracked file lets the browser recover without another edit
+
+#### Scenario: Change which files Git ignores
+
+- **WHEN** an applicable Git ignore rule changes above the project root
+- **THEN** the browser updates the file list
+- **AND** subsequent writes inside an ignored build directory do not trigger a sync
+
+#### Scenario: Lose the project directory
+
+- **WHEN** the open project's `.ardent/` directory disappears
+- **THEN** the browser reports the error and leaves any enclosing project's cache untouched
 
 #### Scenario: Remove an open file
 

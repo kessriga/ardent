@@ -82,13 +82,14 @@ selected node.
 | Right | Expand a node, then move to its first child. |
 | Left | Collapse a node, or move to its parent. |
 | [ / ] | Move to the previous or next sibling. |
-| Page Up / Page Down | Scroll the source text. |
+| Page Up / Page Down | Scroll the source text in an outline or the diagnostics in the file list. |
 | Escape | Return to the file list. |
 | q | Quit. |
 
 When you save a tracked file in an editor, the browser runs sync in the background. You can navigate or quit while it
 waits for the project lock. If the watcher cannot read a path, the file list shows a warning and other files stay
-available.
+available. Changes to Git ignore rules also update the file list. If the project loses its `.ardent/` directory, the
+browser exits and reports the missing project file.
 
 After a refresh, the browser keeps the selected node if its node path still exists. It also keeps your place in the
 source preview if the selected passage is unchanged. A scan error hides the preview until the file parses again. The
