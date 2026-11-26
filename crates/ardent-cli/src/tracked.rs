@@ -1,7 +1,7 @@
 //! The tracked files of a project (spec `ardent-layout`, "Tracked files"): each file that the patterns of exactly one
 //! enabled format match, outside git's ignore rules, the `exclude` patterns, `.ardent/`, and nested projects.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -60,6 +60,7 @@ pub struct Walk {
     pub files: Vec<TrackedFile>,
     pub warnings: Vec<Warning>,
     pub errors: Vec<String>,
+    linked_worktrees: Vec<PathBuf>,
 }
 
 impl Walk {
@@ -128,6 +129,9 @@ pub fn walk(root: &Path, patterns: &Patterns) -> Walk {
         let Some(entry) = walk.record_errors(entry) else {
             continue;
         };
+        if linked_worktree(&entry) {
+            walk.linked_worktrees.push(entry.path().to_owned());
+        }
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }
@@ -161,39 +165,67 @@ pub fn walk(root: &Path, patterns: &Patterns) -> Walk {
     walk
 }
 
+fn linked_worktree(entry: &DirEntry) -> bool {
+    entry.depth() > 0
+        && entry.file_type().is_some_and(|t| t.is_dir())
+        && entry.path().join(".git").is_file()
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PathKind {
+    File,
+    Directory,
+}
+
 /// The last sync's membership and compiled patterns, used to classify browser notifications.
 pub(crate) struct Discovery {
-    files: BTreeSet<PathBuf>,
+    paths: BTreeMap<PathBuf, PathKind>,
+    pub(crate) linked_worktrees: Vec<PathBuf>,
     formats: Vec<Gitignore>,
     exclude: Gitignore,
 }
 
 impl Discovery {
     pub(crate) fn from_walk(walk: &Walk, patterns: &Patterns) -> Self {
+        let paths = walk
+            .files
+            .iter()
+            .map(|file| (PathBuf::from(&file.path), PathKind::File));
+        let warnings = walk.warnings.iter().filter_map(|warning| match warning {
+            Warning::TwoFormats { path, .. } => Some((PathBuf::from(path), PathKind::File)),
+            Warning::NotUtf8(path) => Some((path.clone(), PathKind::File)),
+            Warning::NestedProject(dir) => Some((dir.join(ARDENT_DIR), PathKind::Directory)),
+            Warning::IgnoreRule(_) => None,
+        });
         Self {
-            files: walk.files.iter().map(|f| PathBuf::from(&f.path)).collect(),
+            paths: paths.chain(warnings).collect(),
+            linked_worktrees: walk.linked_worktrees.clone(),
             formats: patterns.formats.iter().map(|(_, p)| p.clone()).collect(),
             exclude: patterns.exclude.clone(),
         }
     }
 
     /// A background sync can discover a new file immediately before the old watcher sees its removal.
-    pub(crate) fn lost_new_files(&self, root: &Path, previous: &Self) -> bool {
-        self.files.difference(&previous.files).any(|path| {
-            !root
-                .join(path)
-                .symlink_metadata()
-                .is_ok_and(|metadata| metadata.is_file())
+    pub(crate) fn lost_new_paths(&self, root: &Path, previous: &Self) -> bool {
+        self.paths.iter().any(|(path, kind)| {
+            previous.paths.get(path) != Some(kind)
+                && !root
+                    .join(path)
+                    .symlink_metadata()
+                    .is_ok_and(|metadata| match kind {
+                        PathKind::File => metadata.is_file(),
+                        PathKind::Directory => metadata.is_dir(),
+                    })
         })
     }
 
     /// A removed subtree can contain previous sources. A new subtree can arrive already populated.
     pub(crate) fn affects_files(&self, root: &Path, relative: &Path) -> bool {
         if self
-            .files
+            .paths
             .range(relative.to_owned()..)
             .next()
-            .is_some_and(|p| p.starts_with(relative))
+            .is_some_and(|(p, _)| p.starts_with(relative))
         {
             return true;
         }
@@ -204,11 +236,12 @@ impl Discovery {
         self.scope(root, path.clone()).any(|entry| match entry {
             Ok(entry) => {
                 entry.path().starts_with(&path)
-                    && entry.file_type().is_some_and(|t| t.is_file())
-                    && entry
-                        .path()
-                        .strip_prefix(root)
-                        .is_ok_and(|p| self.matches_format(p))
+                    && (linked_worktree(&entry)
+                        || (entry.file_type().is_some_and(|t| t.is_file())
+                            && entry
+                                .path()
+                                .strip_prefix(root)
+                                .is_ok_and(|p| self.matches_format(p))))
             }
             Err(_) => true,
         })

@@ -112,7 +112,11 @@ impl Changes {
         self.polling
     }
 
-    pub(super) fn update(&self, discovery: Option<Discovery>) -> io::Result<()> {
+    pub(super) fn update(&mut self, mut discovery: Option<Discovery>) -> io::Result<()> {
+        self.rules.linked_worktrees = discovery
+            .as_mut()
+            .map(|current| std::mem::take(&mut current.linked_worktrees))
+            .unwrap_or_default();
         update_discovery(&self.pending, &self.root, discovery)
     }
 
@@ -154,7 +158,7 @@ fn update_discovery(
     let previous = std::mem::replace(&mut lock()?.discovery, discovery.clone());
     // Later removals use the new membership. Check for removals the previous membership could have missed.
     if let (Some(current), Some(previous)) = (discovery, previous)
-        && current.lost_new_files(root, &previous)
+        && current.lost_new_paths(root, &previous)
     {
         lock()?.since.get_or_insert_with(Instant::now);
     }
@@ -337,6 +341,40 @@ mod tests {
         assert!(changed("inner/.ardent", EventKind::Any));
         fs::remove_dir_all(root.join("docs"))?;
         assert!(changed("docs", EventKind::Any));
+        Ok(())
+    }
+
+    #[test]
+    fn removing_a_path_with_a_discovery_warning_refreshes_the_file_list()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::tracked::{self, Patterns};
+        use ardent_format::patterns;
+        use std::fs;
+
+        let temp = tempfile::tempdir()?;
+        let root = temp.path();
+        let mut patterns = Patterns::new(root, &[])?;
+        for format in ["first", "second"] {
+            patterns.add(format, patterns::compile(root, &["*.md".into()])?);
+        }
+        let discover = || Discovery::from_walk(&tracked::walk(root, &patterns), &patterns);
+        let before = discover();
+        fs::create_dir_all(root.join("docs"))?;
+        fs::write(root.join("docs/conflict.md"), "# Ambiguous")?;
+        fs::create_dir_all(root.join("tools/inner/.ardent"))?;
+        let snapshot = discover();
+        fs::remove_dir_all(root.join("docs"))?;
+        fs::remove_dir_all(root.join("tools"))?;
+        for path in ["docs/conflict.md", "docs", "tools/inner/.ardent", "tools"] {
+            let removed = Event::new(EventKind::Remove(notify::event::RemoveKind::Any))
+                .add_path(root.join(path));
+            assert!(relevant(&removed, root, Some(&snapshot)), "{path}");
+            assert!(!relevant(&removed, root, Some(&before)), "{path}");
+        }
+        let batch = Mutex::new(Pending::default());
+        update_discovery(&batch, root, Some(before))?;
+        update_discovery(&batch, root, Some(snapshot))?;
+        assert!(batch.lock().expect("pending").since.is_some());
         Ok(())
     }
 

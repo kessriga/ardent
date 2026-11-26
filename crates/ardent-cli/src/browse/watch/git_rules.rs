@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 pub(super) struct Inputs {
+    pub(super) linked_worktrees: Vec<PathBuf>,
     previous: Vec<(PathBuf, Option<Vec<u8>>)>,
     checked: Instant,
 }
@@ -12,7 +13,8 @@ pub(super) struct Inputs {
 impl Inputs {
     pub(super) fn new(root: &Path) -> Self {
         Self {
-            previous: read(root),
+            linked_worktrees: Vec::new(),
+            previous: read(root, &[]),
             checked: Instant::now(),
         }
     }
@@ -22,7 +24,7 @@ impl Inputs {
             return false;
         }
         self.checked = Instant::now();
-        let next = read(root);
+        let next = read(root, &self.linked_worktrees);
         if self.previous == next {
             return false;
         }
@@ -31,15 +33,21 @@ impl Inputs {
     }
 }
 
-fn read(root: &Path) -> Vec<(PathBuf, Option<Vec<u8>>)> {
+fn read(root: &Path, linked_worktrees: &[PathBuf]) -> Vec<(PathBuf, Option<Vec<u8>>)> {
     let mut inputs = Vec::new();
-    if let Some(repo) = crate::tracked::git_root(root) {
+    let nearest = crate::tracked::git_root(root);
+    if let Some(repo) = nearest {
         for ancestor in root.ancestors().skip(1) {
             if !ancestor.starts_with(repo) {
                 break;
             }
             inputs.push(ancestor.join(".gitignore"));
         }
+    }
+    for repo in nearest
+        .into_iter()
+        .chain(linked_worktrees.iter().map(PathBuf::as_path))
+    {
         let git = repo.join(".git");
         if git.is_dir() {
             inputs.push(git.join("info/exclude"));
@@ -49,6 +57,8 @@ fn read(root: &Path) -> Vec<(PathBuf, Option<Vec<u8>>)> {
         // A repository boundary can change which ignore files apply even if they keep their timestamps.
         inputs.push(git);
     }
+    inputs.sort_unstable();
+    inputs.dedup();
     inputs
         .into_iter()
         .map(|path| {
@@ -79,9 +89,53 @@ mod tests {
         fs::create_dir_all(temp.path().join("common/info"))?;
         fs::write(repo.join(".git"), format!("gitdir: {}\n", git.display()))?;
         fs::write(git.join("commondir"), "../..\n")?;
-        let before = read(&repo);
+        let before = read(&repo, &[]);
         fs::write(temp.path().join("common/info/exclude"), "private.md")?;
-        assert_ne!(before, read(&repo));
+        assert_ne!(before, read(&repo, &[]));
+        Ok(())
+    }
+
+    #[test]
+    fn detects_external_excludes_for_a_nested_worktree_even_when_its_sources_are_ignored()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::tracked::{self, Discovery, Patterns};
+        use ardent_format::patterns;
+
+        let temp = tempfile::tempdir()?;
+        let root = temp.path().join("project");
+        let nested = root.join("linked");
+        let common = temp.path().join("external/.git");
+        let git = common.join("worktrees/linked");
+        fs::create_dir_all(root.join(".git"))?;
+        fs::create_dir_all(&nested)?;
+        fs::create_dir_all(&git)?;
+        fs::create_dir(common.join("info"))?;
+        fs::write(nested.join(".git"), format!("gitdir: {}\n", git.display()))?;
+        fs::write(git.join("commondir"), "../..\n")?;
+        fs::write(nested.join("example.md"), "# Nested")?;
+        let exclude = common.join("info/exclude");
+        fs::write(&exclude, "example.md\n")?;
+
+        let mut patterns = Patterns::new(&root, &[])?;
+        patterns.add("markdown", patterns::compile(&root, &["*.md".into()])?);
+        let walk = tracked::walk(&root, &patterns);
+        assert!(walk.files.is_empty());
+        let discovery = Discovery::from_walk(&walk, &patterns);
+        assert!(discovery.affects_files(&root, Path::new("linked")));
+        let mut inputs = Inputs::new(&root);
+        inputs.linked_worktrees = discovery.linked_worktrees;
+        let mut changed = || {
+            inputs.checked = Instant::now() - Duration::from_secs(2);
+            inputs.changed(&root)
+        };
+        assert!(changed(), "recheck inputs discovered during the sync");
+        assert!(!changed());
+        fs::remove_file(&exclude)?;
+        assert!(changed());
+        assert_eq!(
+            tracked::walk(&root, &patterns).files[0].path,
+            "linked/example.md"
+        );
         Ok(())
     }
 
@@ -103,9 +157,9 @@ mod tests {
         changed();
         fs::write(repo.join(".git/info/exclude"), "*.md")?;
         changed();
-        let snapshot = read(&root);
+        let snapshot = read(&root, &[]);
         fs::write(temp.path().join(".gitignore"), "*.rs")?;
-        assert_eq!(snapshot, read(&root));
+        assert_eq!(snapshot, read(&root, &[]));
         Ok(())
     }
 }
