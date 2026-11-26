@@ -3,8 +3,8 @@
 Ardent is a terminal outliner for structured text. It reads the files in a project, such as Markdown, Rust, or HTML, and
 shows each file as a tree of nodes, in the same outline form that Roam Research and Tana use.
 
-> **Status:** The CLI provides `ardent init` and `ardent sync`. Markdown and Rust ship as separate WebAssembly
-> components. Install the formats your project uses. Run `backlog milestone list` for milestone progress.
+> **Status:** The CLI provides `ardent init`, `ardent sync`, and `ardent browse`. Markdown and Rust ship as separate
+> WebAssembly components. Install the formats your project uses. Run `backlog milestone list` for milestone progress.
 
 ## Idea
 
@@ -69,6 +69,37 @@ format plugin are unchanged, and it deletes the structure of a file that Ardent 
 ignore rules, and it skips a subdirectory that holds its own `.ardent/` as a separate project. When a file has a syntax
 error, `ardent sync` reports the file with the line and column of the error, keeps the structure from its last scan, and
 exits with status 1.
+
+### Browse a project
+
+Run `ardent browse` in an interactive terminal anywhere inside the project. The command checks its input and output
+before syncing. The explorer on the left groups tracked files by directory. Select a file and press Enter to open its
+outline on the right. The source below the outline shows the selected node's text. Press Tab to browse the explorer
+while keeping the file open. In terminals narrower than 60 columns, Tab switches which pane fills the screen.
+
+| Key | Action |
+| --- | --- |
+| Up / Down | Select the previous or next visible row. |
+| Right | Expand a directory or outline node, or select its first child if expanded. |
+| Left | Collapse a directory or outline node, or move to its parent. |
+| Enter | In the explorer, toggle a directory or open a file. |
+| Tab / Shift+Tab | Switch focus between the explorer and the open document. |
+| [ / ] | Move to the previous or next sibling in the outline. |
+| Page Up / Page Down | Scroll source text, project diagnostics, or the error for an open file. |
+| Escape | Close the open document and return to the explorer. |
+| q | Quit. |
+
+When you save a tracked file in an editor, the browser runs sync in the background. You can navigate or quit while it
+waits for the project lock. If the watcher cannot read a path, the file list shows a warning and other files stay
+available. Changes to Git ignore rules also update the file list. If the project loses its `.ardent/` directory, the
+browser exits and reports the missing project file.
+
+After a refresh, the browser keeps the selected node if its node path still exists. It also keeps your place in the
+source preview if the selected passage is unchanged. In the explorer, `!` marks a file with a scan error. Open it to
+read the full message. The browser shows the diagnostic until the file parses again, then returns to the previous node
+if it still exists.
+
+### Supported outlines
 
 The outline of a Markdown file holds headings, paragraphs, lists and their items, code blocks, block quotes, tables, and
 front matter. A heading contains the blocks after it, up to the next heading of the same or a higher rank: `## Usage`
@@ -140,11 +171,23 @@ Use these terms with these meanings in code, specs, and tasks.
 
 ## Building
 
+Run `just` to list the development commands. `just fmt` formats Rust code. `just check` checks formatting, runs Clippy
+and the workspace tests, builds the binary, and tests the install and format recipes. You can also run `just lint`,
+`just test`, or `just build` separately.
+
+Run `just install` to install the release binary and bundled format plugins. Cargo chooses the install root using its
+normal configuration, including `CARGO_INSTALL_ROOT` and `install.root`. To override it, run
+`just install /path/to/root`. Add the root’s `bin` directory to your `PATH`. Reinstalling replaces the bundled Markdown
+and Rust packages.
+
+To build and run directly with Cargo:
+
 ```sh
 cargo build
 cargo run -p ardent-cli   # the `ardent` binary
 ```
 
-The host workspace has three crates. `ardent-core` holds the document model, structure files and configuration.
-`ardent-format` verifies packages and runs components in Wasmtime. `ardent-cli` builds the `ardent` binary. A separate
-guest workspace builds the two release packages. See the [guest build instructions](guests/README.md).
+The host workspace has four crates. `ardent-core` holds the document model, structure files and configuration.
+`ardent-format` verifies packages and runs components in Wasmtime. `ardent-cli` builds the `ardent` binary. `ardent-tui`
+handles keyboard navigation and draws the browser. A separate guest workspace builds the two release packages. See the
+[guest build instructions](guests/README.md).

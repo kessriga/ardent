@@ -3,6 +3,9 @@
 mod common;
 #[path = "init/package.rs"]
 mod package;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "common/terminal.rs"]
+mod pty;
 
 use std::fs;
 use std::io;

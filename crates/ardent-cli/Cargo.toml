@@ -10,6 +10,8 @@ path = "src/main.rs"
 
 [dependencies]
 ardent-core.workspace = true
+ardent-tui = { path = "../ardent-tui" }
+notify = "9"
 ardent-format.workspace = true
 clap = { version = "4.6.9", features = ["derive"] }
 console = { version = "0.16.6", default-features = false, features = ["std"] }
@@ -17,7 +19,7 @@ ignore = "0.4.34"
 same-file = "1.0.6"
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1.6", features = ["event", "termios"] }
+rustix = { version = "1.1.6", features = ["event", "fs", "termios"] }
 signal-hook = { version = "0.4.6", default-features = false, features = ["iterator"] }
 
 [target.'cfg(windows)'.dependencies]
@@ -31,3 +33,4 @@ tempfile.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dev-dependencies]
 rustix = { version = "1.1.6", features = ["process", "pty", "termios"] }
+vt100 = "0.18.1"

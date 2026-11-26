@@ -1,0 +1,17 @@
+[package]
+name = "ardent-tui"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+ardent-core.workspace = true
+crossterm = "0.29"
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29"] }
+unicode-segmentation = "1.13"
+
+[target.'cfg(unix)'.dependencies]
+signal-hook = { version = "0.4.6", default-features = false, features = ["iterator"] }
+
+[lints]
+workspace = true

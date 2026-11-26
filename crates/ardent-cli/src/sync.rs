@@ -18,7 +18,7 @@ use ardent_format::{FormatPlugin, InstalledPackages, MAX_SOURCE_BYTES};
 use ignore::gitignore::Gitignore;
 
 mod cache_names;
-mod source;
+pub(crate) mod source;
 use cache_names::CacheNames;
 
 use crate::project_root;
@@ -59,11 +59,16 @@ impl fmt::Display for SyncError {
     }
 }
 
-/// What a sync did. `warnings` and `errors` are messages for standard error; an error means that the sync is
-/// incomplete.
+/// Results of a sync. A project error or a per-file error means that the sync is incomplete.
+/// Warnings alone permit a successful exit.
 #[derive(Default)]
 pub struct Report {
-    pub tracked: usize,
+    /// Tracked source paths in sorted order, including files that failed to scan.
+    pub files: Vec<(String, Option<String>)>,
+    /// The membership snapshot a live browser uses to filter filesystem events.
+    pub discovery: Option<tracked::Discovery>,
+    /// Sources that could be retried after read permission is restored.
+    pub read_denied: Vec<String>,
     pub scanned: usize,
     pub removed: usize,
     pub warnings: Vec<String>,
@@ -78,15 +83,25 @@ enum Outcome {
 
 /// Runs a sync in the project of `working_dir`.
 pub fn run(working_dir: &Path) -> Result<Report, SyncError> {
-    let root = find_root(working_dir)?;
+    run_at(&find_root(working_dir)?, Run::Once)
+}
+
+pub(crate) enum Run<'a> {
+    Once,
+    Browse { verify: Option<&'a str> },
+}
+
+/// Sync this project even if an enclosing directory is also a project. A browser can request a
+/// content check for one source when its open preview has evidence that the stamp is stale.
+pub(crate) fn run_at(root: &Path, mode: Run) -> Result<Report, SyncError> {
     let ardent_dir = root.join(ARDENT_DIR);
     let config = read_config(&ardent_dir)?;
     let config_error = |source| SyncError::Pattern {
         path: ardent_dir.join(config::FILE_NAME),
         source,
     };
-    let mut patterns = Patterns::new(&root, &config.exclude).map_err(config_error)?;
-    let overrides = configured_patterns(&root, &config).map_err(config_error)?;
+    let mut patterns = Patterns::new(root, &config.exclude).map_err(config_error)?;
+    let overrides = configured_patterns(root, &config).map_err(config_error)?;
     let _lock = lock(&ardent_dir)?;
     let mut report = Report::default();
     let packages = match InstalledPackages::discover(&ardent_dir) {
@@ -103,34 +118,50 @@ pub fn run(working_dir: &Path) -> Result<Report, SyncError> {
             .map(|err| err.to_string()),
     );
     let (mut plugins, unavailable) =
-        load_plugins(&root, &packages, overrides, &mut patterns, &mut report);
+        load_plugins(root, &packages, overrides, &mut patterns, &mut report);
     let files_dir = create_dir(&ardent_dir, FILES_DIR)?;
-    let walk = tracked::walk(&root, &patterns);
+    let walk = tracked::walk(root, &patterns);
+    if matches!(mode, Run::Browse { .. }) {
+        report.discovery = Some(tracked::Discovery::from_walk(&walk, &patterns));
+    }
     report
         .warnings
         .extend(walk.warnings.iter().map(ToString::to_string));
     report.errors.extend(walk.errors.iter().cloned());
-    report.tracked = walk.files.len();
     let stale = if unavailable.is_empty() && walk.errors.is_empty() {
         StaleStructures::Remove
     } else {
         StaleStructures::Keep
     };
     report.removed = reconcile_cache(&files_dir, &walk.files, stale, &mut report.errors);
-    for file in &walk.files {
+    for file in walk.files {
         let plugin = &mut plugins[file.format];
-        match sync_file(&root, &ardent_dir, &file.path, plugin, &unavailable) {
-            Ok(Outcome::Scanned) => report.scanned += 1,
-            Ok(Outcome::Unchanged | Outcome::Restamped) => {}
-            Err(err) => report
-                .errors
-                .push(format!("{}: {err} (format {})", file.path, plugin.name)),
+        let check = if matches!(mode, Run::Browse { verify: Some(path) } if path == file.path) {
+            SourceCheck::Content
+        } else {
+            SourceCheck::Stamp
+        };
+        let outcome = match source::open_regular(&root.join(&file.path)) {
+            Ok(source) => sync_file(source, &ardent_dir, &file.path, plugin, &unavailable, check),
+            Err(error) => {
+                if error.kind() == io::ErrorKind::PermissionDenied {
+                    report.read_denied.push(file.path.clone());
+                }
+                Err(error.into())
+            }
+        };
+        if matches!(outcome, Ok(Outcome::Scanned)) {
+            report.scanned += 1;
         }
+        let error = outcome
+            .err()
+            .map(|err| format!("{err} (format {})", plugin.name));
+        report.files.push((file.path, error));
     }
     Ok(report)
 }
 
-fn find_root(working_dir: &Path) -> Result<PathBuf, SyncError> {
+pub(crate) fn find_root(working_dir: &Path) -> Result<PathBuf, SyncError> {
     match project_root::find(working_dir) {
         Ok(Some(root)) => Ok(root),
         Ok(None) => Err(SyncError::NoProject(working_dir.to_path_buf())),
@@ -232,16 +263,22 @@ fn create_dir(ardent_dir: &Path, relative_path: &str) -> Result<PathBuf, SyncErr
     layout::create_dir(ardent_dir, relative_path).map_err(SyncError::CreateDir)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SourceCheck {
+    Stamp,
+    Content,
+}
+
 /// Brings the structure file of the tracked file `path` up to date: keeps it when the stamp matches, updates only the
 /// stamp when the content hash matches, and scans the file otherwise.
 fn sync_file(
-    root: &Path,
+    file: File,
     ardent_dir: &Path,
     path: &str,
     plugin: &mut FormatPlugin,
     unavailable: &HashSet<&str>,
+    check: SourceCheck,
 ) -> Result<Outcome, Box<dyn Error>> {
-    let file = File::open(root.join(path))?;
     let metadata = file.metadata()?;
     let (size, mtime) = (metadata.len(), metadata.modified()?);
     let structure_path = layout::structure_path(path);
@@ -251,15 +288,21 @@ fn sync_file(
         .as_ref()
         .is_some_and(|(old, _)| unavailable.contains(old.stamp.format.as_str()))
     {
-        return Ok(Outcome::Unchanged);
+        return match check {
+            SourceCheck::Stamp => Ok(Outcome::Unchanged),
+            SourceCheck::Content => Err(io::Error::other(
+                "cannot refresh the outline while its format plugin is unavailable",
+            )
+            .into()),
+        };
     }
     // The cache directory can have its new spelling while the last good outline still has its old path.
     let previous = previous
         .filter(|(old, _)| built_by(&old.stamp, plugin) && old.outline.matches_source_path(path));
-    if previous
+    let stamp_matches = previous
         .as_ref()
-        .is_some_and(|(old, written)| is_unchanged(&old.stamp, size, mtime, *written))
-    {
+        .is_some_and(|(old, written)| is_unchanged(&old.stamp, size, mtime, *written));
+    if stamp_matches && check == SourceCheck::Stamp {
         return Ok(Outcome::Unchanged);
     }
     let source = source::read(file, size, MAX_SOURCE_BYTES)?;
@@ -272,6 +315,9 @@ fn sync_file(
         format_hash: plugin.format_hash.clone(),
     };
     let (outline, outcome) = match previous {
+        Some((old, _)) if stamp_matches && old.stamp.hash == stamp.hash => {
+            return Ok(Outcome::Unchanged);
+        }
         Some((old, _)) if old.stamp.hash == stamp.hash => (old.outline, Outcome::Restamped),
         _ => (
             Outline::build(path, &source, &plugin.scan(path, &source)?),
@@ -286,8 +332,9 @@ fn sync_file(
 /// The structure file at `path` and the time it was written, or `None` when it is missing or cannot be read, so that
 /// the sync builds it again.
 fn read_structure(path: &Path) -> Option<(Structure, SystemTime)> {
-    let text = fs::read_to_string(path).ok()?;
-    let written = fs::metadata(path).and_then(|m| m.modified()).ok()?;
+    let file = source::open_regular(path).ok()?;
+    let written = file.metadata().and_then(|m| m.modified()).ok()?;
+    let text = io::read_to_string(file).ok()?;
     Some((Structure::from_yaml(&text).ok()?, written))
 }
 

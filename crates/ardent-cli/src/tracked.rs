@@ -1,6 +1,7 @@
 //! The tracked files of a project (spec `ardent-layout`, "Tracked files"): each file that the patterns of exactly one
 //! enabled format match, outside git's ignore rules, the `exclude` patterns, `.ardent/`, and nested projects.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -59,6 +60,7 @@ pub struct Walk {
     pub files: Vec<TrackedFile>,
     pub warnings: Vec<Warning>,
     pub errors: Vec<String>,
+    linked_worktrees: Vec<PathBuf>,
 }
 
 impl Walk {
@@ -119,6 +121,7 @@ pub fn walk(root: &Path, patterns: &Patterns) -> Walk {
         root: root.to_path_buf(),
         exclude: patterns.exclude.clone(),
         nested_projects: Arc::new(Mutex::new(Vec::new())),
+        scope: None,
     };
     let nested_projects = Arc::clone(&filter.nested_projects);
     let mut walk = Walk::default();
@@ -126,6 +129,9 @@ pub fn walk(root: &Path, patterns: &Patterns) -> Walk {
         let Some(entry) = walk.record_errors(entry) else {
             continue;
         };
+        if linked_worktree(&entry) {
+            walk.linked_worktrees.push(entry.path().to_owned());
+        }
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }
@@ -159,12 +165,119 @@ pub fn walk(root: &Path, patterns: &Patterns) -> Walk {
     walk
 }
 
+fn linked_worktree(entry: &DirEntry) -> bool {
+    entry.depth() > 0
+        && entry.file_type().is_some_and(|t| t.is_dir())
+        && entry.path().join(".git").is_file()
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PathKind {
+    File,
+    Directory,
+}
+
+/// The last sync's membership and compiled patterns, used to classify browser notifications.
+pub(crate) struct Discovery {
+    paths: BTreeMap<PathBuf, PathKind>,
+    pub(crate) linked_worktrees: Vec<PathBuf>,
+    formats: Vec<Gitignore>,
+    exclude: Gitignore,
+}
+
+impl Discovery {
+    pub(crate) fn from_walk(walk: &Walk, patterns: &Patterns) -> Self {
+        let paths = walk
+            .files
+            .iter()
+            .map(|file| (PathBuf::from(&file.path), PathKind::File));
+        let warnings = walk.warnings.iter().filter_map(|warning| match warning {
+            Warning::TwoFormats { path, .. } => Some((PathBuf::from(path), PathKind::File)),
+            Warning::NotUtf8(path) => Some((path.clone(), PathKind::File)),
+            Warning::NestedProject(dir) => Some((dir.join(ARDENT_DIR), PathKind::Directory)),
+            Warning::IgnoreRule(_) => None,
+        });
+        Self {
+            paths: paths.chain(warnings).collect(),
+            linked_worktrees: walk.linked_worktrees.clone(),
+            formats: patterns.formats.iter().map(|(_, p)| p.clone()).collect(),
+            exclude: patterns.exclude.clone(),
+        }
+    }
+
+    /// A background sync can discover a new file immediately before the old watcher sees its removal.
+    pub(crate) fn lost_new_paths(&self, root: &Path, previous: &Self) -> bool {
+        self.paths.iter().any(|(path, kind)| {
+            previous.paths.get(path) != Some(kind)
+                && !root
+                    .join(path)
+                    .symlink_metadata()
+                    .is_ok_and(|metadata| match kind {
+                        PathKind::File => metadata.is_file(),
+                        PathKind::Directory => metadata.is_dir(),
+                    })
+        })
+    }
+
+    /// A removed subtree can contain previous sources. A new subtree can arrive already populated.
+    pub(crate) fn affects_files(&self, root: &Path, relative: &Path) -> bool {
+        if self
+            .paths
+            .range(relative.to_owned()..)
+            .next()
+            .is_some_and(|(p, _)| p.starts_with(relative))
+        {
+            return true;
+        }
+        let path = root.join(relative);
+        if !path.is_dir() && !self.matches_format(relative) {
+            return false;
+        }
+        self.scope(root, path.clone()).any(|entry| match entry {
+            Ok(entry) => {
+                entry.path().starts_with(&path)
+                    && (linked_worktree(&entry)
+                        || (entry.file_type().is_some_and(|t| t.is_file())
+                            && entry
+                                .path()
+                                .strip_prefix(root)
+                                .is_ok_and(|p| self.matches_format(p))))
+            }
+            Err(_) => true,
+        })
+    }
+
+    pub(crate) fn visible_directory(&self, root: &Path, relative: &Path) -> bool {
+        let path = root.join(relative);
+        self.scope(root, path.clone())
+            .any(|entry| entry.is_ok_and(|e| e.path() == path))
+    }
+
+    fn matches_format(&self, path: &Path) -> bool {
+        self.formats
+            .iter()
+            .any(|pattern| pattern.matched(path, false).is_ignore())
+    }
+
+    fn scope(&self, root: &Path, path: PathBuf) -> ignore::Walk {
+        walker(
+            root,
+            Filter {
+                root: root.to_owned(),
+                exclude: self.exclude.clone(),
+                nested_projects: Arc::default(),
+                scope: Some(path),
+            },
+        )
+    }
+}
+
 /// A walker with git's ignore rules. Inside a git repository, it also reads the `.gitignore` files above the root up to
 /// the repository root, and applies no outer rule inside a nested repository, as git does. Outside a git repository,
 /// it reads only the `.gitignore` files of the project. Hidden files count; `.ignore` files and the global excludes
 /// file of git do not.
 fn walker(root: &Path, filter: Filter) -> ignore::Walk {
-    let in_git_repository = root.ancestors().any(|dir| dir.join(".git").exists());
+    let in_git_repository = git_root(root).is_some();
     WalkBuilder::new(root)
         .hidden(false)
         .ignore(false)
@@ -178,18 +291,31 @@ fn walker(root: &Path, filter: Filter) -> ignore::Walk {
         .build()
 }
 
+/// The nearest Git boundary controls the ignore files inherited by the project.
+pub(crate) fn git_root(root: &Path) -> Option<&Path> {
+    root.ancestors().find(|dir| dir.join(".git").exists())
+}
+
 /// The entries that the walk does not enter: `.git`, the project's `.ardent/`, excluded paths, and nested projects,
 /// which it records. Excluded directories are never read, so an unreadable or nested project inside one is no error.
 struct Filter {
     root: PathBuf,
     exclude: Gitignore,
     nested_projects: Arc<Mutex<Vec<PathBuf>>>,
+    scope: Option<PathBuf>,
 }
 
 impl Filter {
     fn keep(&self, entry: &DirEntry) -> bool {
         if entry.depth() == 0 {
             return true;
+        }
+        let path = entry.path();
+        if let Some(scope) = &self.scope
+            && !path.starts_with(scope)
+            && !scope.starts_with(path)
+        {
+            return false;
         }
         let name = entry.file_name();
         if name == ".git" || (name == ARDENT_DIR && entry.depth() == 1) {

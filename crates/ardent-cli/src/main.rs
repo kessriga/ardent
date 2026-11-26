@@ -1,3 +1,4 @@
+mod browse;
 mod init;
 mod project_root;
 mod sync;
@@ -29,6 +30,8 @@ enum Command {
     },
     /// Bring the structure of each tracked source file in `.ardent/cache/` up to date
     Sync,
+    /// Browse tracked files, their outlines, and source text in a terminal
+    Browse,
 }
 
 fn main() -> ExitCode {
@@ -40,6 +43,10 @@ fn main() -> ExitCode {
     match command {
         Command::Init { plugins } => init(working_dir, plugins.as_deref()),
         Command::Sync => sync(working_dir),
+        Command::Browse => match browse::run(&working_dir) {
+            Ok(status) => status,
+            Err(err) => fail(err),
+        },
     }
 }
 
@@ -66,14 +73,19 @@ fn sync(working_dir: PathBuf) -> ExitCode {
     for error in &report.errors {
         let _ = writeln!(stderr, "ardent: {error}");
     }
+    for (path, error) in &report.files {
+        if let Some(error) = error {
+            let _ = writeln!(stderr, "ardent: {path}: {error}");
+        }
+    }
     let _ = writeln!(
         io::stdout(),
         "Synced {} tracked files: {} scanned, {} removed",
-        report.tracked,
+        report.files.len(),
         report.scanned,
         report.removed
     );
-    if report.errors.is_empty() {
+    if report.errors.is_empty() && report.files.iter().all(|(_, err)| err.is_none()) {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
