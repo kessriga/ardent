@@ -8,6 +8,7 @@ use wasmtime::component::{Component, Linker, TypedFunc};
 use wasmtime::{Cache, CacheConfig, Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
 
 mod diagnostic;
+mod highlight;
 mod nodes;
 mod wasi;
 
@@ -52,6 +53,7 @@ pub(crate) struct Runtime {
 
 struct Instance {
     store: Store<StoreLimits>,
+    component: wasmtime::component::Instance,
     bindings: FormatPlugin,
     prepare_query: Option<TypedFunc<(), ()>>,
 }
@@ -182,6 +184,7 @@ impl Instance {
             .transpose()?;
         Ok(Self {
             store,
+            component: instance,
             bindings,
             prepare_query,
         })
@@ -206,6 +209,7 @@ mod tests {
     fn bounds_execution_and_recreates_the_store_after_a_trap() -> TestResult {
         let mut runtime = Runtime::compile(&probe_bytes()?)?;
         runtime.describe()?;
+        assert!(runtime.highlight(b"file")?.is_empty());
         assert!(runtime.scan_with_fuel("file", b"file", 0).is_err());
         assert!(runtime.active.is_none());
         assert_eq!(runtime.scan("file", b"next")?.len(), 1);

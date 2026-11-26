@@ -43,3 +43,26 @@ fn syntax_error() -> Result<(), Box<dyn Error>> {
     insta::assert_snapshot!(err.to_string());
     Ok(())
 }
+
+#[test]
+fn packaged_syntax_spans() -> Result<(), Box<dyn Error>> {
+    use ardent_core::highlight::Category::{Comment, Keyword, StringLiteral};
+    let source = r##"pub fn sample() { let s = r#"fn"#; /* let */ let b = "if"; } // fn"##;
+    let expected = [
+        ("pub", Keyword),
+        ("fn", Keyword),
+        ("let", Keyword),
+        (r##"r#"fn"#"##, StringLiteral),
+        ("/* let */", Comment),
+        ("let", Keyword),
+        (r#""if""#, StringLiteral),
+        ("// fn", Comment),
+    ];
+    let spans = common::plugin("rust")?.highlight(source.as_bytes())?;
+    let actual: Vec<_> = spans
+        .into_iter()
+        .map(|span| (&source[span.range], span.category))
+        .collect();
+    assert_eq!(actual, expected);
+    Ok(())
+}

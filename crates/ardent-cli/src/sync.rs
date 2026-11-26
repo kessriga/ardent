@@ -69,6 +69,8 @@ pub struct Report {
     pub discovery: Option<tracked::Discovery>,
     /// Sources that could be retried after read permission is restored.
     pub read_denied: Vec<String>,
+    /// Verified formats available to highlight documents from this browser sync.
+    pub browse_formats: Vec<FormatPlugin>,
     pub scanned: usize,
     pub removed: usize,
     pub warnings: Vec<String>,
@@ -157,6 +159,9 @@ pub(crate) fn run_at(root: &Path, mode: Run) -> Result<Report, SyncError> {
             .err()
             .map(|err| format!("{err} (format {})", plugin.name));
         report.files.push((file.path, error));
+    }
+    if matches!(mode, Run::Browse { .. }) {
+        report.browse_formats = plugins;
     }
     Ok(report)
 }

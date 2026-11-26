@@ -79,6 +79,10 @@ A horizontal divider marks the source pane below the outline. It shows the selec
 display as `item.1`, `item.2` or `Install.1`, `Install.2`. A lone node shows its original label. Press Tab to browse the
 explorer while keeping the file open. In terminals narrower than 60 columns, Tab switches which pane fills the screen.
 
+The outline colors labels by node kind and marks the selected row with `>`. The packaged Rust plugin highlights
+keywords, strings and comments. The Markdown plugin highlights headings, inline code and code blocks. Files opened with
+a scanner-only plugin have a plain source preview and the same navigation keys.
+
 | Key | Action |
 | --- | --- |
 | Up / Down | Select the previous or next visible row. |

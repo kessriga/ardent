@@ -6,6 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use std::str;
 
 use ardent_core::config::{self, ConfigError};
+use ardent_core::highlight::Highlight;
 use ardent_core::layout;
 use ardent_core::outline::ScannedNode;
 use ardent_core::structure;
@@ -240,15 +241,25 @@ impl FormatPlugin {
 
     /// Scans with the verified component, compiling on first use after a verification cache hit.
     pub fn scan(&mut self, path: &str, source: &[u8]) -> Result<Vec<ScannedNode>, RuntimeError> {
-        match &mut self.scanner {
-            Scanner::Active(runtime) => runtime.scan(path, source),
-            Scanner::Verified(bytes) => {
-                let mut runtime = Runtime::compile(bytes)?;
-                let result = runtime.scan(path, source);
-                self.scanner = Scanner::Active(Box::new(runtime));
-                result
-            }
-        }
+        self.with_runtime(|runtime| runtime.scan(path, source))
+    }
+
+    /// Returns validated syntax spans, or an empty list for a scanner-only plugin.
+    pub fn highlight(&mut self, source: &[u8]) -> Result<Vec<Highlight>, RuntimeError> {
+        self.with_runtime(|runtime| runtime.highlight(source))
+    }
+
+    fn with_runtime<T>(
+        &mut self,
+        call: impl FnOnce(&mut Runtime) -> Result<T, RuntimeError>,
+    ) -> Result<T, RuntimeError> {
+        let mut runtime = match &mut self.scanner {
+            Scanner::Active(runtime) => return call(runtime),
+            Scanner::Verified(bytes) => Runtime::compile(bytes)?,
+        };
+        let result = call(&mut runtime);
+        self.scanner = Scanner::Active(Box::new(runtime));
+        result
     }
 }
 

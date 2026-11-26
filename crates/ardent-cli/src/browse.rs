@@ -1,13 +1,13 @@
 //! Connect the terminal browser to project discovery, sync, and the source files on disk.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::io;
 use std::path::Path;
 use std::process::ExitCode;
 
 use ardent_core::layout::{self, ARDENT_DIR};
 use ardent_core::structure::{self, Structure};
-use ardent_format::MAX_SOURCE_BYTES;
+use ardent_format::{FormatPlugin, MAX_SOURCE_BYTES};
 use ardent_tui::Document;
 
 use crate::sync;
@@ -22,18 +22,23 @@ pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
     ardent_tui::require_terminal()?;
     let root = sync::find_root(working_dir).map_err(|err| io::Error::other(err.to_string()))?;
     let mut refresh = Refresh::start(root.clone())?;
-    let (files, mut failed) = refresh.initial()?;
+    let initial = refresh.initial()?;
+    let mut failed = initial.failed;
+    let formats = RefCell::new(initial.formats);
     let observed = Cell::new(None);
     ardent_tui::run(
-        files,
-        |path| load(&root, path, |preview| observed.set(Some(preview))),
+        initial.files,
+        |path| {
+            load(&root, path, &mut formats.borrow_mut(), |preview| {
+                observed.set(Some(preview))
+            })
+        },
         |open_path| {
-            Ok(refresh
-                .ready(open_path, observed.take())?
-                .map(|(files, errors)| {
-                    failed = errors;
-                    files
-                }))
+            Ok(refresh.ready(open_path, observed.take())?.map(|update| {
+                failed = update.failed;
+                formats.replace(update.formats);
+                update.files
+            }))
         },
     )?;
     Ok(if failed {
@@ -45,7 +50,12 @@ pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
 
 /// Read the source and its cached structure as a pair. A failed scan can leave an older structure
 /// with ranges that still fit inside the current file. Only a matching source hash makes them usable.
-fn load(root: &Path, path: &str, observed: impl FnOnce(Preview)) -> io::Result<Document> {
+fn load(
+    root: &Path,
+    path: &str,
+    formats: &mut [FormatPlugin],
+    observed: impl FnOnce(Preview),
+) -> io::Result<Document> {
     let cached = root.join(ARDENT_DIR).join(layout::structure_path(path));
     let structure = Structure::from_yaml(&io::read_to_string(source::open_regular(&cached)?)?)
         .map_err(io::Error::other)?;
@@ -82,7 +92,16 @@ fn load(root: &Path, path: &str, observed: impl FnOnce(Preview)) -> io::Result<D
         path,
         Revision::from_source(&metadata, hash),
     ));
+    let highlights = formats
+        .iter_mut()
+        .find(|plugin| {
+            plugin.name == structure.stamp.format
+                && plugin.format_hash == structure.stamp.format_hash
+        })
+        .and_then(|plugin| plugin.highlight(&bytes).ok())
+        .unwrap_or_default();
     Ok(Document {
+        highlights,
         outline: structure.outline,
         bytes,
     })
@@ -95,6 +114,51 @@ mod tests {
     use ardent_core::structure::Stamp;
     use std::fs;
     use std::time::SystemTime;
+
+    #[test]
+    fn preview_requires_the_same_verified_format_as_the_outline()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let project = tempfile::tempdir()?;
+        let dir = project.path().join(ARDENT_DIR);
+        let installed = dir.join("plugins/markdown");
+        fs::create_dir_all(&installed)?;
+        let release = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/markdown");
+        for file in ["format.wasm", "plugin.yaml"] {
+            fs::copy(release.join(file), installed.join(file))?;
+        }
+        let mut plugin = FormatPlugin::load(&dir, "markdown")?.expect("installed Markdown package");
+        let path = "sample.md";
+        let source = b"# Title\n";
+        let stamp = Stamp {
+            size: source.len() as u64,
+            mtime: SystemTime::UNIX_EPOCH,
+            hash: structure::content_hash(source),
+            format: plugin.name.clone(),
+            format_version: plugin.version.clone(),
+            format_hash: plugin.format_hash.clone(),
+        };
+        fs::write(project.path().join(path), source)?;
+        let mut structure = Structure::new(stamp, Outline::build(path, source, &[]));
+        let mut preview = |structure: &Structure| -> io::Result<Document> {
+            layout::write_atomic(
+                &dir,
+                layout::structure_path(path),
+                structure.to_yaml()?.as_bytes(),
+            )?;
+            load(
+                project.path(),
+                path,
+                std::slice::from_mut(&mut plugin),
+                |_| {},
+            )
+        };
+        assert_eq!(preview(&structure)?.highlights.len(), 1);
+        structure.stamp.format_hash = "previous release".into();
+        let plain = preview(&structure)?;
+        assert!(plain.highlights.is_empty());
+        assert_eq!(plain.bytes, source);
+        Ok(())
+    }
 
     #[test]
     fn preview_uses_only_matching_source_bytes_and_valid_ranges() -> io::Result<()> {
@@ -124,25 +188,25 @@ mod tests {
             layout::write_atomic(&dir, layout::structure_path(path), s.to_yaml()?.as_bytes())
         };
         store(&structure)?;
-        assert!(load(project.path(), path, |_| {}).is_err());
+        assert!(load(project.path(), path, &mut [], |_| {}).is_err());
         fs::write(project.path().join(path), source)?;
-        let document = load(project.path(), path, |_| {})?;
+        let document = load(project.path(), path, &mut [], |_| {})?;
         assert_eq!(
             document.bytes.get(document.outline.nodes[1].range.clone()),
             Some(b"hello".as_slice())
         );
         fs::write(project.path().join(path), "é\nworld")?;
-        assert!(load(project.path(), path, |_| {}).is_err());
+        assert!(load(project.path(), path, &mut [], |_| {}).is_err());
         fs::write(project.path().join(path), source)?;
         structure.outline.nodes[1].range.end += 1;
         store(&structure)?;
-        assert!(load(project.path(), path, |_| {}).is_err());
+        assert!(load(project.path(), path, &mut [], |_| {}).is_err());
         structure.outline = Outline::build(path, b"", &[]);
         structure.stamp.hash = structure::content_hash(b"");
         fs::write(project.path().join(path), "")?;
         store(&structure)?;
         assert_eq!(
-            load(project.path(), path, |_| {})?.outline.nodes[0].range,
+            load(project.path(), path, &mut [], |_| {})?.outline.nodes[0].range,
             0..0
         );
         Ok(())

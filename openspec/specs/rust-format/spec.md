@@ -164,3 +164,13 @@ tree-sitter-rust 0.24.2 rejects. It SHALL explain how this affects sync.
 - **WHEN** a user looks up the diagnostic for `unsafe extern "C" { pub safe fn f(); }`
 - **THEN** the documentation identifies the grammar limitation and explains that sync keeps the last good structure and
   exits with status 1
+
+### Requirement: Rust syntax categories
+
+The packaged Rust format plugin SHALL distinguish keywords, string literals and comments in the source.
+
+#### Scenario: Keyword text inside strings and comments
+
+- **WHEN** a function body contains `let label = "fn"; // let`
+- **THEN** the first `let` has the keyword style, the quoted literal has the string style and the trailing comment has
+  the comment style

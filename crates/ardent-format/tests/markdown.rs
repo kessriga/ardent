@@ -36,3 +36,26 @@ fn quotes_tables_and_blocks_that_are_not_nodes() -> Result<(), Box<dyn Error>> {
     insta::assert_snapshot!(outline_yaml("blocks.md")?);
     Ok(())
 }
+
+#[test]
+fn packaged_syntax_spans() -> Result<(), Box<dyn Error>> {
+    use ardent_core::highlight::Category::{Code, Heading};
+    let source =
+        "# Try `this` now\n\nBody `let`.\n\nNext\n----\n\n```rs\nfn next() {}\n```\n\n    code\n";
+    let expected = [
+        ("# Try ", Heading),
+        ("`this`", Code),
+        (" now\n", Heading),
+        ("`let`", Code),
+        ("Next\n----\n", Heading),
+        ("```rs\nfn next() {}\n```\n", Code),
+        ("    code\n", Code),
+    ];
+    let spans = common::plugin("markdown")?.highlight(source.as_bytes())?;
+    let actual: Vec<_> = spans
+        .into_iter()
+        .map(|span| (&source[span.range], span.category))
+        .collect();
+    assert_eq!(actual, expected);
+    Ok(())
+}
