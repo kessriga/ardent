@@ -47,7 +47,7 @@ fn syntax_error() -> Result<(), Box<dyn Error>> {
 #[test]
 fn packaged_syntax_spans() -> Result<(), Box<dyn Error>> {
     use ardent_core::highlight::Category::{Comment, Keyword, StringLiteral};
-    let source = r##"pub fn sample() { let s = r#"fn"#; /* let */ let b = "if"; } // fn"##;
+    let source = r##"pub fn sample() { let s = r#"fn"#; /* let */ let b = "if"; assert!(if true { r#else } else { false }); } // fn"##;
     let expected = [
         ("pub", Keyword),
         ("fn", Keyword),
@@ -56,6 +56,10 @@ fn packaged_syntax_spans() -> Result<(), Box<dyn Error>> {
         ("/* let */", Comment),
         ("let", Keyword),
         (r#""if""#, StringLiteral),
+        ("if", Keyword),
+        ("true", Keyword),
+        ("else", Keyword),
+        ("false", Keyword),
         ("// fn", Comment),
     ];
     let spans = common::plugin("rust")?.highlight(source.as_bytes())?;

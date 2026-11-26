@@ -33,16 +33,69 @@ fn category(node: Node<'_>, source: &[u8]) -> Option<Category> {
     match node.kind() {
         "string_literal" | "raw_string_literal" => Some(Category::StringLiteral),
         "line_comment" | "block_comment" => Some(Category::Comment),
-        "as" | "async" | "await" | "break" | "const" | "continue" | "crate" | "default" | "dyn"
-        | "else" | "enum" | "extern" | "fn" | "for" | "gen" | "if" | "impl" | "in" | "let"
-        | "loop" | "macro_rules!" | "match" | "mod" | "move" | "mutable_specifier" | "pub"
-        | "raw" | "ref" | "return" | "self" | "static" | "struct" | "super" | "trait" | "try"
-        | "type" | "union" | "unsafe" | "use" | "where" | "while" | "yield" | "boolean_literal" => {
-            Some(Category::Keyword)
-        }
+        "default" | "gen" | "macro_rules!" | "mutable_specifier" | "raw" | "try" | "union"
+        | "yield" | "boolean_literal" => Some(Category::Keyword),
         "type_identifier" | "identifier" if source.get(node.byte_range()) == Some(b"Self") => {
             Some(Category::Keyword)
         }
+        // Macro token trees expose some strict keywords, such as `else`, as identifiers.
+        "identifier"
+            if node.utf8_text(source).is_ok_and(strict_keyword)
+                && node.parent().is_some_and(|parent| {
+                    matches!(
+                        parent.kind(),
+                        "token_tree"
+                            | "token_tree_pattern"
+                            | "token_repetition"
+                            | "token_repetition_pattern"
+                    )
+                }) =>
+        {
+            Some(Category::Keyword)
+        }
+        kind if strict_keyword(kind) => Some(Category::Keyword),
         _ => None,
     }
+}
+
+fn strict_keyword(word: &str) -> bool {
+    matches!(
+        word,
+        "as" | "async"
+            | "await"
+            | "break"
+            | "const"
+            | "continue"
+            | "crate"
+            | "dyn"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "fn"
+            | "for"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "pub"
+            | "ref"
+            | "return"
+            | "self"
+            | "static"
+            | "struct"
+            | "super"
+            | "trait"
+            | "true"
+            | "type"
+            | "unsafe"
+            | "use"
+            | "where"
+            | "while"
+    )
 }
