@@ -172,11 +172,13 @@ Use these terms with these meanings in code, specs, and tasks.
 ## Building
 
 Run `just` to list the development commands. `just fmt` formats Rust code. `just check` checks formatting, runs Clippy
-and the workspace tests, and builds the binary. You can also run `just lint`, `just test`, or `just build` separately.
+and the workspace tests, builds the binary, and tests the install and format recipes. You can also run `just lint`,
+`just test`, or `just build` separately.
 
-Run `just install` to install the release binary and bundled format plugins. It uses `CARGO_INSTALL_ROOT` if set, then
-`CARGO_HOME`, then `~/.cargo`. To choose another directory, run `just install /path/to/root` and add that directory's
-`bin` to your `PATH`.
+Run `just install` to install the release binary and bundled format plugins. Cargo chooses the install root using its
+normal configuration, including `CARGO_INSTALL_ROOT` and `install.root`. To override it, run
+`just install /path/to/root`. Add the root’s `bin` directory to your `PATH`. Reinstalling replaces the bundled Markdown
+and Rust packages.
 
 To build and run directly with Cargo:
 

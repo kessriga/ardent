@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-19 16:29'
-updated_date: '2026-11-26 10:29'
+updated_date: '2026-11-26 11:08'
 labels: []
 milestone: m-1
 dependencies:
@@ -73,6 +73,9 @@ sets the crate boundary between the document model and the interface.
 
 10. Add Just recipes for host checks and local installation. Verify the installed executable can initialize and sync a
     project with both bundled format plugins.
+
+11. Honor Cargo’s install root, replace bundled format packages on reinstall, and protect Markdown snapshot inputs.
+    Verify a configured install, an upgrade, and both directory and explicit formatting arguments.
 <!-- SECTION:PLAN:END -->
 
 ## Final Summary
@@ -82,10 +85,10 @@ Added ardent browse for navigating tracked files, expanding outline nodes, and r
 directory explorer beside the open outline and source. Tab changes focus. On narrow terminals, the focused pane fills
 the screen. Sync preserves the explorer cursor, collapsed directories, and the open node. Scans, source updates, file
 errors, and deletion stay connected to the open path while the reader navigates the explorer. The browser pages through
-diagnostics, rejects redirected input before taking the sync lock, and restores the terminal on exit. All 173 workspace
-tests passed on macOS. Terminal tests exercised native notifications and polling, nested directories, resize, refresh,
-and terminal restoration. Linux and Windows passed compile checks. Source and diagnostics wrap at grapheme boundaries.
-The explorer places the scan-error marker before each affected filename. The Justfile runs the workspace checks and
-installs the release binary with its format plugins. A temporary installation initialized and synced both Markdown and
-Rust files.
+diagnostics, rejects redirected input before taking the sync lock, and restores the terminal on exit. Terminal tests
+exercised native notifications and polling, nested directories, resize, refresh, and terminal restoration. Linux and
+Windows passed compile checks. Source and diagnostics wrap at grapheme boundaries. The explorer places the scan-error
+marker before each affected filename. The Justfile checks the workspace, honors Cargo’s configured install root, and
+replaces bundled packages on reinstall. Markdown formatting skips snapshot inputs. All 173 Rust tests and both recipe
+tests passed. A reinstalled release initialized and synced Markdown and Rust files.
 <!-- SECTION:FINAL_SUMMARY:END -->
