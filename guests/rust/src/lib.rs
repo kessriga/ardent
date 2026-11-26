@@ -219,7 +219,7 @@ mod tests {
         let text = "#[cfg(unix)]\nfn home() {}\n\n#[cfg(windows)]\nfn home() {}\n";
         assert_eq!(
             paths("src/lib.rs", text)?,
-            ["src/lib.rs", "src/lib.rs#fn home", "src/lib.rs#fn home[2]"]
+            ["src/lib.rs", "src/lib.rs#fn home.1", "src/lib.rs#fn home.2"]
         );
         Ok(())
     }
@@ -361,8 +361,8 @@ mod tests {
                 "variant src/entry.rs#enum Entry/Dir",
                 "field src/entry.rs#enum Entry/Dir/path",
                 "variant src/entry.rs#enum Entry/Link",
-                "field src/entry.rs#enum Entry/Link/field",
-                "field src/entry.rs#enum Entry/Link/field[2]"
+                "field src/entry.rs#enum Entry/Link/field.1",
+                "field src/entry.rs#enum Entry/Link/field.2"
             ]
         );
         Ok(())
@@ -380,8 +380,8 @@ mod tests {
                 "src/lib.rs#union Bits/i",
                 "src/lib.rs#union Bits/f",
                 "src/lib.rs#struct Pair",
-                "src/lib.rs#struct Pair/field",
-                "src/lib.rs#struct Pair/field[2]"
+                "src/lib.rs#struct Pair/field.1",
+                "src/lib.rs#struct Pair/field.2"
             ]
         );
         Ok(())
@@ -390,7 +390,7 @@ mod tests {
     #[test]
     fn attribute_on_a_tuple_field() -> TestResult {
         let text = "struct Id(#[serde(skip)] pub u64);\n";
-        let field = range("src/id.rs", text, "src/id.rs#struct Id/field")?;
+        let field = range("src/id.rs", text, "src/id.rs#struct Id/field.1")?;
         assert_eq!(field, offset(text, "#[serde")?..offset(text, ");")?);
         Ok(())
     }
