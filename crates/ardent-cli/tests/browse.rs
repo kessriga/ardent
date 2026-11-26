@@ -140,7 +140,7 @@ fn browses_from_a_subdirectory_and_refreshes_while_open() -> io::Result<()> {
     let (master, slave) = pty::open_terminal(12)?;
     let original = termios::tcgetattr(&slave)?.local_modes;
     let mut session = Session::open(&docs, &slave, master)?;
-    session.wait_screen(&["Explorer", "docs/", "z.rs !", "a.md"], &["skip.md"])?;
+    session.wait_screen(&["Explorer", "docs/", "! z.rs", "a.md"], &["skip.md"])?;
     session.keys(b"\x1b[B\x1b[B\r")?;
     session.wait_for("# Intro")?;
     session.keys(b"\x1b[C\x1b[C\x1b[C")?;

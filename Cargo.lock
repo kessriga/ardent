@@ -160,7 +160,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "signal-hook 0.4.6",
- "unicode-width",
+ "unicode-segmentation",
 ]
 
 [[package]]

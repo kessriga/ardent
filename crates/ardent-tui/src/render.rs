@@ -3,11 +3,12 @@
 use std::borrow::Cow;
 
 use ratatui::Frame;
+use ratatui::buffer::CellWidth;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListState, Paragraph};
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{Browser, Focus, Page, Screen};
 
@@ -117,7 +118,8 @@ fn explorer(frame: &mut Frame<'_>, area: Rect, browser: &Browser) -> Paging {
                     .list
                     .file(&entry.path)
                     .is_some_and(|(_, error)| error.is_some());
-                format!("{indent}{name}{}", if failed { " !" } else { "" })
+                let marker = if failed { "! " } else { "" };
+                format!("{indent}{marker}{name}")
             };
             if browser.open_path() == Some(&entry.path) {
                 Line::styled(label, Style::default().add_modifier(Modifier::UNDERLINED))
@@ -302,33 +304,38 @@ fn display(ch: char) -> char {
 }
 
 fn wrapped(text: &str, width: usize) -> impl Iterator<Item = String> + '_ {
-    let mut source = text.chars().peekable();
-    let mut chars = std::iter::from_fn(move || {
-        let ch = source.next()?;
-        Some(if ch == '\r' && source.next_if_eq(&'\n').is_some() {
-            '\n'
-        } else {
-            ch
-        })
-    })
-    .peekable();
+    // Ratatui draws one extended grapheme per cell sequence. Wrap with the same width calculation.
+    let mut graphemes = text.graphemes(true).peekable();
     std::iter::from_fn(move || {
-        chars.peek()?;
+        if width == 0 {
+            return None;
+        }
+        graphemes.peek()?;
         let mut row = String::new();
         let mut used = 0;
-        while let Some(&ch) = chars.peek() {
-            if ch == '\n' {
-                chars.next();
+        while let Some(&grapheme) = graphemes.peek() {
+            let printable = match grapheme {
+                "\n" | "\r\n" => {
+                    graphemes.next();
+                    break;
+                }
+                "\t" => " ",
+                control if control.starts_with(char::is_control) => "�",
+                other => other,
+            };
+            let cells = usize::from(printable.cell_width());
+            // In a pane narrower than a single glyph, show a visible placeholder.
+            let (symbol, cells) = if cells > width {
+                ("�", 1)
+            } else {
+                (printable, cells)
+            };
+            if used + cells > width {
                 break;
             }
-            let ch = display(ch);
-            let cells = ch.width().unwrap_or(0);
-            if used + cells > width && !row.is_empty() {
-                break;
-            }
-            chars.next();
+            graphemes.next();
             used += cells;
-            row.push(ch);
+            row.push_str(symbol);
         }
         Some(row)
     })
@@ -371,6 +378,47 @@ mod tests {
     }
 
     #[test]
+    fn a_two_cell_emoji_at_the_right_edge_keeps_the_following_text() {
+        use crate::{Document, FileList};
+        use ardent_core::outline::Outline;
+
+        let mut browser = Browser::new(FileList {
+            files: vec![("a.md".into(), None)],
+            messages: vec![],
+        });
+        let first_row = format!("{}❤️", "x".repeat(38));
+        let text = format!("{first_row}Z");
+        browser.enter(&|path| {
+            Ok(Document {
+                outline: Outline::build(path, text.as_bytes(), &[]),
+                bytes: text.as_bytes().to_vec(),
+            })
+        });
+        let rows = snapshot(&browser, 40, 14).0;
+        assert!(
+            rows.windows(2)
+                .any(|pair| pair[0] == first_row && pair[1] == "Z"),
+            "{rows:?}"
+        );
+    }
+
+    #[test]
+    fn a_long_name_keeps_its_scan_error_visible_in_the_sidebar() {
+        use crate::FileList;
+
+        let browser = Browser::new(FileList {
+            files: vec![("long_module_name.rs".into(), Some("syntax error".into()))],
+            messages: vec![],
+        });
+        let rows = snapshot(&browser, 60, 14).0;
+        let sidebar = rows[1].split('│').next().expect("sidebar");
+        assert!(
+            sidebar.contains('!') && sidebar.contains("long_module"),
+            "{sidebar:?}"
+        );
+    }
+
+    #[test]
     fn crlf_lines_wrap_without_showing_carriage_returns() {
         assert_eq!(
             wrapped("1234\r\n\r\nx\ry\nend\r", 4).collect::<Vec<_>>(),
@@ -385,5 +433,7 @@ mod tests {
             ["界a", "b", "", "x�[", "2J"]
         );
         assert_eq!(printable("a\nb\x1bc"), "a�b�c");
+        assert_eq!(wrapped("A👩‍💻B", 2).collect::<Vec<_>>(), ["A", "👩‍💻", "B"]);
+        assert_eq!(wrapped("界a", 1).collect::<Vec<_>>(), ["�", "a"]);
     }
 }
