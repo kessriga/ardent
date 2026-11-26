@@ -3,14 +3,15 @@
 use std::io::{self, IsTerminal, Write};
 use std::time::Duration;
 
-use crossterm::cursor::{Hide, MoveTo, Show};
+use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use crossterm::style::Print;
+use crossterm::execute;
 use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
-use crossterm::{execute, queue};
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 
-use crate::render::Frame;
-use crate::{Browser, Document, FileList, Screen};
+use crate::render::{self, Paging};
+use crate::{Browser, Document, FileList};
 
 /// Check that the browser can take input and draw on an interactive terminal.
 /// Call this before starting project work for a terminal-only command.
@@ -41,8 +42,9 @@ pub(super) fn run(
     let mut output = io::stdout().lock();
     terminal::enable_raw_mode()?;
     let result: io::Result<Option<i32>> = (|| {
-        execute!(output, EnterAlternateScreen, Hide)?;
-        event_loop(&mut output, browser, load, refresh, || {
+        execute!(output, EnterAlternateScreen, Clear(ClearType::All), Hide)?;
+        let mut terminal = Terminal::new(CrosstermBackend::new(&mut output))?;
+        event_loop(&mut terminal, browser, load, refresh, || {
             #[cfg(unix)]
             {
                 signals.pending().next()
@@ -68,20 +70,20 @@ pub(super) fn run(
 }
 
 fn event_loop(
-    output: &mut impl Write,
+    terminal: &mut Terminal<CrosstermBackend<impl Write>>,
     mut browser: Browser,
     load: impl Fn(&str) -> io::Result<Document>,
     mut refresh: impl FnMut(Option<&str>) -> io::Result<Option<FileList>>,
     mut interrupted: impl FnMut() -> Option<i32>,
 ) -> io::Result<Option<i32>> {
-    let mut frame = paint(output, &browser)?;
+    let mut frame = paint(terminal, &browser)?;
     loop {
         if let Some(signal) = interrupted() {
             return Ok(Some(signal));
         }
         if let Some(files) = refresh(browser.open_path())? {
             browser.refresh(files, &load);
-            frame = paint(output, &browser)?;
+            frame = paint(terminal, &browser)?;
         }
         if !event::poll(Duration::from_millis(75))? {
             continue;
@@ -95,40 +97,22 @@ fn event_loop(
                     return Ok(None::<i32>);
                 }
                 browser.key(key.code, frame.page_height, frame.more, &load);
-                frame = paint(output, &browser)?;
+                frame = paint(terminal, &browser)?;
             }
             Event::Resize(_, _) => {
-                browser.diagnostic_scroll = 0;
-                if let Screen::Unavailable { scroll, .. } = &mut browser.screen {
-                    *scroll = 0;
-                }
-                if let Screen::Outline(page)
-                | Screen::Unavailable {
-                    previous: Some(page),
-                    ..
-                } = &mut browser.screen
-                {
-                    page.scroll = 0;
-                }
-                frame = paint(output, &browser)?;
+                browser.resized();
+                frame = paint(terminal, &browser)?;
             }
             _ => {}
         }
     }
 }
 
-fn paint(output: &mut impl Write, browser: &Browser) -> io::Result<Frame> {
-    let (width, height) = terminal::size()?;
-    let frame = Frame::draw(browser, width.into(), height.into());
-    queue!(output, Clear(ClearType::All))?;
-    for (i, row) in frame
-        .rows
-        .iter()
-        .enumerate()
-        .filter(|(_, row)| !row.is_empty())
-    {
-        queue!(output, MoveTo(0, i as u16), Print(row))?;
-    }
-    output.flush()?;
-    Ok(frame)
+fn paint(
+    terminal: &mut Terminal<CrosstermBackend<impl Write>>,
+    browser: &Browser,
+) -> io::Result<Paging> {
+    let mut paging = Paging::default();
+    terminal.draw(|frame| paging = render::draw(frame, browser))?;
+    Ok(paging)
 }

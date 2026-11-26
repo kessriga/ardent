@@ -7,6 +7,7 @@ mod pty;
 use rustix::process::{self, Pid, Signal};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
+use std::num::NonZeroU16;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Child, Command};
@@ -14,54 +15,102 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use rustix::termios;
+use vt100::{Parser, Screen};
 
-struct Session(Child);
+struct Session {
+    child: Child,
+    master: File,
+    terminal: Parser,
+}
 
 impl Session {
-    fn open(dir: &Path, slave: &File) -> io::Result<Self> {
-        Ok(Self(
-            Command::new(env!("CARGO_BIN_EXE_ardent"))
+    fn open(dir: &Path, slave: &File, master: File) -> io::Result<Self> {
+        let mut terminal = Parser::default();
+        set_terminal_size(&mut terminal, slave)?;
+        Ok(Self {
+            child: Command::new(env!("CARGO_BIN_EXE_ardent"))
                 .current_dir(dir)
                 .arg("browse")
                 .stdin(slave.try_clone()?)
                 .stdout(slave.try_clone()?)
                 .stderr(slave.try_clone()?)
                 .spawn()?,
-        ))
+            master,
+            terminal,
+        })
     }
 
     fn signal(&self, signal: Signal) -> io::Result<()> {
-        let pid = Pid::from_child(&self.0);
+        let pid = Pid::from_child(&self.child);
         Ok(process::kill_process(pid, signal)?)
     }
+    fn keys(&mut self, keys: &[u8]) -> io::Result<()> {
+        self.master.write_all(keys)
+    }
+
+    fn resize(&mut self, slave: &File, rows: u16, columns: u16) -> io::Result<()> {
+        pty::resize_to(slave, rows, columns)?;
+        set_terminal_size(&mut self.terminal, slave)?;
+        self.signal(Signal::WINCH)
+    }
+
+    fn wait_for(&mut self, text: &str) -> io::Result<String> {
+        self.wait_screen(&[text], &[])
+    }
+
+    fn wait_screen(&mut self, present: &[&str], absent: &[&str]) -> io::Result<String> {
+        self.wait_until(&format!("show {present:?}, hide {absent:?}"), |screen| {
+            let text = screen.contents();
+            present.iter().all(|s| text.contains(s)) && absent.iter().all(|s| !text.contains(s))
+        })
+    }
+
+    fn wait_restored(&mut self) -> io::Result<()> {
+        self.wait_until("restore the previous screen and cursor", |screen| {
+            !screen.alternate_screen() && !screen.hide_cursor()
+        })?;
+        Ok(())
+    }
+
+    // Ratatui updates only the cells that changed. Assertions need the assembled screen.
+    fn wait_until(&mut self, goal: &str, ready: impl Fn(&Screen) -> bool) -> io::Result<String> {
+        let start = Instant::now();
+        let mut bytes = Vec::new();
+        loop {
+            bytes.clear();
+            match self.master.read_to_end(&mut bytes) {
+                Ok(_) => {}
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => {}
+                Err(err) => return Err(err),
+            }
+            self.terminal.process(&bytes);
+            let screen = self.terminal.screen();
+            if ready(screen) {
+                return Ok(screen.contents());
+            }
+            if start.elapsed() > Duration::from_secs(15) {
+                return Err(io::Error::other(format!(
+                    "waiting to {goal}, saw:\n{}",
+                    screen.contents()
+                )));
+            }
+            thread::sleep(Duration::from_millis(15));
+        }
+    }
+}
+
+fn set_terminal_size(terminal: &mut Parser, slave: &File) -> io::Result<()> {
+    let size = termios::tcgetwinsize(slave)?;
+    let rows = NonZeroU16::try_from(size.ws_row).map_err(io::Error::other)?;
+    let columns = NonZeroU16::try_from(size.ws_col).map_err(io::Error::other)?;
+    terminal.set_size(rows, columns);
+    Ok(())
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-fn wait_for(master: &mut File, expected: &str) -> io::Result<String> {
-    let start = Instant::now();
-    let mut bytes = Vec::new();
-    loop {
-        match master.read_to_end(&mut bytes) {
-            Ok(_) => {}
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {}
-            Err(err) => return Err(err),
-        }
-        let text = String::from_utf8_lossy(&bytes);
-        if text.contains(expected) {
-            return Ok(text.into_owned());
-        }
-        if start.elapsed() > Duration::from_secs(15) {
-            return Err(io::Error::other(format!(
-                "waiting for {expected:?}, saw {text:?}"
-            )));
-        }
-        thread::sleep(Duration::from_millis(15));
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
@@ -88,57 +137,109 @@ fn browses_from_a_subdirectory_and_refreshes_while_open() -> io::Result<()> {
     fs::write(root.join(".gitignore"), "skip.md\n")?;
     fs::write(root.join("skip.md"), "# Ignored\n")?;
 
-    let (mut master, slave) = pty::open_terminal(12)?;
+    let (master, slave) = pty::open_terminal(12)?;
     let original = termios::tcgetattr(&slave)?.local_modes;
-    let mut session = Session::open(&docs, &slave)?;
-    let list = wait_for(&mut master, "Enter open")?;
-    assert!(
-        list.contains("a.md") && list.contains("docs/z.rs") && list.contains("syntax error"),
-        "{list}"
-    );
-    assert!(!list.contains("skip.md"));
-    master.write_all(b"\r")?;
-    wait_for(&mut master, "PgUp/PgDn")?;
-    master.write_all(b"\x1b[C\x1b[C\x1b[C")?;
-    wait_for(&mut master, ">       paragraph")?;
+    let mut session = Session::open(&docs, &slave, master)?;
+    session.wait_screen(&["Explorer", "docs/", "z.rs !", "a.md"], &["skip.md"])?;
+    session.keys(b"\x1b[B\x1b[B\r")?;
+    session.wait_for("# Intro")?;
+    session.keys(b"\x1b[C\x1b[C\x1b[C")?;
+    session.wait_for(">       paragraph")?;
     fs::write(&markdown, source.replace("first passage", "edited passage"))?;
-    let edited = wait_for(&mut master, "edited passage")?;
+    let edited = session.wait_for("edited passage")?;
+    // A terminal would consume "[31m" if the source's escape byte reached the output.
     assert!(
-        edited.contains(">       paragraph") && edited.contains("edited passage�[31m"),
+        edited.contains(">       paragraph") && edited.contains("[31m"),
         "{edited}"
     );
-    assert!(!edited.contains("\x1b[31m") && !edited.contains("source-line-00"));
-    master.write_all(b"\x1b[D]")?;
-    let heading = wait_for(&mut master, ">   + Next")?;
-    assert!(!heading.contains("source-line-06"));
-    master.write_all(b"\x1b[6~")?;
-    wait_for(&mut master, "source-line-06")?;
-    master.write_all(b"\x1b")?;
-    wait_for(&mut master, "Tracked files")?;
-    master.write_all(b"\x1b[B\r")?;
-    wait_for(&mut master, "syntax error")?;
+    assert!(!edited.contains("source-line-00"));
+    session.keys(b"\x1b[D]")?;
+    let heading = session.wait_for(">   + Next")?;
+    assert!(!heading.contains("source-line-04"));
+    session.keys(b"\x1b[6~")?;
+    session.wait_for("source-line-04")?;
+    session.keys(b"\x1b")?;
+    session.wait_screen(&["Explorer"], &["source-line-04"])?;
+    session.keys(b"\x1b[A\r")?;
+    session.wait_for("syntax error")?;
     fs::write(&rust, "fn healthy() {}\n")?;
-    wait_for(&mut master, "fn healthy() {}")?;
-    master.write_all(b"\x1b[C")?;
-    wait_for(&mut master, ">     fn healthy")?;
+    session.wait_for("fn healthy() {}")?;
+    session.keys(b"\x1b[C")?;
+    session.wait_for(">     fn healthy")?;
     fs::write(&rust, "fn healthy(")?;
-    let broken = wait_for(&mut master, "syntax error")?;
+    let broken = session.wait_for("syntax error")?;
     assert!(!broken.contains("fn healthy() {}"), "{broken}");
     fs::write(&rust, "fn first() {}\nfn healthy() {}\n")?;
-    let repaired = wait_for(&mut master, ">     fn healthy")?;
+    let repaired = session.wait_for(">     fn healthy")?;
     assert!(
         repaired.contains("fn healthy() {}") && !repaired.contains("fn first() {}"),
         "{repaired}"
     );
     fs::remove_file(&rust)?;
-    wait_for(&mut master, "Tracked files")?;
-    pty::resize(&slave, 8)?;
-    session.signal(Signal::WINCH)?;
-    wait_for(&mut master, "\x1b[8;1HUp/Down")?;
-    master.write_all(b"q")?;
-    wait_for(&mut master, "\x1b[?1049l")?;
-    assert!(session.0.wait()?.success());
+    session.wait_screen(&["Explorer", "a.md"], &["z.rs", "fn healthy"])?;
+    session.keys(b"q")?;
+    session.wait_restored()?;
+    assert!(session.child.wait()?.success());
     assert_eq!(termios::tcgetattr(&slave)?.local_modes, original);
+    Ok(())
+}
+
+#[test]
+fn keeps_the_directory_explorer_beside_the_open_outline() -> io::Result<()> {
+    let project = common::temp_dir()?;
+    let root = project.path();
+    assert!(
+        common::run_init(root, &["--plugins", "markdown"])?
+            .status
+            .success()
+    );
+    let guide = root.join("docs/guide");
+    fs::create_dir_all(&guide)?;
+    fs::write(guide.join("alpha.md"), "# First passage\n")?;
+    fs::write(root.join("beta.md"), "# Second passage\n")?;
+    let (master, slave) = pty::open_terminal(18)?;
+    let mut session = Session::open(root, &slave, master)?;
+
+    session.wait_screen(&["Explorer", "docs/", "guide/", "alpha.md", "beta.md"], &[])?;
+    session.keys(b"\x1b[D")?;
+    session.wait_screen(&["docs/", "beta.md"], &["guide/", "alpha.md"])?;
+    // Reopen docs/, descend through guide/, then open its file.
+    session.keys(b"\r\x1b[C\x1b[C\r")?;
+    let opened = session.wait_screen(
+        &[
+            "Explorer",
+            "Outline",
+            "Source",
+            "docs/guide/alpha.md",
+            "# First passage",
+            "beta.md",
+        ],
+        &[],
+    )?;
+    assert!(
+        opened
+            .lines()
+            .any(|line| line.contains("Explorer") && line.contains("Outline")),
+        "{opened}"
+    );
+
+    // With focus in the explorer, move to beta.md and refresh the project without replacing the document.
+    session.keys(b"\t\x1b[B")?;
+    fs::write(root.join("z.md"), "# New file\n")?;
+    session.wait_screen(&["z.md", "# First passage"], &["# Second passage"])?;
+    session.resize(&slave, 12, 32)?;
+    session.wait_screen(&["Explorer", "beta.md"], &["# First passage"])?;
+    session.keys(b"\t")?;
+    session.wait_screen(&["Source", "# First passage"], &["Explorer", "beta.md"])?;
+    session.keys(b"\t\r")?;
+    session.wait_screen(&["Source", "# Second passage"], &["# First passage"])?;
+    session.resize(&slave, 18, 80)?;
+    session.wait_screen(&["Explorer", "docs/", "Outline", "# Second passage"], &[])?;
+    session.keys(b"\x1b")?;
+    session.wait_screen(&["Explorer", "beta.md"], &["# Second passage"])?;
+    session.keys(b"q")?;
+    session.wait_restored()?;
+    assert!(session.child.wait()?.success());
     Ok(())
 }
 
@@ -150,13 +251,13 @@ fn interruption_restores_an_empty_browser() -> io::Result<()> {
             .status
             .success()
     );
-    let (mut master, slave) = pty::open_terminal(12)?;
+    let (master, slave) = pty::open_terminal(12)?;
     let original = termios::tcgetattr(&slave)?.local_modes;
-    let mut session = Session::open(project.path(), &slave)?;
-    wait_for(&mut master, "No tracked source files")?;
+    let mut session = Session::open(project.path(), &slave, master)?;
+    session.wait_for("No tracked source files")?;
     session.signal(Signal::TERM)?;
-    wait_for(&mut master, "\x1b[?1049l")?;
-    assert_eq!(session.0.wait()?.signal(), Some(Signal::TERM.as_raw()));
+    session.wait_restored()?;
+    assert_eq!(session.child.wait()?.signal(), Some(Signal::TERM.as_raw()));
     assert_eq!(termios::tcgetattr(&slave)?.local_modes, original);
     Ok(())
 }
@@ -171,12 +272,12 @@ fn quit_during_refresh_restores_terminal_before_the_sync_lock_is_released() -> i
             .success()
     );
     fs::write(dir.join("notes.md"), "# First\n")?;
-    let (mut master, slave) = pty::open_terminal(12)?;
+    let (master, slave) = pty::open_terminal(12)?;
     let original = termios::tcgetattr(&slave)?.local_modes;
-    let mut session = Session::open(dir, &slave)?;
-    wait_for(&mut master, "Enter open")?;
+    let mut session = Session::open(dir, &slave, master)?;
+    session.wait_for("Explorer")?;
     fs::write(dir.join("watch-ready.md"), "# Ready\n")?;
-    wait_for(&mut master, "watch-ready.md")?;
+    session.wait_for("watch-ready.md")?;
     let lock = File::options()
         .write(true)
         .open(dir.join(".ardent/cache/lock"))?;
@@ -184,13 +285,13 @@ fn quit_during_refresh_restores_terminal_before_the_sync_lock_is_released() -> i
     fs::write(dir.join("notes.md"), "# Second\n")?;
     // Allow the polling backend's one-second interval and the event batch deadline to elapse.
     thread::sleep(Duration::from_secs(2));
-    master.write_all(b"\x1b[B\r")?;
-    wait_for(&mut master, "# Ready")?;
-    master.write_all(b"q")?;
-    wait_for(&mut master, "\x1b[?1049l")?;
+    session.keys(b"\x1b[B\r")?;
+    session.wait_for("# Ready")?;
+    session.keys(b"q")?;
+    session.wait_restored()?;
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        if let Some(status) = session.0.try_wait()? {
+        if let Some(status) = session.child.try_wait()? {
             assert!(status.success(), "{status}");
             break;
         }
@@ -220,16 +321,16 @@ fn healthy_file_refreshes_with_an_unreadable_ignored_directory() -> io::Result<(
     fs::set_permissions(&private, fs::Permissions::from_mode(0o000))?;
     let notes = root.join("notes.md");
     fs::write(&notes, "# Before\n")?;
-    let (mut master, slave) = pty::open_terminal(12)?;
-    let mut session = Session::open(root, &slave)?;
-    wait_for(&mut master, "Enter open")?;
-    master.write_all(b"\r")?;
-    wait_for(&mut master, "# Before")?;
+    let (master, slave) = pty::open_terminal(12)?;
+    let mut session = Session::open(root, &slave, master)?;
+    session.wait_for("Explorer")?;
+    session.keys(b"\r")?;
+    session.wait_for("# Before")?;
     fs::write(notes, "# After\n")?;
-    wait_for(&mut master, "# After")?;
-    master.write_all(b"q")?;
-    wait_for(&mut master, "\x1b[?1049l")?;
-    assert!(session.0.wait()?.success());
+    session.wait_for("# After")?;
+    session.keys(b"q")?;
+    session.wait_restored()?;
+    assert!(session.child.wait()?.success());
     fs::set_permissions(private, fs::Permissions::from_mode(0o700))?;
     Ok(())
 }
@@ -248,12 +349,12 @@ fn losing_a_nested_project_never_syncs_the_enclosing_project() -> io::Result<()>
         );
     }
     fs::write(outer.join("parent.md"), "# Parent\n")?;
-    let (mut master, slave) = pty::open_terminal(12)?;
-    let mut session = Session::open(&inner, &slave)?;
-    wait_for(&mut master, "Enter open")?;
+    let (master, slave) = pty::open_terminal(12)?;
+    let mut session = Session::open(&inner, &slave, master)?;
+    session.wait_for("Explorer")?;
     fs::rename(inner.join(".ardent"), outer.join("moved-inner"))?;
-    wait_for(&mut master, "\x1b[?1049l")?;
-    assert!(!session.0.wait()?.success());
+    session.wait_restored()?;
+    assert!(!session.child.wait()?.success());
     assert!(!outer.join(".ardent/cache").exists());
     Ok(())
 }
@@ -270,11 +371,11 @@ fn rechecks_an_open_file_when_a_restore_preserves_its_stamp() -> io::Result<()> 
     let notes = root.join("notes.md");
     fs::write(&notes, "# First\n")?;
     let time = File::open(&notes)?.metadata()?.modified()?;
-    let (mut master, slave) = pty::open_terminal(12)?;
-    let mut session = Session::open(root, &slave)?;
-    wait_for(&mut master, "Enter open")?;
-    master.write_all(b"\r")?;
-    wait_for(&mut master, "# First")?;
+    let (master, slave) = pty::open_terminal(12)?;
+    let mut session = Session::open(root, &slave, master)?;
+    session.wait_for("Explorer")?;
+    session.keys(b"\r")?;
+    session.wait_for("# First")?;
     let replacement = root.join("replacement");
     fs::write(&replacement, "# Other\n")?;
     File::options()
@@ -282,10 +383,10 @@ fn rechecks_an_open_file_when_a_restore_preserves_its_stamp() -> io::Result<()> 
         .open(&replacement)?
         .set_modified(time)?;
     fs::rename(replacement, notes)?;
-    wait_for(&mut master, "# Other")?;
-    master.write_all(b"q")?;
-    wait_for(&mut master, "\x1b[?1049l")?;
-    assert!(session.0.wait()?.success());
+    session.wait_for("# Other")?;
+    session.keys(b"q")?;
+    session.wait_restored()?;
+    assert!(session.child.wait()?.success());
     Ok(())
 }
 
@@ -306,16 +407,16 @@ fn restoring_read_permission_recovers_without_another_edit() -> io::Result<()> {
     if File::open(&notes).is_ok() {
         return Ok(()); // A privileged process can read a mode-000 file.
     }
-    let (mut master, slave) = pty::open_terminal(12)?;
-    let mut session = Session::open(root, &slave)?;
-    wait_for(&mut master, "Enter open")?;
-    master.write_all(b"\r")?;
-    wait_for(&mut master, "Permission denied")?;
+    let (master, slave) = pty::open_terminal(12)?;
+    let mut session = Session::open(root, &slave, master)?;
+    session.wait_for("Explorer")?;
+    session.keys(b"\r")?;
+    session.wait_for("Permission denied")?;
     fs::set_permissions(&notes, fs::Permissions::from_mode(0o600))?;
-    wait_for(&mut master, "# Readable")?;
-    master.write_all(b"q")?;
-    wait_for(&mut master, "\x1b[?1049l")?;
-    assert!(session.0.wait()?.success());
+    session.wait_for("# Readable")?;
+    session.keys(b"q")?;
+    session.wait_restored()?;
+    assert!(session.child.wait()?.success());
     Ok(())
 }
 
@@ -331,20 +432,20 @@ fn repairs_an_open_syntax_error_without_a_size_or_mtime_change() -> io::Result<(
     let source = root.join("notes.rs");
     fs::write(&source, "fn item(  \n")?;
     let time = source.metadata()?.modified()?;
-    let (mut master, slave) = pty::open_terminal(12)?;
-    let mut session = Session::open(root, &slave)?;
-    wait_for(&mut master, "Enter open")?;
-    master.write_all(b"\r")?;
-    wait_for(&mut master, "Esc files")?;
+    let (master, slave) = pty::open_terminal(12)?;
+    let mut session = Session::open(root, &slave, master)?;
+    session.wait_for("Explorer")?;
+    session.keys(b"\r")?;
+    session.wait_for("syntax error")?;
     fs::write(&source, "fn item(){}")?;
     File::options()
         .write(true)
         .open(&source)?
         .set_modified(time)?;
-    wait_for(&mut master, "fn item(){}")?;
-    master.write_all(b"q")?;
-    wait_for(&mut master, "\x1b[?1049l")?;
-    assert!(session.0.wait()?.success());
+    session.wait_for("fn item(){}")?;
+    session.keys(b"q")?;
+    session.wait_restored()?;
+    assert!(session.child.wait()?.success());
     Ok(())
 }
 

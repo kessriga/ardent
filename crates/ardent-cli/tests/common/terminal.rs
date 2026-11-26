@@ -7,9 +7,13 @@ use rustix::pty::{self, OpenptFlags};
 use rustix::termios::{self, Winsize};
 
 pub fn resize(terminal: &File, rows: u16) -> io::Result<()> {
+    resize_to(terminal, rows, 80)
+}
+
+pub fn resize_to(terminal: &File, rows: u16, columns: u16) -> io::Result<()> {
     let size = Winsize {
         ws_row: rows,
-        ws_col: 80,
+        ws_col: columns,
         ws_xpixel: 0,
         ws_ypixel: 0,
     };

@@ -33,3 +33,4 @@ tempfile.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dev-dependencies]
 rustix = { version = "1.1.6", features = ["process", "pty", "termios"] }
+vt100 = "0.18.1"

@@ -1,128 +1,260 @@
-//! Lay out the file list, outline, and source preview in terminal cells.
+//! Draw the directory explorer, the open outline and its source on a Ratatui frame.
 
 use std::borrow::Cow;
 
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, List, ListState, Paragraph};
 use unicode_width::UnicodeWidthChar;
 
-use crate::{Browser, Page, Screen};
+use crate::{Browser, Focus, Page, Screen};
 
-pub(super) struct Frame {
-    pub rows: Vec<String>,
+/// The number of wrapped rows the focused pane can page through on this frame.
+#[derive(Default)]
+pub(super) struct Paging {
     pub page_height: usize,
     pub more: bool,
 }
 
-impl Frame {
-    pub fn draw(browser: &Browser, width: usize, height: usize) -> Self {
-        let mut frame = Self {
-            rows: Vec::new(),
-            page_height: 0,
-            more: false,
-        };
-        let keys: &[&str] = match &browser.screen {
-            Screen::Files if !browser.list.messages.is_empty() => &[
-                "Up/Down select",
-                "Enter open",
-                "PgUp/PgDn messages",
-                "q quit",
-            ],
-            Screen::Files => &["Up/Down select", "Enter open", "q quit"],
-            Screen::Outline(_) => &[
-                "Arrows navigate",
-                "[ ] siblings",
-                "PgUp/PgDn source",
-                "Esc files",
-                "q quit",
-            ],
-            Screen::Unavailable { .. } => &["PgUp/PgDn error", "Esc files", "q quit"],
-        };
-        let footer = footer(keys, width, height);
-        let content_height = height.saturating_sub(footer.len());
-        let body = content_height.saturating_sub(1);
-        let files = &browser.list.files;
-        match &browser.screen {
-            Screen::Files => frame.files(browser, width, body),
-            Screen::Outline(page) => {
-                frame.rows.push(files[browser.selected].0.clone());
-                frame.outline(page, width, body);
-            }
-            Screen::Unavailable {
-                message, scroll, ..
-            } => {
-                frame.rows.push(files[browser.selected].0.clone());
-                frame.page(wrapped(message, width).skip(*scroll), body);
-            }
-        }
-        frame.rows.resize(content_height, String::new());
-        frame.rows.extend(footer);
-        for row in &mut frame.rows {
-            *row = clipped(row, width);
-        }
-        frame
-    }
+pub(super) fn draw(frame: &mut Frame<'_>, browser: &Browser) -> Paging {
+    let area = frame.area();
+    let hints = key_hints(browser);
+    let footer = footer(hints.as_slice(), area.width.into(), area.height.into());
+    let [content, help] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(footer.len() as u16)]).areas(area);
+    frame.render_widget(Paragraph::new(footer.join("\n")), help);
 
-    fn files(&mut self, browser: &Browser, width: usize, height: usize) {
-        self.rows.push("Tracked files".into());
-        let files = &browser.list.files;
-        let messages = &browser.list.messages;
-        let available = height.saturating_sub(usize::from(!messages.is_empty()));
-        if files.is_empty() && available > 0 {
-            self.rows.push("No tracked source files".into());
-        }
-        let start = (browser.selected + 1).saturating_sub(available);
-        for (i, (path, error)) in files.iter().enumerate().skip(start).take(available) {
-            let error = error.as_ref().map(|e| format!("  {e}")).unwrap_or_default();
-            self.rows
-                .push(format!("{} {path}{error}", cursor(i == browser.selected)));
-        }
-        let rows = messages
-            .iter()
-            .flat_map(|message| wrapped(message, width))
-            .skip(browser.diagnostic_scroll);
-        self.page(rows, height.saturating_sub(self.rows.len() - 1));
+    if area.width < 60 {
+        return match browser.focus {
+            Focus::Explorer => explorer(frame, content, browser),
+            Focus::Document => document(frame, content, browser),
+        };
     }
+    let sidebar_width = (area.width / 3).min(36);
+    let [sidebar, reader] =
+        Layout::horizontal([Constraint::Length(sidebar_width), Constraint::Min(1)]).areas(content);
+    let divider = Block::default().borders(Borders::RIGHT);
+    let inside = divider.inner(sidebar);
+    frame.render_widget(divider, sidebar);
+    let messages = explorer(frame, inside, browser);
+    let reading = document(frame, reader, browser);
+    match browser.focus {
+        Focus::Explorer => messages,
+        Focus::Document => reading,
+    }
+}
 
-    fn outline(&mut self, page: &Page, width: usize, height: usize) {
-        let tree = &page.tree;
-        let tree_height = height / 2;
-        let focus = tree
-            .visible()
-            .position(|i| i == tree.selected)
-            .unwrap_or_default();
-        let start = (focus + 1).saturating_sub(tree_height);
-        for i in tree.visible().skip(start).take(tree_height) {
+fn key_hints(browser: &Browser) -> Vec<&'static str> {
+    let mut keys = match browser.focus {
+        Focus::Explorer => vec!["Arrows navigate", "Enter open"],
+        Focus::Document => match browser.screen() {
+            Some(Screen::Outline(_)) => vec!["Arrows navigate", "[ ] siblings", "PgUp/PgDn source"],
+            Some(Screen::Unavailable { .. }) => vec!["PgUp/PgDn error"],
+            None => Vec::new(),
+        },
+    };
+    if browser.focus == Focus::Explorer && !browser.list.messages.is_empty() {
+        keys.push("PgUp/PgDn messages");
+    }
+    if browser.open_path().is_some() {
+        keys.push("Tab panes");
+        keys.push("Esc close");
+    }
+    keys.push("q quit");
+    keys
+}
+
+/// The active pane has a text marker as well as a highlighted heading.
+fn heading(frame: &mut Frame<'_>, area: Rect, title: &str, focused: bool) -> Rect {
+    let [header, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+    let style = Style::default().add_modifier(Modifier::BOLD);
+    let line = if focused {
+        Line::styled(format!("> {title}"), style.fg(Color::Cyan))
+    } else {
+        Line::styled(title, style)
+    };
+    frame.render_widget(line, header);
+    body
+}
+
+fn explorer(frame: &mut Frame<'_>, area: Rect, browser: &Browser) -> Paging {
+    let area = heading(frame, area, "Explorer", browser.focus == Focus::Explorer);
+    let entries = browser.explorer.rows();
+    let list_height = entries.len().max(1).min(usize::from(area.height));
+    let list_height = if browser.list.messages.is_empty() {
+        list_height
+    } else {
+        // Keep at least one row for messages, even when the explorer fills the pane.
+        list_height.min(usize::from(area.height.saturating_sub(1)))
+    };
+    let [files, messages] =
+        Layout::vertical([Constraint::Length(list_height as u16), Constraint::Min(0)]).areas(area);
+    let selected = browser.explorer.selected();
+    let start = (selected + 1).saturating_sub(list_height);
+    if entries.is_empty() {
+        frame.render_widget("No tracked source files", files);
+    } else {
+        let items = entries.iter().skip(start).take(list_height).map(|entry| {
+            let name = entry.path.rsplit('/').next().unwrap_or(&entry.path);
+            let indent = " ".repeat(
+                entry
+                    .depth
+                    .saturating_mul(2)
+                    .min(usize::from(files.width) / 2),
+            );
+            let name = printable(name);
+            let label = if entry.directory {
+                let marker = if browser.explorer.is_expanded(&entry.path) {
+                    '▾'
+                } else {
+                    '▸'
+                };
+                format!("{indent}{marker} {name}/")
+            } else {
+                let failed = browser
+                    .list
+                    .file(&entry.path)
+                    .is_some_and(|(_, error)| error.is_some());
+                format!("{indent}{name}{}", if failed { " !" } else { "" })
+            };
+            if browser.open_path() == Some(&entry.path) {
+                Line::styled(label, Style::default().add_modifier(Modifier::UNDERLINED))
+            } else {
+                Line::from(label)
+            }
+        });
+        selected_list(frame, files, items, selected.saturating_sub(start));
+    }
+    let diagnostics = browser
+        .list
+        .messages
+        .iter()
+        .flat_map(|msg| wrapped(msg, messages.width.into()));
+    page(frame, messages, diagnostics.skip(browser.diagnostic_scroll))
+}
+
+fn document(frame: &mut Frame<'_>, area: Rect, browser: &Browser) -> Paging {
+    let focused = browser.focus == Focus::Document;
+    let path = browser.open_path().map(printable);
+    let title = path.map_or_else(|| "Outline".to_string(), |path| format!("Outline  {path}"));
+    let area = heading(frame, area, &title, focused);
+    match browser.screen() {
+        Some(Screen::Outline(open)) => outline(frame, area, open),
+        Some(Screen::Unavailable {
+            message, scroll, ..
+        }) => page(
+            frame,
+            area,
+            wrapped(message, area.width.into()).skip(*scroll),
+        ),
+        None => {
+            if !browser.list.files.is_empty() {
+                frame.render_widget("Select a file and press Enter", area);
+            }
+            Paging::default()
+        }
+    }
+}
+
+fn outline(frame: &mut Frame<'_>, area: Rect, open: &Page) -> Paging {
+    let [nodes, title, source] = Layout::vertical([
+        Constraint::Length(area.height / 2),
+        Constraint::Length(u16::from(area.height >= 3)),
+        Constraint::Min(0),
+    ])
+    .areas(area);
+    let tree = &open.tree;
+    let selected = tree
+        .visible()
+        .position(|i| i == tree.selected)
+        .unwrap_or_default();
+    let start = (selected + 1).saturating_sub(usize::from(nodes.height));
+    let visible = tree
+        .visible()
+        .skip(start)
+        .take(nodes.height.into())
+        .map(|i| {
             let (depth, marker, label) = tree.label(i);
-            let indent = " ".repeat(depth.saturating_mul(2).min(width / 2));
-            self.rows.push(format!(
-                "{} {indent}{marker} {label}",
-                cursor(i == tree.selected)
-            ));
-        }
-        self.rows.push("Source".into());
-        let node = &page.document.outline.nodes[tree.selected];
-        // Slice before decoding. Replacing an invalid UTF-8 byte can change subsequent byte offsets.
-        let text = page
-            .document
-            .bytes
-            .get(node.range.clone())
-            .map(String::from_utf8_lossy)
-            .unwrap_or(Cow::Borrowed("Invalid source range"));
-        self.page(
-            wrapped(&text, width).skip(page.scroll),
-            height.saturating_sub(self.rows.len() - 1),
-        );
-    }
+            let indent = " ".repeat(depth.saturating_mul(2).min(usize::from(nodes.width) / 2));
+            Line::from(format!("{indent}{marker} {}", printable(label)))
+        });
+    selected_list(frame, nodes, visible, selected.saturating_sub(start));
+    frame.render_widget(
+        Span::styled("Source", Style::default().add_modifier(Modifier::BOLD)),
+        title,
+    );
 
-    fn page(&mut self, mut rows: impl Iterator<Item = String>, height: usize) {
-        self.page_height = height;
-        self.rows.extend(rows.by_ref().take(height));
-        self.more = rows.next().is_some();
+    let node = &open.document.outline.nodes[tree.selected];
+    // Slice before decoding because replacing an invalid UTF-8 byte can move later offsets.
+    let text = open
+        .document
+        .bytes
+        .get(node.range.clone())
+        .map(String::from_utf8_lossy)
+        .unwrap_or(Cow::Borrowed("Invalid source range"));
+    page(
+        frame,
+        source,
+        wrapped(&text, source.width.into()).skip(open.scroll),
+    )
+}
+
+fn selected_list(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    items: impl Iterator<Item = Line<'static>>,
+    selected: usize,
+) {
+    let list = List::new(items)
+        .highlight_symbol("> ")
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+    frame.render_stateful_widget(
+        list,
+        area,
+        &mut ListState::default().with_selected(Some(selected)),
+    );
+}
+
+/// Only decode and hold the rows that reach the viewport, plus one to decide whether Page Down can advance.
+fn page(frame: &mut Frame<'_>, area: Rect, mut rows: impl Iterator<Item = String>) -> Paging {
+    let page_height = usize::from(area.height);
+    let text: Vec<_> = rows.by_ref().take(page_height).map(Line::from).collect();
+    frame.render_widget(Paragraph::new(text), area);
+    Paging {
+        page_height,
+        more: rows.next().is_some(),
     }
+}
+
+fn printable(text: &str) -> String {
+    text.chars().map(display).collect()
+}
+
+#[cfg(test)]
+pub(super) fn snapshot(browser: &Browser, width: u16, height: u16) -> (Vec<String>, Paging) {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("in-memory terminal");
+    let mut paging = Paging::default();
+    terminal
+        .draw(|frame| paging = draw(frame, browser))
+        .expect("in-memory render");
+    let buffer = terminal.backend().buffer();
+    let rows = (0..height)
+        .map(|y| {
+            let row: String = (0..width).map(|x| buffer[(x, y)].symbol()).collect();
+            row.trim_end().to_owned()
+        })
+        .collect();
+    (rows, paging)
 }
 
 /// Keep key/action pairs together where they fit and leave room for the selected content.
 fn footer(keys: &[&str], width: usize, height: usize) -> Vec<String> {
-    let max_rows = height.saturating_sub(2).max(1).min(height);
+    // A short terminal still needs a heading, a selected node and a source row.
+    let max_rows = height.saturating_sub(3).max(1).min(height);
     let mut rows = Vec::new();
     let mut row = String::new();
     for &key in keys {
@@ -137,19 +269,27 @@ fn footer(keys: &[&str], width: usize, height: usize) -> Vec<String> {
     }
     rows.extend(wrapped(&row, width));
     if rows.len() > max_rows {
-        let compact = keys
+        let (full, short) = if let Some((first, rest)) = keys.split_first()
+            && max_rows > 1
+            && first.len() <= width
+        {
+            (Some(first.to_string()), rest)
+        } else {
+            (None, keys)
+        };
+        let compact = short
             .iter()
             .rev()
             .filter_map(|hint| hint.rsplit_once(' ').map(|(keys, _)| keys))
             .collect::<Vec<_>>()
             .join(" ");
-        return wrapped(&compact, width).take(max_rows).collect();
+        return full
+            .into_iter()
+            .chain(wrapped(&compact, width))
+            .take(max_rows)
+            .collect();
     }
     rows
-}
-
-fn cursor(selected: bool) -> char {
-    if selected { '>' } else { ' ' }
 }
 
 /// Map project text to printable characters before measuring or writing it to the terminal.
@@ -159,17 +299,6 @@ fn display(ch: char) -> char {
         c if c.is_control() => '�',
         c => c,
     }
-}
-
-fn clipped(text: &str, width: usize) -> String {
-    let mut used = 0;
-    text.chars()
-        .map(display)
-        .take_while(|c| {
-            used += c.width().unwrap_or(0);
-            used <= width
-        })
-        .collect()
 }
 
 fn wrapped(text: &str, width: usize) -> impl Iterator<Item = String> + '_ {
@@ -210,6 +339,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_four_row_terminal_keeps_the_selection_source_paging_and_focus_keys() {
+        use crate::{Document, FileList};
+        use ardent_core::outline::Outline;
+        use crossterm::event::KeyCode;
+
+        let list = FileList {
+            files: vec![("a.md".into(), None)],
+            messages: vec![],
+        };
+        let mut browser = Browser::new(list);
+        let load = |path: &str| {
+            let bytes = b"first\nsecond".to_vec();
+            Ok(Document {
+                outline: Outline::build(path, &bytes, &[]),
+                bytes,
+            })
+        };
+        browser.enter(&load);
+        let (rows, paging) = snapshot(&browser, 24, 4);
+        assert!(
+            rows[1].contains("> ") && rows[1].contains("a.md"),
+            "{rows:?}"
+        );
+        assert_eq!(rows[2], "first");
+        assert!(rows[3].contains('q') && rows[3].contains("Tab"));
+        assert_eq!(paging.page_height, 1);
+        assert!(paging.more);
+        browser.key(KeyCode::PageDown, paging.page_height, paging.more, &load);
+        assert_eq!(snapshot(&browser, 24, 4).0[2], "second");
+    }
+
+    #[test]
     fn crlf_lines_wrap_without_showing_carriage_returns() {
         assert_eq!(
             wrapped("1234\r\n\r\nx\ry\nend\r", 4).collect::<Vec<_>>(),
@@ -223,6 +384,6 @@ mod tests {
             wrapped("界ab\n\nx\x1b[2J", 3).collect::<Vec<_>>(),
             ["界a", "b", "", "x�[", "2J"]
         );
-        assert_eq!(clipped("a\nb\x1bc", 4), "a�b�");
+        assert_eq!(printable("a\nb\x1bc"), "a�b�c");
     }
 }
