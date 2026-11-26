@@ -31,7 +31,7 @@ It also keeps every link.
 
 A short example.
 ";
-const SPEC_STRUCTURE: &str = "schema: 1
+const SPEC_STRUCTURE: &str = "schema: 2
 stamp:
   size: 201
   mtime: 2026-11-20T08:15:42.123456789Z
@@ -41,34 +41,42 @@ stamp:
   format_hash: f44946daaae00ba28ceea81715b037f6b691458a901d5ac95a012af336cc5831
 nodes:
   - path: docs/spec.md
+    label: docs/spec.md
     kind: file
     range: 0..201
     fingerprint: 64d285e69608de32
-  - path: docs/spec.md#paragraph
+  - path: docs/spec.md#paragraph.1
+    label: paragraph
     kind: paragraph
     range: 0..49
     fingerprint: 986a9a5665640a09
   - path: docs/spec.md#Sync rules
+    label: Sync rules
     kind: heading
     range: 50..172
     fingerprint: 6afe874c4163626f
-  - path: docs/spec.md#Sync rules/paragraph
+  - path: docs/spec.md#Sync rules/paragraph.1
+    label: paragraph
     kind: paragraph
     range: 65..99
     fingerprint: c066d35079ec2897
   - path: docs/spec.md#Sync rules/Renames
+    label: Renames
     kind: heading
     range: 100..172
     fingerprint: f2009c466ed1d13a
-  - path: docs/spec.md#Sync rules/Renames/paragraph
+  - path: docs/spec.md#Sync rules/Renames/paragraph.1
+    label: paragraph
     kind: paragraph
     range: 113..171
     fingerprint: 0b019916628c0b2b
   - path: docs/spec.md#Example
+    label: Example
     kind: heading
     range: 172..201
     fingerprint: 5547ffff36732ee1
-  - path: docs/spec.md#Example/paragraph
+  - path: docs/spec.md#Example/paragraph.1
+    label: paragraph
     kind: paragraph
     range: 184..201
     fingerprint: 7b8f8a6fa531fab0
@@ -275,7 +283,7 @@ fn broken_or_unknown_structure_files_are_rebuilt() -> TestResult {
     project.sync()?.assert_success();
     let good = project.structure("README.md")?;
     fs::write(project.structure_path("README.md"), "nodes: [")?;
-    project.edit_structure("docs/spec.md", "schema: 1", "schema: 7")?;
+    project.edit_structure("docs/spec.md", "schema: 2", "schema: 1")?;
     let run = project.sync()?;
     run.assert_success();
     assert!(run.stdout().contains("2 scanned"), "{}", run.stdout());
@@ -286,7 +294,7 @@ fn broken_or_unknown_structure_files_are_rebuilt() -> TestResult {
     assert!(
         project
             .structure("docs/spec.md")?
-            .starts_with("schema: 1\n")
+            .starts_with("schema: 2\n")
     );
     Ok(())
 }
@@ -581,7 +589,9 @@ fn rust_file_gets_a_structure_file() -> TestResult {
     let structure = project.structure("src/main.rs")?;
     assert!(structure.contains("format: rust\n"), "{structure}");
     assert!(
-        structure.contains("path: src/main.rs#fn main\n    kind: fn\n    range: 0..27\n"),
+        structure.contains(
+            "path: src/main.rs#fn main\n    label: fn main\n    kind: fn\n    range: 0..27\n"
+        ),
         "{structure}"
     );
     Ok(())

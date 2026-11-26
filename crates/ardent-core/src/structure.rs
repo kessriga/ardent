@@ -10,7 +10,7 @@ use crate::outline::Outline;
 use crate::yaml::{self, ReadError};
 
 /// The schema version of structure files that this Ardent reads and writes.
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
 
 /// What a sync compares to decide whether a structure is current (decision-2): the size, time, and hash of the source
 /// file, and the format plugin that built the outline.
@@ -86,7 +86,7 @@ impl Engine {
     }
 }
 ";
-    const ENGINE_STRUCTURE: &str = "schema: 1
+    const ENGINE_STRUCTURE: &str = "schema: 2
 stamp:
   size: 188
   mtime: 2026-11-20T08:15:42.123456789Z
@@ -96,18 +96,22 @@ stamp:
   format_hash: 657afc1b346ceeac0ae244c175c42108bbd218969077353426ade6eb6b5f6f52
 nodes:
   - path: src/engine.rs
+    label: src/engine.rs
     kind: file
     range: 0..188
     fingerprint: 174add0298423e83
   - path: src/engine.rs#impl Engine
+    label: impl Engine
     kind: impl
     range: 47..187
     fingerprint: e756306dadb3fb00
   - path: src/engine.rs#impl Engine/fn run
+    label: fn run
     kind: fn
     range: 65..124
     fingerprint: a33b27c3382d2785
   - path: src/engine.rs#impl Engine/fn reset
+    label: fn reset
     kind: fn
     range: 130..185
     fingerprint: 0c3892e426b726a6
@@ -175,12 +179,12 @@ nodes:
 
     #[test]
     fn rejects_an_unknown_schema() {
-        let text = ENGINE_STRUCTURE.replace("schema: 1", "schema: 7");
+        let text = ENGINE_STRUCTURE.replace("schema: 2", "schema: 7");
         assert!(matches!(
             Structure::from_yaml(&text),
             Err(ReadError::UnknownSchema(Some(7)))
         ));
-        let text = ENGINE_STRUCTURE.replace("schema: 1\n", "");
+        let text = ENGINE_STRUCTURE.replace("schema: 2\n", "");
         assert!(matches!(
             Structure::from_yaml(&text),
             Err(ReadError::UnknownSchema(None))

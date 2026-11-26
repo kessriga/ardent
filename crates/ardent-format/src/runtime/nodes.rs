@@ -43,10 +43,10 @@ pub(super) fn tree(
             ),
             None => (0..source_len, &roots, root_bound),
         };
-        // A byte may need escaping. A separator plus the longest u32 duplicate suffix takes 13 bytes.
+        // A byte may need escaping. A separator plus the longest u32 duplicate suffix takes 12 bytes.
         let path_bound = parent_bound
             .saturating_add(node.label.len().saturating_mul(2))
-            .saturating_add(13);
+            .saturating_add(12);
         path_bytes = path_bytes
             .checked_sub(path_bound)
             .ok_or(RuntimeError::Invalid(

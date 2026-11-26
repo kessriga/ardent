@@ -55,7 +55,7 @@ item SHALL NOT be part of the label.
 #### Scenario: Two functions with one name
 
 - **WHEN** `src/lib.rs` has `#[cfg(unix)] fn home()` and then `#[cfg(windows)] fn home()`
-- **THEN** their node paths are `src/lib.rs#fn home` and `src/lib.rs#fn home[2]`
+- **THEN** their node paths are `src/lib.rs#fn home.1` and `src/lib.rs#fn home.2`
 
 ### Requirement: Impl block labels
 
@@ -115,7 +115,7 @@ the kind `variant`, with the variant name as its label.
 
 - **WHEN** `src/entry.rs` has `enum Entry { File, Dir { path: PathBuf }, Link(PathBuf, bool) }`
 - **THEN** the outline has the nodes `src/entry.rs#enum Entry/File`, `src/entry.rs#enum Entry/Dir/path`,
-  `src/entry.rs#enum Entry/Link/field`, and `src/entry.rs#enum Entry/Link/field[2]`
+  `src/entry.rs#enum Entry/Link/field.1`, and `src/entry.rs#enum Entry/Link/field.2`
 
 ### Requirement: Doc comments and attributes
 
@@ -142,7 +142,7 @@ SHALL stay part of the node that contains them.
 #### Scenario: Attribute on a tuple field
 
 - **WHEN** `src/id.rs` has `struct Id(#[serde(skip)] pub u64);`
-- **THEN** the range of the node `src/id.rs#struct Id/field` starts at `#[serde(skip)]`
+- **THEN** the range of the node `src/id.rs#struct Id/field.1` starts at `#[serde(skip)]`
 
 ### Requirement: Rust code that is not a node
 

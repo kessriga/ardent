@@ -490,11 +490,11 @@ fn numbers_list_items_within_each_list_and_previews_the_selection() -> io::Resul
     let mut session = Session::open(root, &slave, master)?;
     session.wait_for("steps.md")?;
     session.keys(b"\r\x1b[C\x1b[C")?;
-    session.wait_screen(&["item[1]", "item[2]"], &[])?;
+    session.wait_screen(&["item.1", "item.2"], &[])?;
     // Enter the first item, expand it, enter its list, expand, then select the lone child.
     session.keys(b"\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C")?;
     let selected = session.wait_screen(
-        &["- Only child", "item[1]", "item[2]"],
+        &["- Only child", "item.1", "item.2"],
         &["- First step", "- Last step"],
     )?;
     assert!(

@@ -7,7 +7,6 @@ use ardent_core::outline::Outline;
 use crossterm::event::KeyCode;
 
 struct Row {
-    label: String,
     depth: usize,
     parent: Option<usize>,
     /// Exclusive end of the subtree in document order. A closed branch skips straight to this index.
@@ -29,20 +28,10 @@ impl Tree {
         if nodes.is_empty() {
             return Err(invalid());
         }
-        // Node paths give the second item a suffix and leave the first item unnumbered (decision 1).
-        let first_of_many: HashSet<&str> = nodes
-            .iter()
-            .filter(|node| node.kind == "item")
-            .filter_map(|node| node.path.strip_suffix("[2]"))
-            .collect();
         let mut rows: Vec<Row> = Vec::with_capacity(nodes.len());
         let mut ancestors: Vec<usize> = Vec::new();
         for (index, node) in nodes.iter().enumerate() {
-            let (parent_path, mut label) = split_path(&node.path);
-            if node.kind == "item" && label == "item" && first_of_many.contains(node.path.as_str())
-            {
-                label.push_str("[1]");
-            }
+            let parent_path = parent_path(&node.path);
             while let Some(&ancestor) = ancestors.last() {
                 if Some(nodes[ancestor].path.as_str()) == parent_path {
                     break;
@@ -55,7 +44,6 @@ impl Tree {
                 return Err(invalid());
             }
             rows.push(Row {
-                label,
                 parent,
                 depth: ancestors.len(),
                 end: nodes.len(),
@@ -74,7 +62,7 @@ impl Tree {
         })
     }
 
-    pub(crate) fn label(&self, index: usize) -> (usize, char, &str) {
+    pub(crate) fn row_prefix(&self, index: usize) -> (usize, char) {
         let row = &self.rows[index];
         let marker = if row.end == index + 1 {
             ' '
@@ -83,7 +71,7 @@ impl Tree {
         } else {
             '+'
         };
-        (row.depth, marker, &row.label)
+        (row.depth, marker)
     }
 
     pub(crate) fn navigate(&mut self, key: KeyCode) {
@@ -135,9 +123,8 @@ impl Tree {
     }
 }
 
-/// Keep the parent path escaped for lookup and decode the last label for display. Slashes in the source path and
-/// escaped slashes in a label are literal. An unescaped slash after the first unescaped `#` separates labels.
-fn split_path(path: &str) -> (Option<&str>, String) {
+/// Find the parent without treating escaped separators or source directories as ancestors.
+fn parent_path(path: &str) -> Option<&str> {
     let mut in_outline = false;
     let mut delimiter = None;
     let mut chars = path.char_indices();
@@ -154,14 +141,7 @@ fn split_path(path: &str) -> (Option<&str>, String) {
             _ => {}
         }
     }
-    let label = delimiter.map_or(path, |i| &path[i + 1..]);
-    let mut chars = label.chars();
-    let decoded = std::iter::from_fn(|| match chars.next()? {
-        '\\' => chars.next(),
-        c => Some(c),
-    })
-    .collect();
-    (delimiter.map(|i| &path[..i]), decoded)
+    delimiter.map(|i| &path[..i])
 }
 
 #[cfg(test)]
@@ -175,8 +155,8 @@ mod tests {
         let names = [
             r"docs/C\#.md",
             r"docs/C\#.md#a\/b",
-            r"docs/C\#.md#a\/b/x",
-            r"docs/C\#.md#a\/b/x[2]",
+            r"docs/C\#.md#a\/b/x.1",
+            r"docs/C\#.md#a\/b/x.2",
             r"docs/C\#.md#last",
         ];
         let outline = Outline {
@@ -184,6 +164,7 @@ mod tests {
                 .iter()
                 .map(|s| Node {
                     path: s.to_string(),
+                    label: String::new(),
                     kind: "test".into(),
                     range: 0..5,
                     fingerprint: String::new(),
@@ -192,7 +173,6 @@ mod tests {
         };
         let mut tree = Tree::new(&outline)?;
         assert_eq!(tree.visible().collect::<Vec<_>>(), [0, 1, 4]);
-        assert_eq!(tree.label(1).2, "a/b");
         for (key, expected) in [
             (Up, 0),
             (Right, 1),

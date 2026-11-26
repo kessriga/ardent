@@ -3,98 +3,122 @@ source: crates/ardent-format/tests/markdown.rs
 expression: "outline_yaml(\"guide.md\")?"
 ---
 - path: guide.md
+  label: guide.md
   kind: file
   range: 0..522
   fingerprint: 6f221c985929e0ce
-- path: guide.md#front_matter
+- path: guide.md#front_matter.1
+  label: front_matter
   kind: front_matter
   range: 0..42
   fingerprint: 09cc9b2917b300a8
 - path: guide.md#Guide
+  label: Guide
   kind: heading
   range: 43..522
   fingerprint: 2278adbce1a2d41c
-- path: guide.md#Guide/paragraph
+- path: guide.md#Guide/paragraph.1
+  label: paragraph
   kind: paragraph
   range: 52..101
   fingerprint: 986a9a5665640a09
-- path: guide.md#Guide/Install
+- path: guide.md#Guide/Install.1
+  label: Install.1
   kind: heading
   range: 102..428
   fingerprint: a97b250de9b32dbe
-- path: guide.md#Guide/Install/list
+- path: guide.md#Guide/Install.1/list.1
+  label: list.1
   kind: list
   range: 114..299
   fingerprint: 2055c801699a468b
-- path: guide.md#Guide/Install/list/item
+- path: guide.md#Guide/Install.1/list.1/item.1
+  label: item.1
   kind: item
   range: 114..137
   fingerprint: 44329fa20b146711
-- path: guide.md#Guide/Install/list/item[2]
+- path: guide.md#Guide/Install.1/list.1/item.2
+  label: item.2
   kind: item
   range: 137..248
   fingerprint: dfe45d78e8803661
-- path: guide.md#Guide/Install/list/item[2]/list
+- path: guide.md#Guide/Install.1/list.1/item.2/list.1
+  label: list
   kind: list
   range: 163..218
   fingerprint: 466543d2059c945c
-- path: guide.md#Guide/Install/list/item[2]/list/item
+- path: guide.md#Guide/Install.1/list.1/item.2/list.1/item.1
+  label: item.1
   kind: item
   range: 163..191
   fingerprint: 78eaf6dae582d0b5
-- path: guide.md#Guide/Install/list/item[2]/list/item[2]
+- path: guide.md#Guide/Install.1/list.1/item.2/list.1/item.2
+  label: item.2
   kind: item
   range: 191..218
   fingerprint: a8f4b9745981169b
-- path: guide.md#Guide/Install/list/item[3]
+- path: guide.md#Guide/Install.1/list.1/item.3
+  label: item.3
   kind: item
   range: 248..299
   fingerprint: d5e2dc27e9e413e4
-- path: guide.md#Guide/Install/list/item[3]/code
+- path: guide.md#Guide/Install.1/list.1/item.3/code.1
+  label: code
   kind: code
   range: 272..298
   fingerprint: 2fb9608b876ff67e
-- path: guide.md#Guide/Install/list[2]
+- path: guide.md#Guide/Install.1/list.2
+  label: list.2
   kind: list
   range: 299..319
   fingerprint: 66f38021f9964624
-- path: guide.md#Guide/Install/list[2]/item
+- path: guide.md#Guide/Install.1/list.2/item.1
+  label: item.1
   kind: item
   range: 299..308
   fingerprint: 505a4fcfb817d529
-- path: guide.md#Guide/Install/list[2]/item[2]
+- path: guide.md#Guide/Install.1/list.2/item.2
+  label: item.2
   kind: item
   range: 308..319
   fingerprint: fd287a861a7be259
-- path: guide.md#Guide/Install/code
+- path: guide.md#Guide/Install.1/code.1
+  label: code.1
   kind: code
   range: 319..350
   fingerprint: 626977d0f1527d7b
-- path: guide.md#Guide/Install/code[2]
+- path: guide.md#Guide/Install.1/code.2
+  label: code.2
   kind: code
   range: 351..370
   fingerprint: 1479c22392a0a237
-- path: guide.md#Guide/Install/Check the version
+- path: guide.md#Guide/Install.1/Check the version
+  label: Check the version
   kind: heading
   range: 370..428
   fingerprint: 1374ba600af034f6
-- path: guide.md#Guide/Install/Check the version/code
+- path: guide.md#Guide/Install.1/Check the version/code.1
+  label: code
   kind: code
   range: 393..427
   fingerprint: f85678031b9655d6
 - path: guide.md#Guide/Usage
+  label: Usage
   kind: heading
   range: 428..473
   fingerprint: 12cb0022f17e03dd
-- path: guide.md#Guide/Usage/paragraph
+- path: guide.md#Guide/Usage/paragraph.1
+  label: paragraph
   kind: paragraph
   range: 438..472
   fingerprint: 8a640eb11bff5f5e
-- path: guide.md#Guide/Install[2]
+- path: guide.md#Guide/Install.2
+  label: Install.2
   kind: heading
   range: 473..522
   fingerprint: 66f650e5511b5939
-- path: guide.md#Guide/Install[2]/paragraph
+- path: guide.md#Guide/Install.2/paragraph.1
+  label: paragraph
   kind: paragraph
   range: 485..522
   fingerprint: 2e18c9583a5a8eba

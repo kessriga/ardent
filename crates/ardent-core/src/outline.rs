@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub const FILE_KIND: &str = "file";
 
 /// Characters that a backslash escapes in a label.
-const LABEL_SPECIALS: &[char] = &['/', '#', '[', ']', '\\'];
+const LABEL_SPECIALS: &[char] = &['.', '/', '#', '[', ']', '\\'];
 /// Characters that a backslash escapes in a source path, where `/` separates directories.
 const SOURCE_PATH_SPECIALS: &[char] = &['#', '[', ']', '\\'];
 
@@ -25,11 +25,25 @@ pub struct ScannedNode {
     pub children: Vec<ScannedNode>,
 }
 
+impl ScannedNode {
+    fn has_generic_label(&self, source: &[u8]) -> bool {
+        self.label == self.kind
+            && self
+                .label_ranges
+                .iter()
+                .filter_map(|range| source.get(range.clone()))
+                .flatten()
+                .all(|byte| matches!(byte, b' ' | b'\t'..=b'\r'))
+    }
+}
+
 /// One node of an outline, with the keys of a node in a structure file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Node {
     pub path: String,
+    /// Unescaped outline text, with a position when siblings share the label.
+    pub label: String,
     pub kind: String,
     #[serde(with = "crate::yaml::range")]
     pub range: Range<usize>,
@@ -60,6 +74,7 @@ impl Outline {
             range: 0..source.len(),
             fingerprint: fingerprint(source, 0..source.len(), &[]),
             path: root_path.clone(),
+            label: source_path.to_owned(),
         };
         let mut nodes = vec![root];
         push_children(source, &format!("{root_path}#"), top_level, &mut nodes);
@@ -70,18 +85,32 @@ impl Outline {
 /// Appends `children` and their descendants in document order. `prefix` is the parent path with its trailing `#` or
 /// `/`.
 fn push_children(source: &[u8], prefix: &str, children: &[ScannedNode], nodes: &mut Vec<Node>) {
-    let mut seen: HashMap<&str, usize> = HashMap::new();
+    #[derive(Default)]
+    struct Positions {
+        total: usize,
+        current: usize,
+    }
+
+    let mut groups = HashMap::<&str, Positions>::new();
     for child in children {
-        let count = seen.entry(child.label.as_str()).or_default();
-        *count += 1;
-        let suffix = if *count == 1 {
-            String::new()
-        } else {
-            format!("[{count}]")
-        };
-        let path = format!("{prefix}{}{suffix}", escape(&child.label, LABEL_SPECIALS));
+        groups.entry(&child.label).or_default().total += 1;
+    }
+    for child in children {
+        let group = groups.entry(&child.label).or_default();
+        group.current += 1;
+        let repeated = group.total > 1;
+        let mut path = format!("{prefix}{}", escape(&child.label, LABEL_SPECIALS));
+        let mut label = child.label.clone();
+        if repeated || child.has_generic_label(source) {
+            let suffix = format!(".{}", group.current);
+            path.push_str(&suffix);
+            if repeated {
+                label.push_str(&suffix);
+            }
+        }
         nodes.push(Node {
             path: path.clone(),
+            label,
             kind: child.kind.clone(),
             range: child.range.clone(),
             fingerprint: fingerprint(source, child.range.clone(), &child.label_ranges),
@@ -175,6 +204,7 @@ impl Engine {
             outline.nodes,
             [Node {
                 path: "notes.md".to_string(),
+                label: "notes.md".to_string(),
                 kind: "file".to_string(),
                 range: 0..0,
                 fingerprint: fingerprint(b"", 0..0, &[]),
@@ -211,6 +241,7 @@ impl Engine {
                 "docs/C\\#.md#Read\\/write \\[all\\] \\\\ \\#1"
             ]
         );
+        assert_eq!(outline.nodes[1].label, r"Read/write [all] \ #1");
     }
 
     #[test]
@@ -223,20 +254,60 @@ impl Engine {
             leaf("paragraph", "paragraph", 0..1),
         ];
         let install = leaf("heading", "Install", 0..1);
-        let outline = Outline::build("README.md", b"x", &[sync_rules, install.clone(), install]);
+        let literal = leaf("heading", "Install.1", 0..1);
+        let outline = Outline::build(
+            "README.md",
+            b"x",
+            &[sync_rules, install.clone(), literal, install],
+        );
         assert_eq!(
             paths(&outline),
             [
                 "README.md",
                 "README.md#Sync rules",
-                "README.md#Sync rules/paragraph",
-                "README.md#Sync rules/list",
-                "README.md#Sync rules/paragraph[2]",
-                "README.md#Sync rules/paragraph[3]",
-                "README.md#Install",
-                "README.md#Install[2]",
+                "README.md#Sync rules/paragraph.1",
+                "README.md#Sync rules/list.1",
+                "README.md#Sync rules/paragraph.2",
+                "README.md#Sync rules/paragraph.3",
+                "README.md#Install.1",
+                r"README.md#Install\.1",
+                "README.md#Install.2",
             ]
         );
+        let labels: Vec<_> = outline
+            .nodes
+            .iter()
+            .map(|node| node.label.as_str())
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                "README.md",
+                "Sync rules",
+                "paragraph.1",
+                "list",
+                "paragraph.2",
+                "paragraph.3",
+                "Install.1",
+                "Install.1",
+                "Install.2"
+            ]
+        );
+    }
+
+    #[test]
+    fn singleton_named_like_its_kind_keeps_its_name() {
+        let mut named = leaf("heading", "heading", 0..8);
+        named.label_ranges.push(0..7);
+        let mut blank = leaf("heading", "heading", 7..8);
+        blank.label_ranges.push(7..8);
+        named.children.push(blank);
+        let outline = Outline::build("v1.2.md", b"heading ", &[named]);
+        assert_eq!(
+            paths(&outline),
+            ["v1.2.md", "v1.2.md#heading", "v1.2.md#heading/heading.1"]
+        );
+        assert_eq!(outline.nodes[2].label, "heading");
     }
 
     #[test]

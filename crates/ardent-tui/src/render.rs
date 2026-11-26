@@ -178,7 +178,8 @@ fn outline(frame: &mut Frame<'_>, area: Rect, open: &Page) -> Paging {
         .skip(start)
         .take(nodes.height.into())
         .map(|i| {
-            let (depth, marker, label) = tree.label(i);
+            let (depth, marker) = tree.row_prefix(i);
+            let label = &open.document.outline.nodes[i].label;
             let indent = " ".repeat(depth.saturating_mul(2).min(usize::from(nodes.width) / 2));
             Line::from(format!("{indent}{marker} {}", printable(label)))
         });

@@ -32,7 +32,7 @@ setext heading SHALL have level 1 when it is underlined with `=` and level 2 whe
 
 - **WHEN** `guide.md` has a setext heading `Setup` underlined with `---`, followed by a paragraph and then by the ATX
   heading `## Usage`
-- **THEN** the paragraph has the node path `guide.md#Setup/paragraph`
+- **THEN** the paragraph has the node path `guide.md#Setup/paragraph.1`
 - **AND** the ATX heading has the node path `guide.md#Usage`
 
 #### Scenario: Heading without text
@@ -54,7 +54,7 @@ A heading SHALL contain the blocks after it up to the next heading with the same
 #### Scenario: Setext heading of level 1 inside an ATX section
 
 - **WHEN** `guide.md` has `## Old`, then a setext heading `New` underlined with `===`, then a paragraph
-- **THEN** `New` is a sibling of `Old`, and the paragraph has the node path `guide.md#New/paragraph`
+- **THEN** `New` is a sibling of `Old`, and the paragraph has the node path `guide.md#New/paragraph.1`
 
 ### Requirement: Paragraphs
 
@@ -65,7 +65,7 @@ of a list item, a block quote, or a setext heading, SHALL be part of the node th
 #### Scenario: Paragraph under a heading
 
 - **WHEN** the heading `## Install` in `README.md` is followed by one paragraph
-- **THEN** the paragraph has the node path `README.md#Install/paragraph`
+- **THEN** the paragraph has the node path `README.md#Install/paragraph.1`
 
 #### Scenario: Text of a list item
 
@@ -75,7 +75,7 @@ of a list item, a block quote, or a setext heading, SHALL be part of the node th
 #### Scenario: Heading inside a list item
 
 - **WHEN** a list item in `README.md` holds the heading `## Note` and a paragraph below it
-- **THEN** the paragraph is a node, with the node path `README.md#list/item/Note/paragraph`
+- **THEN** the paragraph is a node, with the node path `README.md#list.1/item.1/Note/paragraph.1`
 
 ### Requirement: Lists and items
 
@@ -85,8 +85,8 @@ list. A list, code block, block quote, or table inside a list item SHALL be a ch
 #### Scenario: Nested list
 
 - **WHEN** the second item of the first list under `## Install` in `README.md` holds a nested list with two items
-- **THEN** the nested items have the node paths `README.md#Install/list/item[2]/list/item` and
-  `README.md#Install/list/item[2]/list/item[2]`
+- **THEN** the nested items have the node paths `README.md#Install/list.1/item.2/list.1/item.1` and
+  `README.md#Install/list.1/item.2/list.1/item.2`
 
 #### Scenario: Ordered list
 
@@ -100,7 +100,7 @@ Each fenced code block and each indented code block SHALL be a node of the kind 
 #### Scenario: Fenced code block with a language
 
 - **WHEN** the heading `## Install` in `README.md` holds a code block that starts with the fence ```` ```sh ````
-- **THEN** the code block has the node path `README.md#Install/code`
+- **THEN** the code block has the node path `README.md#Install/code.1`
 
 ### Requirement: Block quotes and tables
 
@@ -109,7 +109,7 @@ Each block quote SHALL be a node of the kind `quote`, and each pipe table SHALL 
 #### Scenario: Quote and table under a heading
 
 - **WHEN** the heading `## Notes` in `README.md` holds a block quote and then a table
-- **THEN** they have the node paths `README.md#Notes/quote` and `README.md#Notes/table`
+- **THEN** they have the node paths `README.md#Notes/quote.1` and `README.md#Notes/table.1`
 
 ### Requirement: Front matter
 
@@ -119,7 +119,7 @@ file SHALL be a node of the kind `front_matter`, as a child of the root node.
 #### Scenario: YAML front matter
 
 - **WHEN** `guide.md` starts with `---`, `title: Guide`, and `---`
-- **THEN** the outline has the node `guide.md#front_matter` with the range of those three lines
+- **THEN** the outline has the node `guide.md#front_matter.1` with the range of those three lines
 
 ### Requirement: Blocks that are not nodes
 
@@ -130,5 +130,5 @@ the node that contains them.
 
 - **WHEN** the heading `## Notes` in `README.md` holds a paragraph, a line `---` that is a thematic break, and a second
   paragraph
-- **THEN** `README.md#Notes` has two children, `paragraph` and `paragraph[2]`, and the range of the heading includes the
-  thematic break
+- **THEN** `README.md#Notes` has two children, `paragraph.1` and `paragraph.2`, and the range of the heading includes
+  the thematic break
