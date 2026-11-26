@@ -139,3 +139,47 @@ the terminal on quit, interruption, or a reported terminal error.
 
 - **WHEN** the reader opens an outline and presses q
 - **THEN** the command exits and the shell accepts and echoes input normally
+
+### Requirement: Open the browser by default
+
+Running `ardent` without arguments SHALL open the same terminal browser as `ardent browse`. Running `ardent --help`
+SHALL print the command list and exit successfully.
+
+#### Scenario: Open an initialized project
+
+- **WHEN** a reader runs `ardent` in an initialized project in an interactive terminal
+- **THEN** the browser opens the explorer
+
+#### Scenario: Discover commands
+
+- **WHEN** a reader runs `ardent --help` outside a project with redirected output
+- **THEN** the output lists the init, sync and browse commands
+
+### Requirement: Distinguish outline and source panes
+
+The browser SHALL draw an unlabeled horizontal divider across the document pane between the outline and source preview
+when there is room for both panes and the divider. The divider SHALL leave the explorer and source paging controls
+usable.
+
+#### Scenario: Read an outline
+
+- **WHEN** a reader opens a document beside the explorer
+- **THEN** the reader sees the source below a horizontal divider that spans only the document pane
+- **AND** the divider remains visible when the reader switches to the document in a narrow terminal with room for the
+  divider
+
+### Requirement: Display sibling positions
+
+The browser SHALL display the one-based dotted position for every sibling in a repeated label group across all formats.
+A singleton SHALL display its original label.
+
+#### Scenario: Read a nested list
+
+- **WHEN** a reader expands a two-item list whose first item contains a one-item list
+- **THEN** the outer list shows `item.1` and `item.2`, and the inner list shows `item`
+- **AND** selecting each row shows the source for its node path
+
+#### Scenario: Read repeated names
+
+- **WHEN** two sibling headings are named Install and another is named Usage
+- **THEN** the outline displays `Install.1`, `Install.2`, and `Usage`

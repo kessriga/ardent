@@ -3,50 +3,62 @@ source: crates/ardent-format/tests/rust.rs
 expression: "outline_yaml(\"modules.rs\")?"
 ---
 - path: modules.rs
+  label: modules.rs
   kind: file
   range: 0..721
   fingerprint: 13951973c06a6888
 - path: modules.rs#mod config
+  label: mod config
   kind: mod
   range: 94..105
   fingerprint: e436acb4b40175eb
 - path: modules.rs#const MAX_FILES
+  label: const MAX_FILES
   kind: const
   range: 107..188
   fingerprint: c70dfa6d482f0537
 - path: modules.rs#static SCANS
+  label: static SCANS
   kind: static
   range: 190..216
   fingerprint: 5debb5d26e76f02a
 - path: modules.rs#macro_rules! log
+  label: macro_rules! log
   kind: macro
   range: 218..284
   fingerprint: f787cdf14c548bd4
 - path: modules.rs#fn run
+  label: fn run
   kind: fn
   range: 286..457
   fingerprint: 4f42649ee5473773
 - path: modules.rs#fn run/fn count
+  label: fn count
   kind: fn
   range: 355..416
   fingerprint: 2c4e15268f9b7ccb
 - path: modules.rs#mod walk
+  label: mod walk
   kind: mod
   range: 459..720
   fingerprint: 5307e21a7b33e67d
 - path: modules.rs#mod walk/type Depth
+  label: type Depth
   kind: type
   range: 506..526
   fingerprint: 49413d1c69643b20
 - path: modules.rs#mod walk/fn walk
+  label: fn walk
   kind: fn
   range: 532..585
   fingerprint: d036df5a5422e636
 - path: modules.rs#mod walk/mod tests
+  label: mod tests
   kind: mod
   range: 591..718
   fingerprint: cb337fd616a0a7ea
 - path: modules.rs#mod walk/mod tests/fn walks
+  label: fn walks
   kind: fn
   range: 651..712
   fingerprint: 3dfdbab197cb166e

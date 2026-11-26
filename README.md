@@ -72,10 +72,12 @@ exits with status 1.
 
 ### Browse a project
 
-Run `ardent browse` in an interactive terminal anywhere inside the project. The command checks its input and output
-before syncing. The explorer on the left groups tracked files by directory. Select a file and press Enter to open its
-outline on the right. The source below the outline shows the selected node's text. Press Tab to browse the explorer
-while keeping the file open. In terminals narrower than 60 columns, Tab switches which pane fills the screen.
+Run `ardent` in an interactive terminal anywhere inside the project to open the browser. You can also run
+`ardent browse`. Run `ardent --help` to list the commands. The browser checks its input and output before syncing. The
+explorer on the left groups tracked files by directory. Select a file and press Enter to open its outline on the right.
+A horizontal divider marks the source pane below the outline. It shows the selected node's text. Repeated sibling labels
+display as `item.1`, `item.2` or `Install.1`, `Install.2`. A lone node shows its original label. Press Tab to browse the
+explorer while keeping the file open. In terminals narrower than 60 columns, Tab switches which pane fills the screen.
 
 | Key | Action |
 | --- | --- |
@@ -135,6 +137,9 @@ Run `backlog decision list` to find the design decisions.
 - Decided in decision-1: anchors and references address a node by its node path, such as
   `docs/spec.md#Sync rules/Renames`, and keep a fingerprint of its content to find it again after a rename or move. A
   reference in view content has the form `@[docs/spec.md#Sync rules]`.
+- Decision 10 numbers generic labels in every node path, even a lone `paragraph.1`. Named siblings take positions only
+  when their names repeat. A literal dot in a label is escaped in the path, so a heading named `Install.1` has the
+  segment `Install\.1`.
 - Decided in decision-2: every Ardent command first checks the tracked files for changes and re-scans the changed ones.
   The structure is a local cache; only stored views, the project configuration, and project plugins go into git.
 - Decided in decision-4: the layout of `.ardent/` and the YAML schema of each file in it. Each YAML data file starts

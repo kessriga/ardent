@@ -3,42 +3,52 @@ source: crates/ardent-format/tests/markdown.rs
 expression: "outline_yaml(\"setext.md\")?"
 ---
 - path: setext.md
+  label: setext.md
   kind: file
   range: 0..153
   fingerprint: cc1f4e8b06fde9bd
 - path: setext.md#Title
+  label: Title
   kind: heading
   range: 0..153
   fingerprint: 5ee56f9c8cb4cdba
-- path: setext.md#Title/paragraph
+- path: setext.md#Title/paragraph.1
+  label: paragraph
   kind: paragraph
   range: 13..27
   fingerprint: c30f211ad37771e7
 - path: setext.md#Title/Part one
+  label: Part one
   kind: heading
   range: 28..99
   fingerprint: 76771096a7de85b1
-- path: setext.md#Title/Part one/paragraph
+- path: setext.md#Title/Part one/paragraph.1
+  label: paragraph
   kind: paragraph
   range: 47..65
   fingerprint: 246b07073d04bb98
 - path: setext.md#Title/Part one/Detail
+  label: Detail
   kind: heading
   range: 66..99
   fingerprint: f45e089f5ad737a5
-- path: setext.md#Title/Part one/Detail/paragraph
+- path: setext.md#Title/Part one/Detail/paragraph.1
+  label: paragraph
   kind: paragraph
   range: 78..98
   fingerprint: 634173444ae29c06
 - path: setext.md#Title/Part two
+  label: Part two
   kind: heading
   range: 99..118
   fingerprint: 192aba9bec613423
 - path: setext.md#Title/ATX after setext
+  label: ATX after setext
   kind: heading
   range: 118..153
   fingerprint: 9ecf9d020dfd41d3
-- path: setext.md#Title/ATX after setext/paragraph
+- path: setext.md#Title/ATX after setext/paragraph.1
+  label: paragraph
   kind: paragraph
   range: 139..153
   fingerprint: f3abb5a67ab409e0

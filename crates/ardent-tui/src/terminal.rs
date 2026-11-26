@@ -22,7 +22,7 @@ use crate::{Browser, Document, FileList};
 pub fn require_terminal() -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other(
-            "ardent browse requires an interactive terminal",
+            "the browser requires an interactive terminal",
         ));
     }
     Ok(())

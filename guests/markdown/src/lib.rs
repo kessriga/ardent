@@ -98,13 +98,13 @@ mod tests {
             rows,
             [
                 "docs/spec.md | file | 0..201 | 64d285e69608de32",
-                "docs/spec.md#paragraph | paragraph | 0..49 | 986a9a5665640a09",
+                "docs/spec.md#paragraph.1 | paragraph | 0..49 | 986a9a5665640a09",
                 "docs/spec.md#Sync rules | heading | 50..172 | 6afe874c4163626f",
-                "docs/spec.md#Sync rules/paragraph | paragraph | 65..99 | c066d35079ec2897",
+                "docs/spec.md#Sync rules/paragraph.1 | paragraph | 65..99 | c066d35079ec2897",
                 "docs/spec.md#Sync rules/Renames | heading | 100..172 | f2009c466ed1d13a",
-                "docs/spec.md#Sync rules/Renames/paragraph | paragraph | 113..171 | 0b019916628c0b2b",
+                "docs/spec.md#Sync rules/Renames/paragraph.1 | paragraph | 113..171 | 0b019916628c0b2b",
                 "docs/spec.md#Example | heading | 172..201 | 5547ffff36732ee1",
-                "docs/spec.md#Example/paragraph | paragraph | 184..201 | 7b8f8a6fa531fab0",
+                "docs/spec.md#Example/paragraph.1 | paragraph | 184..201 | 7b8f8a6fa531fab0",
             ]
         );
         Ok(())
@@ -117,7 +117,7 @@ mod tests {
             [
                 "guide.md",
                 "guide.md#Setup",
-                "guide.md#Setup/paragraph",
+                "guide.md#Setup/paragraph.1",
                 "guide.md#Usage"
             ]
         );
@@ -126,7 +126,10 @@ mod tests {
 
     #[test]
     fn heading_without_text() -> TestResult {
-        assert_eq!(paths("notes.md", "##\n")?, ["notes.md", "notes.md#heading"]);
+        assert_eq!(
+            paths("notes.md", "##\n")?,
+            ["notes.md", "notes.md#heading.1"]
+        );
         Ok(())
     }
 
@@ -152,7 +155,7 @@ mod tests {
                 "guide.md",
                 "guide.md#Old",
                 "guide.md#New",
-                "guide.md#New/paragraph"
+                "guide.md#New/paragraph.1"
             ]
         );
         Ok(())
@@ -165,7 +168,7 @@ mod tests {
             [
                 "README.md",
                 "README.md#Install",
-                "README.md#Install/paragraph"
+                "README.md#Install/paragraph.1"
             ]
         );
         Ok(())
@@ -189,10 +192,10 @@ mod tests {
             paths("README.md", "- ## Note\n\n  Text below the note.\n")?,
             [
                 "README.md",
-                "README.md#list",
-                "README.md#list/item",
-                "README.md#list/item/Note",
-                "README.md#list/item/Note/paragraph",
+                "README.md#list.1",
+                "README.md#list.1/item.1",
+                "README.md#list.1/item.1/Note",
+                "README.md#list.1/item.1/Note/paragraph.1",
             ]
         );
         Ok(())
@@ -206,12 +209,12 @@ mod tests {
             [
                 "README.md",
                 "README.md#Install",
-                "README.md#Install/list",
-                "README.md#Install/list/item",
-                "README.md#Install/list/item[2]",
-                "README.md#Install/list/item[2]/list",
-                "README.md#Install/list/item[2]/list/item",
-                "README.md#Install/list/item[2]/list/item[2]",
+                "README.md#Install/list.1",
+                "README.md#Install/list.1/item.1",
+                "README.md#Install/list.1/item.2",
+                "README.md#Install/list.1/item.2/list.1",
+                "README.md#Install/list.1/item.2/list.1/item.1",
+                "README.md#Install/list.1/item.2/list.1/item.2",
             ]
         );
         Ok(())
@@ -237,8 +240,8 @@ mod tests {
             [
                 "README.md",
                 "README.md#Install",
-                "README.md#Install/code",
-                "README.md#Install/code[2]"
+                "README.md#Install/code.1",
+                "README.md#Install/code.2"
             ]
         );
         Ok(())
@@ -252,8 +255,8 @@ mod tests {
             [
                 "README.md",
                 "README.md#Notes",
-                "README.md#Notes/quote",
-                "README.md#Notes/table"
+                "README.md#Notes/quote.1",
+                "README.md#Notes/table.1"
             ]
         );
         Ok(())
@@ -263,12 +266,12 @@ mod tests {
     fn front_matter() -> TestResult {
         let yaml = outline("guide.md", "---\ntitle: Guide\n---\n\n# Guide\n")?;
         assert_eq!(
-            node(&yaml, "guide.md#front_matter").map(|n| n.range.clone()),
+            node(&yaml, "guide.md#front_matter.1").map(|n| n.range.clone()),
             Some(0..21)
         );
         let toml = outline("guide.md", "+++\ntitle = \"Guide\"\n+++\n")?;
         assert_eq!(
-            node(&toml, "guide.md#front_matter").map(|n| n.kind.as_str()),
+            node(&toml, "guide.md#front_matter.1").map(|n| n.kind.as_str()),
             Some("front_matter")
         );
         Ok(())
@@ -288,8 +291,8 @@ mod tests {
             [
                 "README.md",
                 "README.md#Notes",
-                "README.md#Notes/paragraph",
-                "README.md#Notes/paragraph[2]"
+                "README.md#Notes/paragraph.1",
+                "README.md#Notes/paragraph.2"
             ]
         );
         assert_eq!(

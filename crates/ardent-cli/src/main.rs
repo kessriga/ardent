@@ -12,12 +12,12 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-/// A terminal outliner for structured text.
+/// A terminal outliner for structured text. Run without a command to browse the project.
 #[derive(Parser)]
 #[command(name = "ardent", version)]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -35,7 +35,7 @@ enum Command {
 }
 
 fn main() -> ExitCode {
-    let command = Cli::parse().command;
+    let command = Cli::parse().command.unwrap_or(Command::Browse);
     let working_dir = match env::current_dir() {
         Ok(dir) => dir,
         Err(err) => return fail(format_args!("cannot read the working directory: {err}")),
