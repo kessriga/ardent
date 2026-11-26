@@ -20,6 +20,11 @@ file list.
 - **THEN** the browser lists `README.md` and `docs/guide.md` in that order
 - **AND** selecting `docs/guide.md` and pressing Enter opens its file node with its immediate children visible
 
+#### Scenario: Redirected input or output
+
+- **WHEN** standard input or output is redirected
+- **THEN** the command reports that it requires an interactive terminal before starting sync
+
 #### Scenario: Read project diagnostics
 
 - **WHEN** the file list contains diagnostics that exceed the terminal width or height
@@ -66,6 +71,7 @@ characters in source text and labels safely.
 - **WHEN** a file has a syntax error and sync retained its last good structure
 - **THEN** the browser identifies the file and reports the error, withholds its stale preview, and lets the reader open
   another tracked file
+- **AND** the reader can page through the full diagnostic on a narrow terminal
 
 ### Requirement: Refresh after source changes
 
@@ -82,11 +88,13 @@ disappeared.
 
 - **WHEN** a reader replaces an open source file with different content of the same size and modification time
 - **THEN** the browser checks its content and displays the updated outline and preview
+- **AND** the browser detects a repair that preserves the stamp while the file’s scan error is on screen
 - **AND** restoring read access to an unreadable tracked file lets the browser recover without another edit
 
 #### Scenario: Change which files Git ignores
 
-- **WHEN** an applicable Git ignore rule changes above the project root
+- **WHEN** an applicable Git ignore rule changes above the project root or in a nested Git worktree’s external exclude
+  file
 - **THEN** the browser updates the file list
 - **AND** subsequent writes inside an ignored build directory do not trigger a sync
 

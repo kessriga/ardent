@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-19 16:29'
-updated_date: '2026-11-25 20:10'
+updated_date: '2026-11-26 09:36'
 labels: []
 milestone: m-1
 dependencies:
@@ -57,16 +57,21 @@ sets the crate boundary between the document model and the interface.
 6. Pin browser sync to its project, recover from stale stamps and permission changes, watch ancestor ignore rules, and
    suppress refreshes from ignored build output. Verify all four watch cases and project isolation in temporary
    projects. Make diagnostics readable at any viewport size, handle CRLF, and keep quit visible in narrow terminals.
+
+7. Track the displayed file through errors and closure, page file diagnostics, refresh nested Git excludes and resolved
+   conflicts, validate regular files when opening sources, and check the terminal before starting sync. Exercise each
+   case and run the project gate.
 <!-- SECTION:PLAN:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added ardent browse for navigating tracked files, expanding outline nodes, and reading their source. The browser keeps
-its project root and stays responsive while sync waits for the project lock. It restores the selected node and reading
-position, rechecks a file restored with its old timestamp, and recovers when read access returns. Git ignore rules
-update the picker. Ignored build writes leave it idle. Diagnostics wrap and page, narrow terminals show exit controls,
-and CRLF source displays correctly. All 160 workspace tests passed on macOS. Terminal checks covered native
-notifications, polling, and deletion during a 400-file import. The CLI passed cargo check for Linux and Windows. Build,
-formatting, Clippy, Rust API documentation, and strict OpenSpec validation passed.
+its project root, restores the selected node and reading position, and stays responsive while sync waits for the lock.
+Project and file diagnostics wrap and page. Polling detects repairs to an open file even when its timestamp and size
+stay the same, and stops checking the file when it closes. The picker refreshes when nested Git worktree exclusions
+change or a format conflict disappears. Sync and preview reject named pipes without waiting. Redirected browse exits
+before sync touches the cache. All 166 workspace tests passed on macOS. Terminal checks covered native notifications and
+polling. The CLI passed compile checks for Linux and Windows. Build, formatting, Clippy, Rust API documentation, and
+strict OpenSpec validation passed.
 <!-- SECTION:FINAL_SUMMARY:END -->

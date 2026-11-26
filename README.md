@@ -72,9 +72,9 @@ exits with status 1.
 
 ### Browse a project
 
-Run `ardent browse` in a terminal anywhere inside the project. Ardent runs sync and lists the tracked source files.
-Select a file with Up or Down and press Enter. The outline opens at the file node. The source pane shows the text of the
-selected node.
+Run `ardent browse` in an interactive terminal anywhere inside the project. The command checks its input and output
+before syncing and listing tracked files. Select a file with Up or Down and press Enter. The outline opens at the file
+node. The source pane shows the text of the selected node.
 
 | Key | Action |
 | --- | --- |
@@ -82,7 +82,7 @@ selected node.
 | Right | Expand a node, then move to its first child. |
 | Left | Collapse a node, or move to its parent. |
 | [ / ] | Move to the previous or next sibling. |
-| Page Up / Page Down | Scroll the source text in an outline or the diagnostics in the file list. |
+| Page Up / Page Down | Scroll source text, project diagnostics, or the error for an open file. |
 | Escape | Return to the file list. |
 | q | Quit. |
 
@@ -92,8 +92,8 @@ available. Changes to Git ignore rules also update the file list. If the project
 browser exits and reports the missing project file.
 
 After a refresh, the browser keeps the selected node if its node path still exists. It also keeps your place in the
-source preview if the selected passage is unchanged. A scan error hides the preview until the file parses again. The
-browser then returns to the previous node if it still exists.
+source preview if the selected passage is unchanged. To read a scan error in full, open the affected file. The browser
+shows the diagnostic until the file parses again, then returns to the previous node if it still exists.
 
 ### Supported outlines
 
