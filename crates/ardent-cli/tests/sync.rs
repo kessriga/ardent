@@ -372,8 +372,17 @@ fn sync_warns_when_configured_packages_are_missing() -> TestResult {
 fn failed_verification_preserves_structures_and_continues_sync() -> TestResult {
     let project = Project::new()?;
     project.write("lib.rs", "fn hello() {}")?;
+    project.write("legacy.rs", "fn hello() {}")?;
     project.sync()?.assert_success();
     let rust = project.structure("lib.rs")?;
+    // The old schema has the same stamp, but no display labels in its nodes.
+    let legacy: String = project
+        .structure("legacy.rs")?
+        .replacen("schema: 2", "schema: 1", 1)
+        .split_inclusive('\n')
+        .filter(|line| !line.starts_with("    label: "))
+        .collect();
+    fs::write(project.structure_path("legacy.rs"), &legacy)?;
     let stale = project.structure("README.md")?;
     fs::remove_file(project.path("README.md"))?;
     project.write("docs/spec.md", "# Revised\n")?;
@@ -391,6 +400,7 @@ fn failed_verification_preserves_structures_and_continues_sync() -> TestResult {
     assert_eq!(run.code(), Some(1), "{}", run.stderr());
     assert!(run.stderr().contains("rust"));
     assert_eq!(project.structure("lib.rs")?, rust);
+    assert_eq!(project.structure("legacy.rs")?, legacy);
     assert_eq!(project.structure("README.md")?, stale);
     assert!(
         project

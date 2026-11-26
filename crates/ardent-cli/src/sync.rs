@@ -282,11 +282,13 @@ fn sync_file(
     let metadata = file.metadata()?;
     let (size, mtime) = (metadata.len(), metadata.modified()?);
     let structure_path = layout::structure_path(path);
-    let previous = read_structure(&ardent_dir.join(&structure_path));
+    let cached = read_structure_text(&ardent_dir.join(&structure_path));
     // Incomplete discovery can hide a pattern conflict with the previous owner.
-    if previous
-        .as_ref()
-        .is_some_and(|(old, _)| unavailable.contains(old.stamp.format.as_str()))
+    if !unavailable.is_empty()
+        && cached
+            .as_ref()
+            .and_then(|(text, _)| Stamp::from_structure_yaml(text).ok())
+            .is_some_and(|stamp| unavailable.contains(stamp.format.as_str()))
     {
         return match check {
             SourceCheck::Stamp => Ok(Outcome::Unchanged),
@@ -297,7 +299,8 @@ fn sync_file(
         };
     }
     // The cache directory can have its new spelling while the last good outline still has its old path.
-    let previous = previous
+    let previous = cached
+        .and_then(|(text, written)| Some((Structure::from_yaml(&text).ok()?, written)))
         .filter(|(old, _)| built_by(&old.stamp, plugin) && old.outline.matches_source_path(path));
     let stamp_matches = previous
         .as_ref()
@@ -331,11 +334,11 @@ fn sync_file(
 
 /// The structure file at `path` and the time it was written, or `None` when it is missing or cannot be read, so that
 /// the sync builds it again.
-fn read_structure(path: &Path) -> Option<(Structure, SystemTime)> {
+fn read_structure_text(path: &Path) -> Option<(String, SystemTime)> {
     let file = source::open_regular(path).ok()?;
     let written = file.metadata().and_then(|m| m.modified()).ok()?;
     let text = io::read_to_string(file).ok()?;
-    Some((Structure::from_yaml(&text).ok()?, written))
+    Some((text, written))
 }
 
 /// Whether a source file with `size` and `mtime` still has the content of `stamp`, without reading it. A file whose

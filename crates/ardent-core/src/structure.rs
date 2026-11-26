@@ -27,6 +27,19 @@ pub struct Stamp {
     pub format_hash: String,
 }
 
+impl Stamp {
+    /// Read the stamp independently of the node schema so sync can identify the owner of an outdated cache.
+    pub fn from_structure_yaml(text: &str) -> Result<Self, ReadError> {
+        #[derive(Deserialize)]
+        struct Header {
+            stamp: Stamp,
+        }
+        serde_saphyr::from_str::<Header>(text)
+            .map(|header| header.stamp)
+            .map_err(|err| ReadError::Invalid(err.to_string()))
+    }
+}
+
 /// The stored form of the outline of one source file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
