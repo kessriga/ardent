@@ -389,7 +389,7 @@ mod tests {
         let load = |path: &str| {
             let bytes = b"first\nsecond".to_vec();
             Ok(Document {
-                highlights: Vec::new(),
+                highlights: Default::default(),
                 outline: Outline::build(path, &bytes, &[]),
                 bytes,
             })
@@ -421,7 +421,7 @@ mod tests {
         let text = format!("{first_row}Z");
         browser.enter(&|path| {
             Ok(Document {
-                highlights: Vec::new(),
+                highlights: Default::default(),
                 outline: Outline::build(path, text.as_bytes(), &[]),
                 bytes: text.as_bytes().to_vec(),
             })
@@ -453,10 +453,11 @@ mod tests {
         };
         let mut open = Page::new(crate::Document {
             outline: Outline::build("a", &bytes, &[child]),
-            highlights: vec![Highlight {
+            highlights: [Highlight {
                 range: start..start + "界e\u{301}x".len(),
                 category: Category::Code,
-            }],
+            }]
+            .into(),
             bytes,
         })?;
         open.tree.navigate(KeyCode::Right);
