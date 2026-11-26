@@ -30,7 +30,6 @@ impl Session {
         Ok(Self {
             child: Command::new(env!("CARGO_BIN_EXE_ardent"))
                 .current_dir(dir)
-                .arg("browse")
                 .stdin(slave.try_clone()?)
                 .stdout(slave.try_clone()?)
                 .stderr(slave.try_clone()?)
@@ -209,7 +208,7 @@ fn keeps_the_directory_explorer_beside_the_open_outline() -> io::Result<()> {
         &[
             "Explorer",
             "Outline",
-            "Source",
+            "Source ──",
             "docs/guide/alpha.md",
             "# First passage",
             "beta.md",
@@ -230,7 +229,7 @@ fn keeps_the_directory_explorer_beside_the_open_outline() -> io::Result<()> {
     session.resize(&slave, 12, 32)?;
     session.wait_screen(&["Explorer", "beta.md"], &["# First passage"])?;
     session.keys(b"\t")?;
-    session.wait_screen(&["Source", "# First passage"], &["Explorer", "beta.md"])?;
+    session.wait_screen(&["Source ──", "# First passage"], &["Explorer", "beta.md"])?;
     session.keys(b"\t\r")?;
     session.wait_screen(&["Source", "# Second passage"], &["# First passage"])?;
     session.resize(&slave, 18, 80)?;
@@ -443,6 +442,61 @@ fn repairs_an_open_syntax_error_without_a_size_or_mtime_change() -> io::Result<(
         .open(&source)?
         .set_modified(time)?;
     session.wait_for("fn item(){}")?;
+    session.keys(b"q")?;
+    session.wait_restored()?;
+    assert!(session.child.wait()?.success());
+    Ok(())
+}
+
+#[test]
+fn help_lists_commands_outside_a_project() -> io::Result<()> {
+    let dir = common::temp_dir()?;
+    let output = Command::new(env!("CARGO_BIN_EXE_ardent"))
+        .current_dir(dir.path())
+        .arg("--help")
+        .output()?;
+    assert!(output.status.success());
+    let help = String::from_utf8_lossy(&output.stdout);
+    for command in ["init", "sync", "browse"] {
+        assert!(
+            help.lines()
+                .any(|line| line.split_whitespace().next() == Some(command)),
+            "{help}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn numbers_list_items_within_each_list_and_previews_the_selection() -> io::Result<()> {
+    let project = common::temp_dir()?;
+    let root = project.path();
+    assert!(
+        common::run_init(root, &["--plugins", "markdown"])?
+            .status
+            .success()
+    );
+    fs::write(
+        root.join("steps.md"),
+        "- First step\n  - Only child\n- Last step\n",
+    )?;
+    let (master, slave) = pty::open_terminal(24)?;
+    let mut session = Session::open(root, &slave, master)?;
+    session.wait_for("steps.md")?;
+    session.keys(b"\r\x1b[C\x1b[C")?;
+    session.wait_screen(&["item[1]", "item[2]"], &[])?;
+    // Enter the first item, expand it, enter its list, expand, then select the lone child.
+    session.keys(b"\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C")?;
+    let selected = session.wait_screen(
+        &["- Only child", "item[1]", "item[2]"],
+        &["- First step", "- Last step"],
+    )?;
+    assert!(
+        selected
+            .lines()
+            .any(|row| row.contains('>') && row.trim_end().ends_with(" item")),
+        "{selected}"
+    );
     session.keys(b"q")?;
     session.wait_restored()?;
     assert!(session.child.wait()?.success());

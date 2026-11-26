@@ -29,10 +29,20 @@ impl Tree {
         if nodes.is_empty() {
             return Err(invalid());
         }
+        // Node paths give the second item a suffix and leave the first item unnumbered (decision 1).
+        let first_of_many: HashSet<&str> = nodes
+            .iter()
+            .filter(|node| node.kind == "item")
+            .filter_map(|node| node.path.strip_suffix("[2]"))
+            .collect();
         let mut rows: Vec<Row> = Vec::with_capacity(nodes.len());
         let mut ancestors: Vec<usize> = Vec::new();
         for (index, node) in nodes.iter().enumerate() {
-            let (parent_path, label) = split_path(&node.path);
+            let (parent_path, mut label) = split_path(&node.path);
+            if node.kind == "item" && label == "item" && first_of_many.contains(node.path.as_str())
+            {
+                label.push_str("[1]");
+            }
             while let Some(&ancestor) = ancestors.last() {
                 if Some(nodes[ancestor].path.as_str()) == parent_path {
                     break;

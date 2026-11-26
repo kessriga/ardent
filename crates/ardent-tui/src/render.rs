@@ -184,7 +184,10 @@ fn outline(frame: &mut Frame<'_>, area: Rect, open: &Page) -> Paging {
         });
     selected_list(frame, nodes, visible, selected.saturating_sub(start));
     frame.render_widget(
-        Span::styled("Source", Style::default().add_modifier(Modifier::BOLD)),
+        Block::default().borders(Borders::TOP).title(Span::styled(
+            "Source ",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
         title,
     );
 

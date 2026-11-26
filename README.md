@@ -72,9 +72,11 @@ exits with status 1.
 
 ### Browse a project
 
-Run `ardent browse` in an interactive terminal anywhere inside the project. The command checks its input and output
-before syncing. The explorer on the left groups tracked files by directory. Select a file and press Enter to open its
-outline on the right. The source below the outline shows the selected node's text. Press Tab to browse the explorer
+Run `ardent` in an interactive terminal anywhere inside the project to open the browser. You can also run
+`ardent browse`. Run `ardent --help` to list the commands. The browser checks its input and output before syncing. The
+explorer on the left groups tracked files by directory. Select a file and press Enter to open its outline on the right.
+A horizontal divider marks the source pane below the outline. It shows the selected node's text. A list with several
+items displays them as `item[1]`, `item[2]`, and so on. A lone item displays as `item`. Press Tab to browse the explorer
 while keeping the file open. In terminals narrower than 60 columns, Tab switches which pane fills the screen.
 
 | Key | Action |
