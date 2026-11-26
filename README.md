@@ -73,17 +73,20 @@ exits with status 1.
 ### Browse a project
 
 Run `ardent browse` in an interactive terminal anywhere inside the project. The command checks its input and output
-before syncing and listing tracked files. Select a file with Up or Down and press Enter. The outline opens at the file
-node. The source pane shows the text of the selected node.
+before syncing. The explorer on the left groups tracked files by directory. Select a file and press Enter to open its
+outline on the right. The source below the outline shows the selected node's text. Press Tab to browse the explorer
+while keeping the file open. In terminals narrower than 60 columns, Tab switches which pane fills the screen.
 
 | Key | Action |
 | --- | --- |
 | Up / Down | Select the previous or next visible row. |
-| Right | Expand a node, then move to its first child. |
-| Left | Collapse a node, or move to its parent. |
-| [ / ] | Move to the previous or next sibling. |
+| Right | Expand a directory or outline node, or select its first child if expanded. |
+| Left | Collapse a directory or outline node, or move to its parent. |
+| Enter | In the explorer, toggle a directory or open a file. |
+| Tab / Shift+Tab | Switch focus between the explorer and the open document. |
+| [ / ] | Move to the previous or next sibling in the outline. |
 | Page Up / Page Down | Scroll source text, project diagnostics, or the error for an open file. |
-| Escape | Return to the file list. |
+| Escape | Close the open document and return to the explorer. |
 | q | Quit. |
 
 When you save a tracked file in an editor, the browser runs sync in the background. You can navigate or quit while it
@@ -92,8 +95,9 @@ available. Changes to Git ignore rules also update the file list. If the project
 browser exits and reports the missing project file.
 
 After a refresh, the browser keeps the selected node if its node path still exists. It also keeps your place in the
-source preview if the selected passage is unchanged. To read a scan error in full, open the affected file. The browser
-shows the diagnostic until the file parses again, then returns to the previous node if it still exists.
+source preview if the selected passage is unchanged. In the explorer, `!` marks a file with a scan error. Open it to
+read the full message. The browser shows the diagnostic until the file parses again, then returns to the previous node
+if it still exists.
 
 ### Supported outlines
 

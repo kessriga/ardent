@@ -9,16 +9,38 @@ belongs to a node.
 
 ### Requirement: Choose a tracked file
 
-From any directory in a project, `ardent browse` SHALL run sync on entry and list the tracked source paths in path
-order. Up and Down SHALL select a file, Enter SHALL open its outline, and Escape from an outline SHALL return to the
-file list.
+From any directory in a project, `ardent browse` SHALL sync on entry and show an explorer of tracked files grouped by
+directory. Directories SHALL start expanded and precede files among siblings, with each group sorted by name. Up and
+Down SHALL move among visible entries. Enter SHALL toggle a directory or open a file at its file node. Right SHALL
+expand a directory or select its first child. Left SHALL collapse an expanded directory or select the parent.
 
 #### Scenario: Start in a subdirectory
 
-- **WHEN** a reader runs `ardent browse` in `docs/` with two tracked files, `README.md` and `docs/guide.md`, and a
-  git-ignored `draft.md`
-- **THEN** the browser lists `README.md` and `docs/guide.md` in that order
-- **AND** selecting `docs/guide.md` and pressing Enter opens its file node with its immediate children visible
+- **WHEN** a reader runs `ardent browse` in `docs/` with tracked files `README.md` and `docs/guide.md` and a git-ignored
+  `draft.md`
+- **THEN** the explorer lists `docs`, its child `guide.md`, and `README.md`
+- **AND** opening `guide.md` selects its file node and shows its immediate children and source
+
+#### Scenario: Explore while reading
+
+- **WHEN** a reader opens a file in a terminal at least 60 columns wide
+- **THEN** the explorer stays on the left and the document pane displays the outline and the selected node's source
+- **AND** Tab switches focus without closing the file or losing the reader's place
+- **AND** moving the explorer selection or collapsing a directory leaves the open document visible
+- **AND** Escape closes the open document and focuses the explorer
+
+#### Scenario: Use a narrow terminal
+
+- **WHEN** the terminal has fewer than 60 columns
+- **THEN** the focused pane uses the available width and Tab switches between the explorer and the open document
+- **AND** widening the terminal restores both panes with their selections intact
+
+#### Scenario: Refresh independent selections
+
+- **WHEN** sync updates the explorer while a different file is open
+- **THEN** surviving explorer selections and collapsed directories keep their state, and the open document refreshes by
+  its own path
+- **AND** removing the open file closes the document and focuses the explorer
 
 #### Scenario: Redirected input or output
 

@@ -5,13 +5,14 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-19 16:29'
-updated_date: '2026-11-26 09:36'
+updated_date: '2026-11-26 09:56'
 labels: []
 milestone: m-1
 dependencies:
   - TASK-7
 references:
   - openspec/changes/archive/2026-11-25-task-9-browse-outline
+  - openspec/changes/archive/2026-11-26-task-9-sidebar-explorer
 priority: medium
 type: feature
 ordinal: 9000
@@ -32,6 +33,8 @@ sets the crate boundary between the document model and the interface.
 - [x] #3 Selecting a node shows its source text, read from the source file through the node's source range
 - [x] #4 The TUI code lives outside ardent-core
 - [x] #5 Tests cover outline navigation as state transitions without a real terminal
+- [x] #6 The Ratatui browser groups tracked files by directory in a keyboard-accessible sidebar alongside the outline
+      and source, and supports narrow terminals.
 <!-- AC:END -->
 
 ## Definition of Done
@@ -61,17 +64,19 @@ sets the crate boundary between the document model and the interface.
 7. Track the displayed file through errors and closure, page file diagnostics, refresh nested Git excludes and resolved
    conflicts, validate regular files when opening sources, and check the terminal before starting sync. Exercise each
    case and run the project gate.
+
+8. Add the directory explorer and independent pane focus to the existing browser. Use Ratatui with Crossterm, keep sync
+   and preview recovery, exercise the real terminal, and update the specs and usage guide.
 <!-- SECTION:PLAN:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added ardent browse for navigating tracked files, expanding outline nodes, and reading their source. The browser keeps
-its project root, restores the selected node and reading position, and stays responsive while sync waits for the lock.
-Project and file diagnostics wrap and page. Polling detects repairs to an open file even when its timestamp and size
-stay the same, and stops checking the file when it closes. The picker refreshes when nested Git worktree exclusions
-change or a format conflict disappears. Sync and preview reject named pipes without waiting. Redirected browse exits
-before sync touches the cache. All 166 workspace tests passed on macOS. Terminal checks covered native notifications and
-polling. The CLI passed compile checks for Linux and Windows. Build, formatting, Clippy, Rust API documentation, and
-strict OpenSpec validation passed.
+Added ardent browse for navigating tracked files, expanding outline nodes, and reading their source. Ratatui draws a
+directory explorer beside the open outline and source. Tab changes focus. On narrow terminals, the focused pane fills
+the screen. Sync preserves the explorer cursor, collapsed directories, and the open node. Scans, source updates, file
+errors, and deletion stay connected to the open path while the reader navigates the explorer. The browser pages through
+diagnostics, rejects redirected input before taking the sync lock, and restores the terminal on exit. All 171 workspace
+tests passed on macOS. Terminal tests exercised native notifications and polling, nested directories, resize, refresh,
+and terminal restoration. Linux and Windows passed compile checks.
 <!-- SECTION:FINAL_SUMMARY:END -->
