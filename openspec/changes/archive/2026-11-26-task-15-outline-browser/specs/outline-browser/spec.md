@@ -19,15 +19,16 @@ SHALL print the command list and exit successfully.
 
 ### Requirement: Distinguish outline and source panes
 
-The browser SHALL draw a horizontal divider across the document pane between the outline and source preview whenever
-there is room for the source heading. The divider SHALL leave the explorer and source paging controls usable.
+The browser SHALL draw an unlabeled horizontal divider across the document pane between the outline and source preview
+when there is room for both panes and the divider. The divider SHALL leave the explorer and source paging controls
+usable.
 
 #### Scenario: Read an outline
 
 - **WHEN** a reader opens a document beside the explorer
 - **THEN** the reader sees the source below a horizontal divider that spans only the document pane
 - **AND** the divider remains visible when the reader switches to the document in a narrow terminal with room for the
-  heading
+  divider
 
 ### Requirement: Number items within each displayed list
 

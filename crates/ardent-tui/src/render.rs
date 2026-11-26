@@ -6,7 +6,7 @@ use ratatui::Frame;
 use ratatui::buffer::CellWidth;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, List, ListState, Paragraph};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -161,7 +161,7 @@ fn document(frame: &mut Frame<'_>, area: Rect, browser: &Browser) -> Paging {
 }
 
 fn outline(frame: &mut Frame<'_>, area: Rect, open: &Page) -> Paging {
-    let [nodes, title, source] = Layout::vertical([
+    let [nodes, divider, source] = Layout::vertical([
         Constraint::Length(area.height / 2),
         Constraint::Length(u16::from(area.height >= 3)),
         Constraint::Min(0),
@@ -183,13 +183,7 @@ fn outline(frame: &mut Frame<'_>, area: Rect, open: &Page) -> Paging {
             Line::from(format!("{indent}{marker} {}", printable(label)))
         });
     selected_list(frame, nodes, visible, selected.saturating_sub(start));
-    frame.render_widget(
-        Block::default().borders(Borders::TOP).title(Span::styled(
-            "Source ",
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        title,
-    );
+    frame.render_widget(Block::default().borders(Borders::TOP), divider);
 
     let node = &open.document.outline.nodes[tree.selected];
     // Slice before decoding because replacing an invalid UTF-8 byte can move later offsets.

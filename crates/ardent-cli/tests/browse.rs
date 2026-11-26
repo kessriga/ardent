@@ -208,12 +208,12 @@ fn keeps_the_directory_explorer_beside_the_open_outline() -> io::Result<()> {
         &[
             "Explorer",
             "Outline",
-            "Source ──",
+            "│────",
             "docs/guide/alpha.md",
             "# First passage",
             "beta.md",
         ],
-        &[],
+        &["Source"],
     )?;
     assert!(
         opened
@@ -229,9 +229,15 @@ fn keeps_the_directory_explorer_beside_the_open_outline() -> io::Result<()> {
     session.resize(&slave, 12, 32)?;
     session.wait_screen(&["Explorer", "beta.md"], &["# First passage"])?;
     session.keys(b"\t")?;
-    session.wait_screen(&["Source ──", "# First passage"], &["Explorer", "beta.md"])?;
+    session.wait_screen(
+        &["────", "# First passage"],
+        &["Explorer", "beta.md", "Source"],
+    )?;
     session.keys(b"\t\r")?;
-    session.wait_screen(&["Source", "# Second passage"], &["# First passage"])?;
+    session.wait_screen(
+        &["────", "# Second passage"],
+        &["# First passage", "Source"],
+    )?;
     session.resize(&slave, 18, 80)?;
     session.wait_screen(&["Explorer", "docs/", "Outline", "# Second passage"], &[])?;
     session.keys(b"\x1b")?;
