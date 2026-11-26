@@ -1,6 +1,6 @@
 //! Connect the terminal browser to project discovery, sync, and the source files on disk.
 
-use std::fs::{self, File};
+use std::cell::Cell;
 use std::io;
 use std::path::Path;
 use std::process::ExitCode;
@@ -15,20 +15,25 @@ use crate::sync;
 mod refresh;
 mod watch;
 
+use crate::sync::source;
 use refresh::{Preview, Refresh, Revision};
 
 pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
+    ardent_tui::require_terminal()?;
     let root = sync::find_root(working_dir).map_err(|err| io::Error::other(err.to_string()))?;
-    let refresh = Refresh::start(root.clone())?;
+    let mut refresh = Refresh::start(root.clone())?;
     let (files, mut failed) = refresh.initial()?;
+    let observed = Cell::new(None);
     ardent_tui::run(
         files,
-        |path| load(&root, path, |preview| refresh.opened(preview)),
-        || {
-            Ok(refresh.ready()?.map(|(files, errors)| {
-                failed = errors;
-                files
-            }))
+        |path| load(&root, path, |preview| observed.set(Some(preview))),
+        |open_path| {
+            Ok(refresh
+                .ready(open_path, observed.take())?
+                .map(|(files, errors)| {
+                    failed = errors;
+                    files
+                }))
         },
     )?;
     Ok(if failed {
@@ -42,15 +47,16 @@ pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
 /// with ranges that still fit inside the current file. Only a matching source hash makes them usable.
 fn load(root: &Path, path: &str, observed: impl FnOnce(Preview)) -> io::Result<Document> {
     let cached = root.join(ARDENT_DIR).join(layout::structure_path(path));
-    let structure = Structure::from_yaml(&fs::read_to_string(cached)?).map_err(io::Error::other)?;
+    let structure = Structure::from_yaml(&io::read_to_string(source::open_regular(&cached)?)?)
+        .map_err(io::Error::other)?;
     if !structure.outline.matches_source_path(path) {
         return Err(io::Error::other(
             "structure belongs to a different source file",
         ));
     }
-    let file = match File::open(root.join(path)) {
+    let file = match source::open_regular(&root.join(path)) {
         Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
-            observed(Preview::Recheck(path.to_owned()));
+            observed(Preview::recheck(path));
             return Err(err);
         }
         result => result?,
@@ -59,7 +65,7 @@ fn load(root: &Path, path: &str, observed: impl FnOnce(Preview)) -> io::Result<D
     let bytes = sync::source::read(file, metadata.len(), MAX_SOURCE_BYTES)?;
     let hash = structure::content_hash(&bytes);
     if hash != structure.stamp.hash {
-        observed(Preview::Recheck(path.to_owned()));
+        observed(Preview::recheck(path));
         return Err(io::Error::other(
             "source changed since its last successful scan",
         ));
@@ -72,10 +78,10 @@ fn load(root: &Path, path: &str, observed: impl FnOnce(Preview)) -> io::Result<D
     {
         return Err(io::Error::other("node range is outside the source file"));
     }
-    observed(Preview::Open {
-        path: path.to_owned(),
-        revision: Revision::from_source(&metadata, hash),
-    });
+    observed(Preview::loaded(
+        path,
+        Revision::from_source(&metadata, hash),
+    ));
     Ok(Document {
         outline: structure.outline,
         bytes,
@@ -87,6 +93,7 @@ mod tests {
     use super::*;
     use ardent_core::outline::{Outline, ScannedNode};
     use ardent_core::structure::Stamp;
+    use std::fs;
     use std::time::SystemTime;
 
     #[test]

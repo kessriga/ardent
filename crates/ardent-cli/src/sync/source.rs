@@ -1,4 +1,27 @@
+use std::fs::File;
 use std::io::{self, Read};
+use std::path::Path;
+
+/// A tracked path can change type after discovery. Open it without waiting for a pipe writer,
+/// then check the handle that the caller will actually read.
+pub(crate) fn open_regular(path: &Path) -> io::Result<File> {
+    let mut options = File::options();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use rustix::fs::OFlags;
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(OFlags::NONBLOCK.bits() as i32);
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "expected a regular file",
+        ));
+    }
+    Ok(file)
+}
 
 /// Read the full source for a scan or preview, returning an error if it exceeds `limit` bytes.
 /// Pass the observed file size in `size` for an early size check.
@@ -24,6 +47,29 @@ pub(crate) fn read(mut file: impl Read, size: u64, limit: usize) -> io::Result<V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn regular_file_reads_are_nonblocking_and_reject_other_file_types() -> io::Result<()> {
+        use rustix::fs::{self, OFlags};
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("notes.md");
+        File::create(&path)?;
+        let source = open_regular(&path)?;
+        assert!(fs::fcntl_getfl(&source)?.contains(OFlags::NONBLOCK));
+        let pipe = dir.path().join("pipe");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&pipe)
+                .status()?
+                .success()
+        );
+        assert_eq!(
+            open_regular(&pipe).expect_err("named pipe").kind(),
+            io::ErrorKind::InvalidInput
+        );
+        Ok(())
+    }
 
     #[test]
     fn accepts_the_exact_limit_and_checks_for_growth_after_stat() -> io::Result<()> {

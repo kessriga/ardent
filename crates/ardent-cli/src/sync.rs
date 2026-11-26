@@ -141,7 +141,7 @@ pub(crate) fn run_at(root: &Path, mode: Run) -> Result<Report, SyncError> {
         } else {
             SourceCheck::Stamp
         };
-        let outcome = match File::open(root.join(&file.path)) {
+        let outcome = match source::open_regular(&root.join(&file.path)) {
             Ok(source) => sync_file(source, &ardent_dir, &file.path, plugin, &unavailable, check),
             Err(error) => {
                 if error.kind() == io::ErrorKind::PermissionDenied {
@@ -332,8 +332,9 @@ fn sync_file(
 /// The structure file at `path` and the time it was written, or `None` when it is missing or cannot be read, so that
 /// the sync builds it again.
 fn read_structure(path: &Path) -> Option<(Structure, SystemTime)> {
-    let text = fs::read_to_string(path).ok()?;
-    let written = fs::metadata(path).and_then(|m| m.modified()).ok()?;
+    let file = source::open_regular(path).ok()?;
+    let written = file.metadata().and_then(|m| m.modified()).ok()?;
+    let text = io::read_to_string(file).ok()?;
     Some((Structure::from_yaml(&text).ok()?, written))
 }
 

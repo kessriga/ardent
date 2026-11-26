@@ -318,3 +318,52 @@ fn restoring_read_permission_recovers_without_another_edit() -> io::Result<()> {
     assert!(session.0.wait()?.success());
     Ok(())
 }
+
+#[test]
+fn repairs_an_open_syntax_error_without_a_size_or_mtime_change() -> io::Result<()> {
+    let project = common::temp_dir()?;
+    let root = project.path();
+    assert!(
+        common::run_init(root, &["--plugins", "rust"])?
+            .status
+            .success()
+    );
+    let source = root.join("notes.rs");
+    fs::write(&source, "fn item(  \n")?;
+    let time = source.metadata()?.modified()?;
+    let (mut master, slave) = pty::open_terminal(12)?;
+    let mut session = Session::open(root, &slave)?;
+    wait_for(&mut master, "Enter open")?;
+    master.write_all(b"\r")?;
+    wait_for(&mut master, "Esc files")?;
+    fs::write(&source, "fn item(){}")?;
+    File::options()
+        .write(true)
+        .open(&source)?
+        .set_modified(time)?;
+    wait_for(&mut master, "fn item(){}")?;
+    master.write_all(b"q")?;
+    wait_for(&mut master, "\x1b[?1049l")?;
+    assert!(session.0.wait()?.success());
+    Ok(())
+}
+
+#[test]
+fn redirected_browse_rejects_the_terminal_before_creating_a_cache() -> io::Result<()> {
+    let project = common::temp_dir()?;
+    let root = project.path();
+    assert!(
+        common::run_init(root, &["--plugins", "markdown"])?
+            .status
+            .success()
+    );
+    fs::write(root.join("notes.md"), "# Hello\n")?;
+    let output = Command::new(env!("CARGO_BIN_EXE_ardent"))
+        .current_dir(root)
+        .arg("browse")
+        .output()?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requires an interactive terminal"));
+    assert!(!root.join(".ardent/cache").exists());
+    Ok(())
+}

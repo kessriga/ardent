@@ -34,7 +34,7 @@ impl Frame {
                 "Esc files",
                 "q quit",
             ],
-            Screen::Unavailable { .. } => &["Esc files", "q quit"],
+            Screen::Unavailable { .. } => &["PgUp/PgDn error", "Esc files", "q quit"],
         };
         let footer = footer(keys, width, height);
         let content_height = height.saturating_sub(footer.len());
@@ -46,10 +46,11 @@ impl Frame {
                 frame.rows.push(files[browser.selected].0.clone());
                 frame.outline(page, width, body);
             }
-            Screen::Unavailable { message, .. } => {
-                frame
-                    .rows
-                    .extend([files[browser.selected].0.clone(), message.clone()]);
+            Screen::Unavailable {
+                message, scroll, ..
+            } => {
+                frame.rows.push(files[browser.selected].0.clone());
+                frame.page(wrapped(message, width).skip(*scroll), body);
             }
         }
         frame.rows.resize(content_height, String::new());
@@ -74,13 +75,11 @@ impl Frame {
             self.rows
                 .push(format!("{} {path}{error}", cursor(i == browser.selected)));
         }
-        self.page_height = height.saturating_sub(self.rows.len() - 1);
-        let mut rows = messages
+        let rows = messages
             .iter()
             .flat_map(|message| wrapped(message, width))
             .skip(browser.diagnostic_scroll);
-        self.rows.extend(rows.by_ref().take(self.page_height));
-        self.more = rows.next().is_some();
+        self.page(rows, height.saturating_sub(self.rows.len() - 1));
     }
 
     fn outline(&mut self, page: &Page, width: usize, height: usize) {
@@ -100,7 +99,6 @@ impl Frame {
             ));
         }
         self.rows.push("Source".into());
-        self.page_height = height.saturating_sub(self.rows.len().saturating_sub(1));
         let node = &page.document.outline.nodes[tree.selected];
         // Slice before decoding. Replacing an invalid UTF-8 byte can change subsequent byte offsets.
         let text = page
@@ -109,8 +107,15 @@ impl Frame {
             .get(node.range.clone())
             .map(String::from_utf8_lossy)
             .unwrap_or(Cow::Borrowed("Invalid source range"));
-        let mut rows = wrapped(&text, width).skip(page.scroll);
-        self.rows.extend(rows.by_ref().take(self.page_height));
+        self.page(
+            wrapped(&text, width).skip(page.scroll),
+            height.saturating_sub(self.rows.len() - 1),
+        );
+    }
+
+    fn page(&mut self, mut rows: impl Iterator<Item = String>, height: usize) {
+        self.page_height = height;
+        self.rows.extend(rows.by_ref().take(height));
         self.more = rows.next().is_some();
     }
 }

@@ -12,16 +12,27 @@ use crossterm::{execute, queue};
 use crate::render::Frame;
 use crate::{Browser, Document, FileList, Screen};
 
-pub(super) fn run(
-    browser: Browser,
-    load: impl Fn(&str) -> io::Result<Document>,
-    refresh: impl FnMut() -> io::Result<Option<FileList>>,
-) -> io::Result<()> {
+/// Check that the browser can take input and draw on an interactive terminal.
+/// Call this before starting project work for a terminal-only command.
+///
+/// # Errors
+///
+/// Returns an error if standard input or standard output is redirected.
+pub fn require_terminal() -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other(
             "ardent browse requires an interactive terminal",
         ));
     }
+    Ok(())
+}
+
+pub(super) fn run(
+    browser: Browser,
+    load: impl Fn(&str) -> io::Result<Document>,
+    refresh: impl FnMut(Option<&str>) -> io::Result<Option<FileList>>,
+) -> io::Result<()> {
+    require_terminal()?;
     #[cfg(unix)]
     let mut signals = signal_hook::iterator::Signals::new({
         use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
@@ -60,7 +71,7 @@ fn event_loop(
     output: &mut impl Write,
     mut browser: Browser,
     load: impl Fn(&str) -> io::Result<Document>,
-    mut refresh: impl FnMut() -> io::Result<Option<FileList>>,
+    mut refresh: impl FnMut(Option<&str>) -> io::Result<Option<FileList>>,
     mut interrupted: impl FnMut() -> Option<i32>,
 ) -> io::Result<Option<i32>> {
     let mut frame = paint(output, &browser)?;
@@ -68,7 +79,7 @@ fn event_loop(
         if let Some(signal) = interrupted() {
             return Ok(Some(signal));
         }
-        if let Some(files) = refresh()? {
+        if let Some(files) = refresh(browser.open_path())? {
             browser.refresh(files, &load);
             frame = paint(output, &browser)?;
         }
@@ -88,6 +99,9 @@ fn event_loop(
             }
             Event::Resize(_, _) => {
                 browser.diagnostic_scroll = 0;
+                if let Screen::Unavailable { scroll, .. } = &mut browser.screen {
+                    *scroll = 0;
+                }
                 if let Screen::Outline(page)
                 | Screen::Unavailable {
                     previous: Some(page),

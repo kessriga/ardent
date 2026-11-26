@@ -9,6 +9,7 @@ mod render;
 mod terminal;
 mod tree;
 
+pub use terminal::require_terminal;
 use tree::Tree;
 
 /// The file picker contents from one sync.
@@ -69,6 +70,7 @@ enum Screen {
     /// Keep the last good page for navigation recovery. Only the diagnostic is displayed.
     Unavailable {
         message: String,
+        scroll: usize,
         previous: Option<Page>,
     },
 }
@@ -81,18 +83,36 @@ struct Browser {
 }
 
 impl Browser {
+    fn open_path(&self) -> Option<&str> {
+        match self.screen {
+            Screen::Files => None,
+            Screen::Outline(_) | Screen::Unavailable { .. } => self
+                .list
+                .files
+                .get(self.selected)
+                .map(|(path, _)| path.as_str()),
+        }
+    }
+
     fn open(&mut self, load: &impl Fn(&str) -> io::Result<Document>) {
         let Some((path, error)) = self.list.files.get(self.selected) else {
             return;
         };
+        let result = match error {
+            Some(error) => Err(error.clone()),
+            None => load(path)
+                .and_then(Page::new)
+                .map_err(|err| err.to_string()),
+        };
+        if let (Err(error), Screen::Unavailable { message, .. }) = (&result, &self.screen)
+            && error == message
+        {
+            return;
+        }
         let previous = match mem::replace(&mut self.screen, Screen::Files) {
             Screen::Files => None,
             Screen::Outline(page) => Some(page),
             Screen::Unavailable { previous, .. } => previous,
-        };
-        let result = match error {
-            Some(error) => Err(io::Error::other(error.clone())),
-            None => load(path).and_then(Page::new),
         };
         self.screen = match result {
             Ok(mut page) => {
@@ -101,8 +121,9 @@ impl Browser {
                 }
                 Screen::Outline(page)
             }
-            Err(error) => Screen::Unavailable {
-                message: error.to_string(),
+            Err(message) => Screen::Unavailable {
+                message,
+                scroll: 0,
                 previous,
             },
         };
@@ -134,18 +155,22 @@ impl Browser {
         match (&mut self.screen, key) {
             (_, KeyCode::Esc) => self.screen = Screen::Files,
             (Screen::Files, KeyCode::Enter) => self.open(load),
-            (Screen::Files, KeyCode::PageUp) => {
-                self.diagnostic_scroll = self.diagnostic_scroll.saturating_sub(height);
+            (screen, KeyCode::PageUp | KeyCode::PageDown) => {
+                let scroll = match screen {
+                    Screen::Files => &mut self.diagnostic_scroll,
+                    Screen::Outline(page) => &mut page.scroll,
+                    Screen::Unavailable { scroll, .. } => scroll,
+                };
+                if key == KeyCode::PageUp {
+                    *scroll = scroll.saturating_sub(height);
+                } else if more {
+                    *scroll += height;
+                }
             }
-            (Screen::Files, KeyCode::PageDown) if more => self.diagnostic_scroll += height,
             (Screen::Files, KeyCode::Up) => self.selected = self.selected.saturating_sub(1),
             (Screen::Files, KeyCode::Down) => {
                 self.selected = (self.selected + 1).min(self.list.files.len().saturating_sub(1))
             }
-            (Screen::Outline(page), KeyCode::PageUp) => {
-                page.scroll = page.scroll.saturating_sub(height)
-            }
-            (Screen::Outline(page), KeyCode::PageDown) if more => page.scroll += height,
             (Screen::Outline(page), key) => {
                 let old = page.tree.selected;
                 page.tree.navigate(key);
@@ -164,7 +189,8 @@ impl Browser {
 /// Supply a [`Document`] from the same source revision as its structure. A load error appears
 /// in place of that file's outline, and the reader can return to the picker.
 ///
-/// The event loop calls `refresh` on the input thread. Return `Ok(None)` promptly while idle and
+/// The event loop passes the open source path to `refresh`, including while a scan error is
+/// displayed. The picker passes `None`. Return `Ok(None)` promptly while idle and
 /// `Ok(Some(list))` with the complete replacement [`FileList`] after a sync.
 ///
 /// # Errors
@@ -173,7 +199,7 @@ impl Browser {
 pub fn run(
     list: FileList,
     load: impl Fn(&str) -> io::Result<Document>,
-    refresh: impl FnMut() -> io::Result<Option<FileList>>,
+    refresh: impl FnMut(Option<&str>) -> io::Result<Option<FileList>>,
 ) -> io::Result<()> {
     let browser = Browser {
         list,
@@ -261,6 +287,35 @@ mod tests {
                 .rows
                 .iter()
                 .any(|row| row == "new warning")
+        );
+    }
+
+    #[test]
+    fn file_error_pages_survive_refresh_until_the_message_changes() {
+        let mut browser = reading_passage();
+        let message = format!("{}\nline 9, column 7", "x".repeat(44));
+        browser.refresh(files(Some(&message)), &document);
+        let first = Frame::draw(&browser, 22, 5);
+        assert!(first.rows.iter().any(|row| row == &"x".repeat(22)));
+        assert!(first.rows.iter().any(|row| row.contains("PgUp/PgDn error")));
+        assert!(first.more);
+
+        browser.key(KeyCode::PageDown, first.page_height, first.more, &document);
+        let last = Frame::draw(&browser, 22, 5);
+        assert!(last.rows.iter().any(|row| row == "line 9, column 7"));
+        assert!(!last.more);
+        browser.refresh(files(Some(&message)), &document);
+        assert_eq!(Frame::draw(&browser, 22, 5).rows, last.rows);
+        browser.key(KeyCode::PageUp, last.page_height, last.more, &document);
+        assert_eq!(Frame::draw(&browser, 22, 5).rows, first.rows);
+
+        browser.key(KeyCode::PageDown, first.page_height, first.more, &document);
+        browser.refresh(files(Some("new error")), &document);
+        assert!(
+            Frame::draw(&browser, 22, 5)
+                .rows
+                .iter()
+                .any(|row| row == "new error")
         );
     }
 
