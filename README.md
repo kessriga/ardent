@@ -171,6 +171,15 @@ Use these terms with these meanings in code, specs, and tasks.
 
 ## Building
 
+Run `just` to list the development commands. `just fmt` formats Rust code. `just check` checks formatting, runs Clippy
+and the workspace tests, and builds the binary. You can also run `just lint`, `just test`, or `just build` separately.
+
+Run `just install` to install the release binary and bundled format plugins. It uses `CARGO_INSTALL_ROOT` if set, then
+`CARGO_HOME`, then `~/.cargo`. To choose another directory, run `just install /path/to/root` and add that directory's
+`bin` to your `PATH`.
+
+To build and run directly with Cargo:
+
 ```sh
 cargo build
 cargo run -p ardent-cli   # the `ardent` binary
