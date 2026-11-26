@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-19 16:29'
-updated_date: '2026-11-26 09:56'
+updated_date: '2026-11-26 10:29'
 labels: []
 milestone: m-1
 dependencies:
@@ -67,6 +67,12 @@ sets the crate boundary between the document model and the interface.
 
 8. Add the directory explorer and independent pane focus to the existing browser. Use Ratatui with Crossterm, keep sync
    and preview recovery, exercise the real terminal, and update the specs and usage guide.
+
+9. Match source and diagnostic wrapping to Ratatui grapheme widths, keep the file error marker visible in the sidebar,
+   and verify both at the reported terminal sizes.
+
+10. Add Just recipes for host checks and local installation. Verify the installed executable can initialize and sync a
+    project with both bundled format plugins.
 <!-- SECTION:PLAN:END -->
 
 ## Final Summary
@@ -76,7 +82,10 @@ Added ardent browse for navigating tracked files, expanding outline nodes, and r
 directory explorer beside the open outline and source. Tab changes focus. On narrow terminals, the focused pane fills
 the screen. Sync preserves the explorer cursor, collapsed directories, and the open node. Scans, source updates, file
 errors, and deletion stay connected to the open path while the reader navigates the explorer. The browser pages through
-diagnostics, rejects redirected input before taking the sync lock, and restores the terminal on exit. All 171 workspace
+diagnostics, rejects redirected input before taking the sync lock, and restores the terminal on exit. All 173 workspace
 tests passed on macOS. Terminal tests exercised native notifications and polling, nested directories, resize, refresh,
-and terminal restoration. Linux and Windows passed compile checks.
+and terminal restoration. Linux and Windows passed compile checks. Source and diagnostics wrap at grapheme boundaries.
+The explorer places the scan-error marker before each affected filename. The Justfile runs the workspace checks and
+installs the release binary with its format plugins. A temporary installation initialized and synced both Markdown and
+Rust files.
 <!-- SECTION:FINAL_SUMMARY:END -->
