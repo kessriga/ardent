@@ -40,8 +40,7 @@ fn quotes_tables_and_blocks_that_are_not_nodes() -> Result<(), Box<dyn Error>> {
 #[test]
 fn packaged_syntax_spans() -> Result<(), Box<dyn Error>> {
     use ardent_core::highlight::Category::{Code, Heading};
-    let source =
-        "# Try `this` now\n\nBody `let`.\n\nNext\n----\n\n```rs\nfn next() {}\n```\n\n    code\n";
+    let source = "# Try `this` now\n\nBody `let`.\n\nNext\n----\n\n```rs\nfn next() {}\n```\n\n    code\n    again\n";
     let expected = [
         ("# Try ", Heading),
         ("`this`", Code),
@@ -49,7 +48,7 @@ fn packaged_syntax_spans() -> Result<(), Box<dyn Error>> {
         ("`let`", Code),
         ("Next\n----\n", Heading),
         ("```rs\nfn next() {}\n```\n", Code),
-        ("    code\n", Code),
+        ("    code\n    again\n", Code),
     ];
     let spans = common::plugin("markdown")?.highlight(source.as_bytes())?;
     let actual: Vec<_> = spans

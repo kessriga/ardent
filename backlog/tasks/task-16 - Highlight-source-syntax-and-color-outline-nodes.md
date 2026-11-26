@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-26 13:13'
-updated_date: '2026-11-26 14:59'
+updated_date: '2026-11-26 16:04'
 labels: []
 dependencies: []
 references:
@@ -44,7 +44,18 @@ format plugins identify source ranges and their syntax categories so the termina
 2. Add Rust and Markdown syntax categories and rebuild the packaged plugins.
 3. Carry verified ranges into the browser and test cell styles through selection, wrapping, paging and refresh.
 4. Verify the packaged examples and the project gate, then archive the OpenSpec change in the implementation PR.
+
+5. Reuse highlights across unrelated saves, cover Rust macro keywords and Markdown code indentation, and verify the
+   rebuilt packages.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+The browser reuses spans only while the source hash and verified component digest match. Regression tests cover
+unrelated saves, changed source and plugins, Rust macro keywords and raw identifiers, and Markdown code indentation in
+nested containers.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

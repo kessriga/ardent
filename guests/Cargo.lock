@@ -62,6 +62,7 @@ version = "0.1.0"
 dependencies = [
  "ardent-core",
  "ardent-format-guest",
+ "tree-sitter",
  "tree-sitter-md",
 ]
 
