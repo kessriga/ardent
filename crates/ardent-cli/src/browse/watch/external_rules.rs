@@ -9,16 +9,45 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use ardent_core::layout::{ARDENT_DIR, CACHE_DIR};
-use notify::{Config, Event, Watcher};
+use notify::{Config, Event, PollWatcher, Watcher};
 use same_file::Handle;
 
 pub(super) struct Inputs {
     pub(super) linked_worktrees: Vec<PathBuf>,
     user_dir: Option<PathBuf>,
     previous: Snapshot,
-    package_watch: Option<(Handle, Box<dyn Watcher>)>,
-    package_event: Arc<AtomicBool>,
+    package_watch: Option<PackageWatch>,
+    package_events: Arc<PackageEvents>,
     checked: Instant,
+}
+
+struct PackageWatch {
+    directory: Handle,
+    polling: bool,
+    _watcher: Box<dyn Watcher>,
+}
+
+#[derive(Default)]
+struct PackageEvents {
+    changed: AtomicBool,
+    prefer_polling: AtomicBool,
+}
+
+impl PackageEvents {
+    fn record(&self, result: notify::Result<Event>, cache: &Path) {
+        let changed = match result {
+            Ok(event) => {
+                event.need_rescan()
+                    || (!event.kind.is_access()
+                        && event.paths.iter().any(|path| !path.starts_with(cache)))
+            }
+            // A native backend can stop delivering events after a read error.
+            Err(_) => !self.prefer_polling.swap(true, Ordering::Relaxed),
+        };
+        if changed {
+            self.changed.store(true, Ordering::Relaxed);
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -34,7 +63,7 @@ impl Inputs {
             previous: read(root, &[], user_dir.as_deref()),
             user_dir,
             package_watch: None,
-            package_event: Arc::default(),
+            package_events: Arc::default(),
             checked: Instant::now(),
         };
         inputs.watch_packages(root);
@@ -47,7 +76,7 @@ impl Inputs {
         }
         self.checked = Instant::now();
         let watch_changed = self.watch_packages(root);
-        let package_changed = self.package_event.swap(false, Ordering::Relaxed);
+        let package_changed = self.package_events.changed.swap(false, Ordering::Relaxed);
         let next = read(root, &self.linked_worktrees, self.user_dir.as_deref());
         if self.previous == next {
             return watch_changed || package_changed;
@@ -61,32 +90,32 @@ impl Inputs {
         let Some((path, handle)) = self.user_dir.as_deref().and_then(package_directory) else {
             return self.package_watch.take().is_some();
         };
+        let prefer_polling = self.package_events.prefer_polling.load(Ordering::Relaxed);
         if self
             .package_watch
             .as_ref()
-            .is_some_and(|(watched, _)| *watched == handle)
+            .is_some_and(|watch| watch.directory == handle && (watch.polling || !prefer_polling))
         {
             return false;
         }
-        let event = Arc::clone(&self.package_event);
+        let events = Arc::clone(&self.package_events);
         let cache = root.join(ARDENT_DIR).join(CACHE_DIR);
-        let observe = move |result: notify::Result<Event>| {
-            if let Ok(change) = result
-                && (change.need_rescan()
-                    || (!change.kind.is_access()
-                        && change.paths.iter().any(|path| !path.starts_with(&cache))))
-            {
-                event.store(true, Ordering::Relaxed);
-            }
-        };
+        let observe = move |result| events.record(result, &cache);
         let config = Config::default()
             .with_follow_symlinks(false)
             .with_poll_interval(Duration::from_secs(1))
             .with_compare_contents(true);
         let was_watched = self.package_watch.is_some();
-        self.package_watch = super::watch_tree(&path, observe, config)
-            .ok()
-            .map(|(watcher, _)| (handle, watcher));
+        let watcher = if prefer_polling {
+            super::start::<PollWatcher>(&path, observe, config).map(|watcher| (watcher, true))
+        } else {
+            super::watch_tree(&path, observe, config)
+        };
+        self.package_watch = watcher.ok().map(|(watcher, polling)| PackageWatch {
+            directory: handle,
+            polling,
+            _watcher: watcher,
+        });
         was_watched || self.package_watch.is_some()
     }
 }
@@ -156,6 +185,31 @@ fn common_directory(repo: &Path, git_file: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_package_watch_error_refreshes_once_and_switches_to_polling() -> std::io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let user = tempfile::tempdir()?;
+        fs::create_dir(user.path().join("plugins"))?;
+        let mut inputs = Inputs::new(root.path(), Some(user.path().to_owned()));
+        inputs
+            .package_events
+            .record(Err(notify::Error::generic("watch stopped")), root.path());
+        inputs.checked = Instant::now() - Duration::from_secs(2);
+        assert!(inputs.changed(root.path()));
+        assert!(
+            inputs
+                .package_watch
+                .as_ref()
+                .is_some_and(|watch| watch.polling)
+        );
+        inputs
+            .package_events
+            .record(Err(notify::Error::generic("unreadable file")), root.path());
+        inputs.checked = Instant::now() - Duration::from_secs(2);
+        assert!(!inputs.changed(root.path()));
+        Ok(())
+    }
 
     #[test]
     fn reads_the_shared_excludes_of_a_linked_worktree() -> std::io::Result<()> {
