@@ -34,10 +34,11 @@ Keep the release's `plugins/` directory beside the `ardent` executable. Run `ard
 Press q, Escape, or Ctrl-C at any prompt to cancel. Init refuses to run where `.ardent` already exists or inside another
 Ardent project. In MSYS and Cygwin pipe terminals, enter the numbered scope, then the format names separated by commas.
 
-In scripts, `--plugins` installs the named formats in the project without prompting. Use `--plugins ''` for none.
+In scripts, `--plugins` installs the named formats in the project without prompting. Add `--project` to make that scope
+explicit. Use `--plugins ''` for none.
 
 ```sh
-ardent init --plugins markdown,rust && ardent sync
+ardent init --plugins markdown,rust --project && ardent sync
 ```
 
 The browser names project-installed plugins that differ from the running release. The notice clears after you update

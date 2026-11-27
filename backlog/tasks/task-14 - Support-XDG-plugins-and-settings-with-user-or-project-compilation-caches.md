@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-24 13:08'
-updated_date: '2026-11-27 18:16'
+updated_date: '2026-11-27 19:35'
 labels: []
 milestone: m-3
 dependencies:
@@ -18,6 +18,7 @@ references:
   - openspec/specs/ardent-layout/spec.md
   - openspec/changes/archive/2026-11-27-task-14-xdg-plugins
   - openspec/changes/archive/2026-11-27-task-14-init-install-scope
+  - openspec/changes/archive/2026-11-27-task-14-init-project-flag
 priority: medium
 type: feature
 ordinal: 14000
@@ -62,13 +63,16 @@ compilation cache holds derived code and has a separate choice of scope.
 
 5. Extend interactive init with the requested opt-in, scope and plugin prompts. Test both installation locations, shared
    package reuse, cancellation and scripted compatibility.
+
+6. Expose project scope for scripted init, document the flag, and test where it writes.
 <!-- SECTION:PLAN:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Projects enable their own formats, inherit user settings by key and can pin a project package. Interactive init offers
-user or project installation with every plugin initially unchecked. Explicit --plugins installs in the project. The full
-macOS gate passed with 221 Rust tests and two recipe tests. Terminal tests cover both scopes, concurrent installation,
-cancellation, retained packages and retry. Linux and Windows workspace checks passed.
+user or project installation with every plugin initially unchecked. Scripts can pass `--project` with `--plugins` to
+make the project destination explicit. The serial macOS gate passed with 223 Rust tests and two recipe tests. Tests
+cover shared package preservation, concurrent installation, cancellation, retry and both scripted spellings. Linux and
+Windows workspace checks passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
