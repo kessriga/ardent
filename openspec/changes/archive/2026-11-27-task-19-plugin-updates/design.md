@@ -33,7 +33,11 @@ eligible package, including removal of obsolete files.
 - Publish the package as a directory under the lock. Preserve the original until the replacement is in place. Use an
   atomic directory exchange where supported. Any fallback must restore the original at its installed path before
   reporting a publish failure. Clean up only directories this update owns. Test a failure during publication as well as
-  a failure during staging. Replacement is per plugin, so a successful earlier update can stand.
+  a failure during staging. Replacement is per plugin. Report both successes and failures.
+- Where directory exchange is unavailable, put a marked backup directory at `.ardent/plugins/.ardent-update-<name>/`
+  before moving the original. Sync, browse and update recover under the project lock before using the installed
+  packages. If the installed path is missing, restore the original. If the replacement is in place, finish cleanup.
+  Keeping the backup outside the cache lets the reader clear the cache during an interruption.
 
 ## Risks and rollout
 

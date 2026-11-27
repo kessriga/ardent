@@ -106,6 +106,9 @@ pub(crate) fn run_at(root: &Path, mode: Run) -> Result<Report, SyncError> {
     let overrides = configured_patterns(root, &config).map_err(config_error)?;
     let _lock = lock(&ardent_dir)?;
     let mut report = Report::default();
+    if !crate::update::recover(&ardent_dir, &mut report.warnings, &mut report.errors).is_empty() {
+        return Ok(report);
+    }
     let packages = match InstalledPackages::discover(&ardent_dir) {
         Ok(packages) => packages,
         Err(err) => {

@@ -214,6 +214,33 @@ fn notices_a_rebuilt_component_and_clears_after_external_update() -> io::Result<
 }
 
 #[test]
+fn shows_available_updates_alongside_a_bundle_error() -> io::Result<()> {
+    let project = common::temp_dir()?;
+    let release = common::stage_release()?;
+    let root = project.path();
+    assert!(
+        common::run_init(root, &["--plugins", "markdown,rust"])?
+            .status
+            .success()
+    );
+    fs::write(release.path().join("plugins/markdown/guide"), "new")?;
+    fs::remove_file(release.path().join("plugins/rust/README.md"))?;
+    let (master, slave) = pty::open_terminal(24)?;
+    let mut session =
+        Session::open_command(Command::new(release.executable()), root, &slave, master)?;
+    session.wait_screen(
+        &[
+            "Plugin updates: markdown. Run ardent update",
+            "cannot update rust",
+        ],
+        &[],
+    )?;
+    session.keys(b"q")?;
+    assert!(session.child.wait()?.success());
+    Ok(())
+}
+
+#[test]
 fn browses_from_a_subdirectory_and_refreshes_while_open() -> io::Result<()> {
     let project = common::temp_dir()?;
     let root = project.path();

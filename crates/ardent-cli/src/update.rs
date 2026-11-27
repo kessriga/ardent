@@ -10,6 +10,10 @@ use tempfile::TempDir;
 use crate::release::{self, RELEASE, ReleasePlugin};
 use crate::sync;
 
+mod transaction;
+#[cfg(windows)]
+mod windows;
+
 type Result<T> = std::result::Result<T, String>;
 
 fn path_error((path, error): (PathBuf, io::Error)) -> String {
@@ -20,38 +24,97 @@ fn package_error(name: &str, error: impl fmt::Display) -> String {
     format!("cannot update {name}: {error}")
 }
 
-fn changed(ardent: &Path, release: &Path) -> Result<Vec<&'static ReleasePlugin>> {
+#[derive(Default)]
+pub(super) struct Report {
+    packages: Vec<&'static ReleasePlugin>,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+    pending: bool,
+}
+
+impl Report {
+    pub fn names(&self) -> Option<String> {
+        (!self.packages.is_empty()).then(|| {
+            self.packages
+                .iter()
+                .map(|plugin| plugin.name)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+    }
+}
+
+fn inspect(ardent: &Path, release: &Path) -> Result<Report> {
     let installed = InstalledPackages::discover(ardent).map_err(|e| e.to_string())?;
-    let mut changed = Vec::new();
+    let mut report = Report::default();
     for plugin in RELEASE {
-        if !installed
-            .contains_format(plugin.name)
-            .map_err(|e| package_error(plugin.name, e))?
-        {
-            continue;
+        match transaction::pending(ardent, plugin.name) {
+            Ok(pending) => report.pending |= pending,
+            Err(err) => {
+                report.errors.push(package_error(plugin.name, err));
+                continue;
+            }
         }
-        if plugin
-            .differs(release, ardent)
-            .map_err(|e| package_error(plugin.name, path_error(e)))?
-        {
-            changed.push(plugin);
+        let changed = installed
+            .contains_format(plugin.name)
+            .map_err(|e| e.to_string())
+            .and_then(|present| {
+                if present {
+                    plugin.differs(release, ardent).map_err(path_error)
+                } else {
+                    Ok(false)
+                }
+            });
+        match changed {
+            Ok(true) => report.packages.push(plugin),
+            Ok(false) => {}
+            Err(error) => report.errors.push(package_error(plugin.name, error)),
         }
     }
-    Ok(changed)
+    Ok(report)
 }
 
-/// Called by the browser worker after its first sync and after a project plugin changes.
-pub(super) fn notice(root: &Path) -> Result<Option<String>> {
-    let ardent = root.join(ARDENT_DIR);
-    let release = release::release_dir().map_err(path_error)?;
-    let _lock = sync::lock(&ardent).map_err(|e| e.to_string())?;
-    let names: Vec<_> = changed(&ardent, &release)?.iter().map(|p| p.name).collect();
-    Ok((!names.is_empty())
-        .then(|| format!("Plugin updates: {}. Run ardent update", names.join(", "))))
+/// Compare under a shared lock when the project already has one. A fresh project needs no cache.
+fn check(ardent: &Path, release: &Path) -> Result<Report> {
+    let path = ardent.join(LOCK_FILE);
+    let existing = || match fs::File::open(&path) {
+        Ok(file) => Ok(Some(file)),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(path_error((path.clone(), err))),
+    };
+    let lock = match existing()? {
+        Some(file) => file,
+        None => {
+            let initial = inspect(ardent, release);
+            // A writer may have created the lock during the first comparison.
+            let Some(file) = existing()? else {
+                return initial;
+            };
+            file
+        }
+    };
+    lock.lock_shared().map_err(|e| path_error((path, e)))?;
+    inspect(ardent, release)
 }
 
-pub(super) fn run(working_dir: &Path) -> Result<Vec<&'static str>> {
+pub(super) fn available(root: &Path) -> Result<Report> {
+    check(
+        &root.join(ARDENT_DIR),
+        &release::release_dir().map_err(path_error)?,
+    )
+}
+
+pub(super) fn run(working_dir: &Path) -> Result<Report> {
     let root = sync::find_root(working_dir).map_err(|e| e.to_string())?;
+    let release = release::release_dir().map_err(path_error)?;
+    apply(&root, &release, publish)
+}
+
+fn apply(
+    root: &Path,
+    release: &Path,
+    publish: impl Fn(&Path, &Path, &mut Vec<String>) -> io::Result<()>,
+) -> Result<Report> {
     let ardent = root.join(ARDENT_DIR);
     if !fs::symlink_metadata(&ardent)
         .map_err(|e| e.to_string())?
@@ -59,86 +122,266 @@ pub(super) fn run(working_dir: &Path) -> Result<Vec<&'static str>> {
     {
         return Err(format!("{} must be a directory", ardent.display()));
     }
-    let release = release::release_dir().map_err(path_error)?;
-    // A fresh, current project should stay byte-for-byte as init created it, without a cache.
-    if !ardent
-        .join(LOCK_FILE)
-        .try_exists()
-        .map_err(|e| e.to_string())?
-        && changed(&ardent, &release)?.is_empty()
-    {
-        return Ok(Vec::new());
+    let mut initial = check(&ardent, release)?;
+    if initial.packages.is_empty() && !initial.pending {
+        return Ok(initial);
     }
-    let _lock = sync::lock(&ardent).map_err(|e| e.to_string())?;
-    let mut updated = Vec::new();
-    for plugin in changed(&ardent, &release)? {
-        replace(plugin, &root, &release).map_err(|e| package_error(plugin.name, e))?;
-        updated.push(plugin.name);
+    let _lock = match sync::lock(&ardent) {
+        Ok(lock) => lock,
+        Err(err) => {
+            for plugin in std::mem::take(&mut initial.packages) {
+                initial.errors.push(package_error(plugin.name, &err));
+            }
+            if initial.pending {
+                initial
+                    .errors
+                    .push(format!("cannot recover plugin update: {err}"));
+            }
+            return Ok(initial);
+        }
+    };
+    let mut warnings = Vec::new();
+    let mut errors = Vec::new();
+    let blocked = recover(&ardent, &mut warnings, &mut errors);
+    let mut report = inspect(&ardent, release)?;
+    report.warnings = warnings;
+    report.errors.extend(errors);
+    for plugin in std::mem::take(&mut report.packages) {
+        if blocked.contains(&plugin.name) {
+            continue;
+        }
+        match replace(plugin, root, release, &publish, &mut report.warnings) {
+            Ok(()) => report.packages.push(plugin),
+            Err(e) => report.errors.push(package_error(plugin.name, e)),
+        }
     }
-    Ok(updated)
+    Ok(report)
 }
 
-fn replace(plugin: &ReleasePlugin, root: &Path, release: &Path) -> Result<()> {
+fn replace(
+    plugin: &ReleasePlugin,
+    root: &Path,
+    release: &Path,
+    publish: &impl Fn(&Path, &Path, &mut Vec<String>) -> io::Result<()>,
+    warnings: &mut Vec<String>,
+) -> Result<()> {
     let ardent = root.join(ARDENT_DIR);
     let tmp = layout::create_dir(&ardent, "cache/tmp").map_err(|e| e.to_string())?;
-    let stage = TempDir::new_in(tmp).map_err(|e| e.to_string())?;
+    let stage = staging_dir(&tmp).map_err(|e| e.to_string())?;
+    let result = stage_candidate(plugin, root, release, &stage.path).and_then(|candidate| {
+        publish(
+            &candidate,
+            &ardent.join("plugins").join(plugin.name),
+            warnings,
+        )
+        .map_err(|e| e.to_string())
+    });
+    close_stage(stage, plugin.name, warnings);
+    result
+}
+
+struct Stage {
+    outer: TempDir,
+    path: PathBuf,
+    #[cfg(windows)]
+    pins: [fs::File; 2],
+}
+
+fn close_stage(stage: Stage, name: &str, warnings: &mut Vec<String>) {
+    let path = stage.outer.path().to_owned();
+    #[cfg(windows)]
+    drop(stage.pins);
+    if let Err(err) = stage.outer.close() {
+        warnings.push(format!(
+            "could not clean up staging files for {name} at {}: {err}",
+            path.display()
+        ));
+    }
+}
+
+fn staging_dir(tmp: &Path) -> io::Result<Stage> {
+    let mut builder = tempfile::Builder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(fs::Permissions::from_mode(0o700));
+    }
+    let outer = builder.prefix(".ardent-").tempdir_in(tmp)?;
+    #[cfg(windows)]
+    let (path, pins) = {
+        let parent = windows::pin_directory(outer.path())?;
+        let path = outer.path().join("private");
+        let pin = windows::private_directory(&path)?;
+        (path, [parent, pin])
+    };
+    #[cfg(not(windows))]
+    let path = outer.path().to_owned();
+    Ok(Stage {
+        outer,
+        path,
+        #[cfg(windows)]
+        pins,
+    })
+}
+
+pub(crate) fn recover(
+    ardent: &Path,
+    warnings: &mut Vec<String>,
+    errors: &mut Vec<String>,
+) -> Vec<&'static str> {
+    let mut blocked = Vec::new();
+    for plugin in RELEASE {
+        let result = transaction::pending(ardent, plugin.name).and_then(|pending| {
+            if pending {
+                transaction::recover(ardent, plugin.name, warnings)?;
+            }
+            Ok(())
+        });
+        if let Err(err) = result {
+            errors.push(format!("cannot recover {}: {err}", plugin.name));
+            blocked.push(plugin.name);
+        }
+    }
+    blocked
+}
+
+fn stage_candidate(
+    plugin: &ReleasePlugin,
+    root: &Path,
+    release: &Path,
+    stage: &Path,
+) -> Result<PathBuf> {
+    let ardent = root.join(ARDENT_DIR);
     plugin
-        .install(release, &ardent, stage.path())
+        .install(release, &ardent, stage)
         .map_err(path_error)?;
-    let format = FormatPlugin::load(stage.path(), plugin.name)
+    let format = FormatPlugin::load(stage, plugin.name)
         .map_err(|e| e.to_string())?
         .ok_or("missing staged package")?;
     patterns::compile_defaults(root, &format.default_files, &format.default_prefixes)
         .map_err(|e| e.to_string())?;
-    let relative = Path::new("plugins").join(plugin.name);
-    publish(stage, &relative, &ardent.join(&relative)).map_err(|e| e.to_string())
+    Ok(stage.join("plugins").join(plugin.name))
 }
 
-fn publish(stage: TempDir, relative: &Path, installed: &Path) -> io::Result<()> {
-    let candidate = stage.path().join(relative);
+fn publish(candidate: &Path, installed: &Path, warnings: &mut Vec<String>) -> io::Result<()> {
     #[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
     {
         use rustix::fs::{self, CWD, RenameFlags};
         use rustix::io::Errno;
-        match fs::renameat_with(CWD, &candidate, CWD, installed, RenameFlags::EXCHANGE) {
+        match fs::renameat_with(CWD, candidate, CWD, installed, RenameFlags::EXCHANGE) {
             Ok(()) => return Ok(()),
             Err(Errno::NOTSUP | Errno::NOSYS | Errno::INVAL) => {}
             Err(err) => return Err(err.into()),
         }
     }
-    publish_with_backup(stage, &candidate, installed)
-}
-
-fn publish_with_backup(stage: TempDir, candidate: &Path, installed: &Path) -> io::Result<()> {
-    let previous = stage.path().join("previous");
-    fs::rename(installed, &previous)?;
-    if let Err(error) = fs::rename(candidate, installed) {
-        if let Err(restore) = fs::rename(&previous, installed) {
-            let _ = stage.keep();
-            return Err(io::Error::other(format!(
-                "{error}; previous package retained at {}: {restore}",
-                previous.display()
-            )));
-        }
-        return Err(error);
-    }
-    Ok(())
+    transaction::portable(candidate, installed, warnings)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::TryLockError;
 
     #[test]
-    fn failed_portable_rename_restores_the_original_directory() -> io::Result<()> {
+    fn publication_holds_the_project_lock_and_a_failed_rename_preserves_the_package()
+    -> io::Result<()> {
+        let project = tempfile::tempdir()?;
+        let root = project.path();
+        let ardent = root.join(ARDENT_DIR);
+        fs::create_dir(&ardent)?;
+        let release = release::release_dir().map_err(|(_, e)| e)?;
+        let plugin = &RELEASE[0];
+        plugin
+            .install(&release, &ardent, &ardent)
+            .map_err(|(_, e)| e)?;
+        let installed = ardent.join("plugins").join(plugin.name);
+        fs::write(installed.join("custom"), "local")?;
+        let called = std::cell::Cell::new(false);
+        let report = apply(root, &release, |candidate, target, warnings| {
+            called.set(true);
+            let lock = fs::File::open(ardent.join(LOCK_FILE))?;
+            assert!(matches!(
+                lock.try_lock_shared(),
+                Err(TryLockError::WouldBlock)
+            ));
+            fs::remove_dir_all(candidate)?;
+            transaction::portable(candidate, target, warnings)
+        })
+        .map_err(io::Error::other)?;
+        assert!(called.get());
+        assert!(report.names().is_none());
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|e| e.contains("cannot update markdown"))
+        );
+        assert_eq!(fs::read(installed.join("custom"))?, b"local");
+        assert!(
+            FormatPlugin::load(&ardent, plugin.name)
+                .map_err(io::Error::other)?
+                .is_some()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn portable_publication_preserves_unrelated_files() -> io::Result<()> {
         let project = tempfile::tempdir()?;
         let installed = project.path().join("markdown");
+        let stage = tempfile::tempdir_in(project.path())?;
+        let candidate = stage.path().join("markdown");
         fs::create_dir(&installed)?;
-        fs::write(installed.join("old"), b"original")?;
-        let stage = TempDir::new_in(project.path())?;
-        let missing = stage.path().join("missing");
-        assert!(publish_with_backup(stage, &missing, &installed).is_err());
-        assert_eq!(fs::read(installed.join("old"))?, b"original");
+        fs::create_dir(&candidate)?;
+        fs::write(installed.join("old"), "old")?;
+        fs::write(candidate.join("new"), "new")?;
+        let collision = project.path().join(".ardent-update-markdown");
+        fs::create_dir(&collision)?;
+        fs::write(collision.join("local"), "mine")?;
+        let mut warnings = Vec::new();
+        assert_eq!(
+            transaction::portable(&candidate, &installed, &mut warnings)
+                .expect_err("collision")
+                .kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(fs::read(collision.join("local"))?, b"mine");
+        assert_eq!(fs::read(installed.join("old"))?, b"old");
+        fs::rename(&collision, project.path().join("mine"))?;
+        transaction::portable(&candidate, &installed, &mut warnings)?;
+        assert!(warnings.is_empty());
+        assert_eq!(fs::read(installed.join("new"))?, b"new");
+        assert!(!installed.join("old").try_exists()?);
+        assert!(!collision.try_exists()?);
+        Ok(())
+    }
+
+    #[test]
+    fn cleanup_warning_names_the_directory_left_behind() -> io::Result<()> {
+        let parent = tempfile::tempdir()?;
+        let stage = staging_dir(parent.path())?;
+        let path = stage.outer.path().to_owned();
+        #[cfg(unix)]
+        {
+            fs::rename(&path, parent.path().join("saved"))?;
+            fs::write(&path, "occupied")?;
+        }
+        #[cfg(windows)]
+        let _open = windows::pin_directory(&stage.path)?;
+        let mut warnings = Vec::new();
+        close_stage(stage, "markdown", &mut warnings);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains(&path.display().to_string()));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn candidate_staging_is_private() -> io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let parent = tempfile::tempdir()?;
+        let stage = staging_dir(parent.path())?;
+        assert_eq!(stage.path.metadata()?.permissions().mode() & 0o777, 0o700);
         Ok(())
     }
 }

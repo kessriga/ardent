@@ -177,7 +177,7 @@ fn watch(
         warnings: Vec::new(),
         check_plugins: true,
     });
-    let mut notice = Ok(None);
+    let mut available = Ok(update::Report::default());
     let mut checked = Instant::now();
     loop {
         let check_access = checked.elapsed() >= Duration::from_secs(1);
@@ -212,11 +212,21 @@ fn watch(
             if let Some(batch) = batch.take() {
                 messages.extend(batch.warnings);
                 if batch.check_plugins {
-                    notice = update::notice(root);
+                    available = update::available(root);
                 }
             }
-            let update_notice = match &notice {
-                Ok(message) => message.clone(),
+            let update_notice = match &available {
+                Ok(report) => {
+                    messages.extend(
+                        report
+                            .errors
+                            .iter()
+                            .map(|e| format!("Cannot check plugin updates: {e}")),
+                    );
+                    report
+                        .names()
+                        .map(|names| format!("Plugin updates: {names}. Run ardent update"))
+                }
                 Err(error) => {
                     messages.push(format!("Cannot check plugin updates: {error}"));
                     None

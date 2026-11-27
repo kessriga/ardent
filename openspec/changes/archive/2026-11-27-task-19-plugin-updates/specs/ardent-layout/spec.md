@@ -54,3 +54,16 @@ that plugin's previous package usable. A concurrent Ardent sync SHALL see a comp
 
 - **WHEN** the candidate package is complete but Ardent cannot put it in the installed location
 - **THEN** the command identifies the plugin and its original files remain at the installed location
+
+#### Scenario: Update stops between directory renames
+
+- **WHEN** a filesystem requires two renames and the updater stops after moving the original package to
+  `.ardent/plugins/.ardent-update-<name>/`
+- **THEN** the next sync, browse or update restores the original before inspecting installed plugins, even if the cache
+  has been cleared
+- **AND** if the replacement already reached its installed path, Ardent keeps it and completes cleanup
+
+#### Scenario: Only some plugins can be updated
+
+- **WHEN** one replacement fails and another can be installed
+- **THEN** the command reports both the successful replacement and the failed plugin and exits with failure

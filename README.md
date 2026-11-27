@@ -42,6 +42,10 @@ with the running executable. This includes disabled plugins. The command replace
 edits and extra files in a fork installed under the same name. A separately named fork keeps its files. Project settings
 and the selection of installed plugins stay as they are.
 
+If one package fails, Ardent names it and reports which other packages it updated. On filesystems that require two
+renames, Ardent temporarily saves the previous package in `.ardent/plugins/.ardent-update-<name>/`. After an
+interruption, run `ardent sync` or `ardent update` to recover. Recovery also works after you clear the cache.
+
 When upgrading an existing project, copy any missing packages listed under `formats` in `.ardent/config.yaml` before the
 first sync. Sync prunes cached structures for files it no longer tracks. For example, if both packages are missing, set
 `ARDENT_RELEASE` to the directory that contains the release executable and run these commands from the project root.

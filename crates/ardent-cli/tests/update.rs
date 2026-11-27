@@ -117,24 +117,8 @@ fn invalid_replacement_keeps_the_working_component() -> io::Result<()> {
     assert_failed_update(release.executable(), project.path())
 }
 
-#[cfg(unix)]
 #[test]
-fn failed_directory_publication_keeps_the_installed_package() -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let release = stage_release()?;
-    let project = temp_dir()?;
-    success(run_init(project.path(), &["--plugins", "markdown"])?);
-    fs::write(release.path().join("plugins/markdown/notes"), "new")?;
-    let parent = project.path().join(".ardent/plugins");
-    let original = fs::metadata(&parent)?.permissions();
-    fs::set_permissions(&parent, fs::Permissions::from_mode(0o555))?;
-    let checked = assert_failed_update(release.executable(), project.path());
-    fs::set_permissions(parent, original)?;
-    checked
-}
-
-#[test]
-fn sync_and_update_wait_for_the_project_lock() -> io::Result<()> {
+fn concurrent_sync_and_update_leave_a_complete_package() -> io::Result<()> {
     let release = stage_release()?;
     let project = temp_dir()?;
     let root = project.path();
@@ -154,12 +138,8 @@ fn sync_and_update_wait_for_the_project_lock() -> io::Result<()> {
             .stderr(Stdio::piped())
             .spawn()
     };
-    let mut update = start("update")?;
-    let mut sync = start("sync")?;
-    std::thread::sleep(std::time::Duration::from_millis(150));
-    assert!(update.try_wait()?.is_none());
-    assert!(sync.try_wait()?.is_none());
-    assert!(!root.join(".ardent/plugins/markdown/notes").exists());
+    let update = start("update")?;
+    let sync = start("sync")?;
     lock.unlock()?;
     success(update.wait_with_output()?);
     success(sync.wait_with_output()?);
@@ -188,5 +168,89 @@ fn updating_inside_the_release_package_excludes_the_project_installation() -> io
     assert!(!installed.join("example/.ardent").exists());
     assert_eq!(fs::read(installed.join("notes"))?, b"new");
     assert!(success(run(release.executable(), &project, "update")?).contains("up to date"));
+    Ok(())
+}
+
+#[test]
+fn reports_each_updated_plugin_even_when_another_fails() -> io::Result<()> {
+    let project = temp_dir()?;
+    let release = stage_release()?;
+    let root = project.path();
+    success(run_init(root, &["--plugins", "markdown,rust"])?);
+    let installed = root.join(".ardent/plugins");
+    let bundled = release.path().join("plugins");
+    fs::write(bundled.join("markdown/notes"), "new")?;
+    let rust = snapshot(&installed.join("rust"))?;
+    fs::write(bundled.join("rust/format.wasm"), "invalid replacement")?;
+    let output = run(release.executable(), root, "update")?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Updated markdown"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot update rust"));
+    assert_eq!(fs::read(installed.join("markdown/notes"))?, b"new");
+    assert_eq!(snapshot(&installed.join("rust"))?, rust);
+
+    fs::copy(
+        installed.join("rust/format.wasm"),
+        bundled.join("rust/format.wasm"),
+    )?;
+    fs::write(bundled.join("rust/notes"), "new")?;
+    fs::remove_file(bundled.join("markdown/format.wasm"))?;
+    let output = run(release.executable(), root, "update")?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Updated rust"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot update markdown"));
+    assert_eq!(fs::read(installed.join("rust/notes"))?, b"new");
+    Ok(())
+}
+
+#[test]
+fn current_project_can_be_checked_with_a_read_only_lock() -> io::Result<()> {
+    let project = temp_dir()?;
+    let root = project.path();
+    let exe = Path::new(env!("CARGO_BIN_EXE_ardent"));
+    success(run_init(root, &["--plugins", "markdown"])?);
+    success(run(exe, root, "sync")?);
+    let lock = root.join(".ardent/cache/lock");
+    let original = fs::metadata(&lock)?.permissions();
+    let mut read_only = original.clone();
+    read_only.set_readonly(true);
+    fs::set_permissions(&lock, read_only)?;
+    let result = run(exe, root, "update");
+    fs::set_permissions(&lock, original)?;
+    assert!(success(result?).contains("up to date"));
+    Ok(())
+}
+
+#[test]
+fn sync_and_update_recover_after_cache_removal_at_either_rename() -> io::Result<()> {
+    let binary = Path::new(env!("CARGO_BIN_EXE_ardent"));
+    for command in ["sync", "update"] {
+        for published in [false, true] {
+            let project = temp_dir()?;
+            let root = project.path();
+            success(run_init(root, &["--plugins", "markdown"])?);
+            fs::write(root.join("notes.md"), "# Notes\n")?;
+            success(run(binary, root, "sync")?);
+            let ardent = root.join(".ardent");
+            let installed = ardent.join("plugins/markdown");
+            let journal = ardent.join("plugins/.ardent-update-markdown");
+            let marker = journal.join("ardent-plugin-update-v1");
+            fs::create_dir_all(&marker)?;
+            let previous = marker.join("previous");
+            if published {
+                fs::create_dir(&previous)?;
+                fs::write(previous.join("obsolete"), "old package")?;
+            } else {
+                fs::rename(&installed, &previous)?;
+            }
+            fs::remove_dir_all(ardent.join("cache"))?;
+            success(run(binary, root, command)?);
+            assert!(!journal.try_exists()?);
+            assert!(installed.join("format.wasm").is_file());
+            assert!(!installed.join("obsolete").exists());
+            success(run(binary, root, "sync")?);
+            assert!(ardent.join("cache/files/notes.md/structure.yaml").is_file());
+        }
+    }
     Ok(())
 }

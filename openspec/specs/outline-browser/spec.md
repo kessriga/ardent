@@ -233,3 +233,8 @@ browser SHALL clear the notice when a refresh finds that all installed release p
 
 - **WHEN** the reader runs `ardent browse` and each bundled plugin is either absent from the project or current
 - **THEN** the browser shows no update notice
+
+#### Scenario: A different release package cannot be checked
+
+- **WHEN** one installed release plugin differs and the comparison fails for another
+- **THEN** the browser shows the available update and names the failed comparison in its diagnostics

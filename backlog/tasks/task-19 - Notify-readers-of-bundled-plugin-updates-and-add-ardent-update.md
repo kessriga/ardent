@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-27 12:41'
-updated_date: '2026-11-27 14:02'
+updated_date: '2026-11-27 15:13'
 labels: []
 dependencies: []
 references:
@@ -48,6 +48,9 @@ the update when ready.
 2. Add ardent update with staged verification, per-package rollback, and tests for failure and repeat runs.
 3. Show the browser notice and clear it after package changes. Cover both entry points and document the command.
 4. Run the project gate and archive the change in the implementation PR.
+
+Resolve review findings for interruption, private staging, per-package results, read-only comparisons, cleanup and
+deterministic failure and lock tests. Recheck the published PR.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -56,13 +59,18 @@ the update when ready.
 Confirmed during review: running `ardent update` authorizes complete replacement of a bundled format plugin, including
 local edits, extra files and a fork installed under the same plugin identity. The command requires no second prompt.
 Separately named plugins keep their files.
+
+The approved recovery directory under .ardent/plugins keeps the previous package across cache deletion. Sync, browse and
+update recover under the project lock. Windows uses an owner-only access control list during staging and restores
+project access on publication.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-The browser names differing installed release plugins and clears the notice after an external update. Running ardent
-update verifies and replaces each complete package under the project lock. The tests cover same-version builds, local
-forks, disabled and third-party plugins, repeat runs, concurrent sync, and recovery from validation and publication
-failures. The full just check gate passed on macOS.
+The browser names available plugin updates alongside comparison failures. The update command verifies complete packages,
+reports each success or failure, and preserves the previous package on a failed replacement. Tests cover interruption on
+either side of publication, cache deletion, read-only checks, cleanup and lock ownership. On macOS, just check passed
+all 201 Rust tests and both recipe tests. All eight specs passed strict validation. The Windows target passed Clippy
+with warnings denied. Native Windows runtime behavior remains unverified.
 <!-- SECTION:FINAL_SUMMARY:END -->
