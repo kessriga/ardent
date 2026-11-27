@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-24 13:08'
-updated_date: '2026-11-27 19:35'
+updated_date: '2026-11-27 21:11'
 labels: []
 milestone: m-3
 dependencies:
@@ -65,14 +65,19 @@ compilation cache holds derived code and has a separate choice of scope.
    package reuse, cancellation and scripted compatibility.
 
 6. Expose project scope for scripted init, document the flag, and test where it writes.
+
+7. Fix the five PR review findings and verify private staging, shared package reuse, browser refresh, terminal resizing
+   and cache paths.
 <!-- SECTION:PLAN:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Projects enable their own formats, inherit user settings by key and can pin a project package. Interactive init offers
-user or project installation with every plugin initially unchecked. Scripts can pass `--project` with `--plugins` to
-make the project destination explicit. The serial macOS gate passed with 223 Rust tests and two recipe tests. Tests
-cover shared package preservation, concurrent installation, cancellation, retry and both scripted spellings. Linux and
-Windows workspace checks passed.
+Projects can share user settings and format plugins or pin a package locally. Interactive init defaults to per-user
+installation with all plugins unchecked. Scripts can pass `--project` with `--plugins` to make project scope explicit.
+Init stages packages privately, reuses verified packages through symlinked configuration directories, and adapts its
+scope picker when the terminal shrinks. Browse refreshes when user settings change or a shared plugin appears or
+disappears. The compilation cache accepts resolved paths outside the checkout. The macOS workspace checks passed with
+230 Rust tests and two recipe tests. Linux and Windows workspace targets passed compilation checks. All eight OpenSpec
+specifications passed strict validation.
 <!-- SECTION:FINAL_SUMMARY:END -->
