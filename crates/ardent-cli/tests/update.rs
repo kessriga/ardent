@@ -323,6 +323,33 @@ fn recovery_restores_into_an_empty_path_and_keeps_unrelated_files() -> io::Resul
 }
 
 #[test]
+fn update_ignores_a_manifest_only_in_a_recognized_recovery_directory() -> io::Result<()> {
+    let project = temp_dir()?;
+    let root = project.path();
+    let binary = Path::new(env!("CARGO_BIN_EXE_ardent"));
+    success(run_init(root, &["--plugins", "markdown"])?);
+    let installed = root.join(".ardent/plugins/markdown");
+    let journal = installed.with_file_name(".ardent-update-markdown");
+    let marker = journal.join("ardent-plugin-update-v1");
+    fs::create_dir(&journal)?;
+    let unrelated = journal.join("plugin.yaml");
+    fs::write(&unrelated, "reader's copy")?;
+
+    let output = run(binary, root, "update")?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains(".ardent-update-markdown"));
+
+    fs::create_dir(&marker)?;
+    fs::rename(&installed, marker.join("previous"))?;
+    for command in ["update", "sync", "update"] {
+        success(run(binary, root, command)?);
+        assert!(installed.join("format.wasm").is_file());
+        assert_eq!(fs::read_to_string(&unrelated)?, "reader's copy");
+    }
+    Ok(())
+}
+
+#[test]
 fn ambiguous_recovery_keeps_both_copies_and_scans_healthy_formats() -> io::Result<()> {
     let project = temp_dir()?;
     let root = project.path();
@@ -360,6 +387,9 @@ fn update_preserves_shared_access_under_a_private_umask() -> io::Result<()> {
     let binary = release.executable();
     success(run_init(root, &["--plugins", "markdown"])?);
     let installed = root.join(".ardent/plugins/markdown");
+    let ardent = root.join(".ardent");
+    fs::set_permissions(&ardent, fs::Permissions::from_mode(0o775))?;
+    assert!(!ardent.join("cache").exists());
     fs::set_permissions(&installed, fs::Permissions::from_mode(0o775))?;
     fs::set_permissions(
         installed.join("plugin.yaml"),
@@ -382,6 +412,17 @@ fn update_preserves_shared_access_under_a_private_umask() -> io::Result<()> {
     ] {
         assert_eq!(
             fs::metadata(installed.join(path))?.permissions().mode() & 0o777,
+            mode,
+            "{path}"
+        );
+    }
+    for (path, mode) in [
+        ("cache", 0o775),
+        ("cache/tmp", 0o775),
+        ("cache/lock", 0o664),
+    ] {
+        assert_eq!(
+            fs::metadata(ardent.join(path))?.permissions().mode() & 0o777,
             mode,
             "{path}"
         );
@@ -470,6 +511,12 @@ fn update_keeps_named_access_and_inherits_it_for_new_paths() -> io::Result<()> {
 #[cfg(target_os = "linux")]
 #[test]
 fn update_preserves_posix_acls_and_the_inherited_mask() -> io::Result<()> {
+    check_posix_acl_inheritance(0o775, 4)?;
+    check_posix_acl_inheritance(0o755, 7)
+}
+
+#[cfg(target_os = "linux")]
+fn check_posix_acl_inheritance(parent_mode: u32, mask: u16) -> io::Result<()> {
     use rustix::fs::{self as xattr, XattrFlags};
     use std::os::unix::fs::PermissionsExt;
 
@@ -479,7 +526,7 @@ fn update_preserves_posix_acls_and_the_inherited_mask() -> io::Result<()> {
         (1_u16, 7_u16, u32::MAX),
         (2, 6, 65534),
         (4, 7, u32::MAX),
-        (16, 4, u32::MAX),
+        (16, mask, u32::MAX),
         (32, 0, u32::MAX),
     ] {
         acl.extend(tag.to_le_bytes());
@@ -490,15 +537,18 @@ fn update_preserves_posix_acls_and_the_inherited_mask() -> io::Result<()> {
     let release = stage_release()?;
     let root = project.path();
     success(run_init(root, &["--plugins", "markdown"])?);
-    let installed = root.join(".ardent/plugins/markdown");
+    let ardent = root.join(".ardent");
+    let installed = ardent.join("plugins/markdown");
     let manifest = installed.join("plugin.yaml");
-    fs::set_permissions(&installed, fs::Permissions::from_mode(0o775))?;
-    xattr::setxattr(
-        &installed,
-        "system.posix_acl_default",
-        &acl,
-        XattrFlags::empty(),
-    )?;
+    for parent in [&installed, &ardent] {
+        fs::set_permissions(parent, fs::Permissions::from_mode(parent_mode))?;
+        xattr::setxattr(
+            parent,
+            "system.posix_acl_default",
+            &acl,
+            XattrFlags::empty(),
+        )?;
+    }
     xattr::setxattr(
         &manifest,
         "system.posix_acl_access",
@@ -514,12 +564,16 @@ fn update_preserves_posix_acls_and_the_inherited_mask() -> io::Result<()> {
         Ok(value)
     };
     let key = "system.posix_acl_access";
+    let new_directory_acl = read_acl(&reference, key)?;
     let new_file_acl = read_acl(&reference.join("guide"), key)?;
     let docs = release.path().join("plugins/markdown/docs");
     fs::create_dir(&docs)?;
     fs::write(docs.join("guide"), "guide")?;
     success(run(release.executable(), root, "update")?);
     assert_eq!(read_acl(&manifest, key)?, acl);
+    assert_eq!(read_acl(&ardent.join("cache"), key)?, new_directory_acl);
+    assert_eq!(read_acl(&ardent.join("cache/lock"), key)?, new_file_acl);
+    assert_eq!(read_acl(&installed.join("docs"), key)?, new_directory_acl);
     assert_eq!(
         read_acl(&installed.join("docs"), "system.posix_acl_default")?,
         acl

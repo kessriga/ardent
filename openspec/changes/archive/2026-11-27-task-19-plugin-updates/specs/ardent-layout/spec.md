@@ -81,3 +81,16 @@ that plugin's previous package usable. A concurrent Ardent sync SHALL see a comp
 - **WHEN** a reader updates an installed plugin that other project members can read
 - **THEN** existing paths retain their sharing permissions and new files and directories inherit the containing
   directory's access policy
+- **AND** if the updater cannot preserve an existing owner, it reports failure and leaves the original package installed
+- **AND** when update creates `cache/`, `cache/tmp/` or `cache/lock`, each inherits project access
+
+#### Scenario: Another Windows reader recovers a published package
+
+- **WHEN** the updater stops after publishing a replacement and before removing the backup
+- **THEN** existing package paths already have their original access rules and new paths inherit their directory's rules
+- **AND** a reader with project access can verify the replacement and finish recovery
+
+#### Scenario: A backup contains an unrelated manifest file
+
+- **WHEN** a marked update backup contains an unrelated `plugin.yaml`
+- **THEN** sync, browse and update preserve that file and recover the package

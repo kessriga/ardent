@@ -135,6 +135,7 @@ version = "0.0.0"
 dependencies = [
  "blake3",
  "jiff",
+ "rustix",
  "serde",
  "serde-saphyr",
  "tempfile",

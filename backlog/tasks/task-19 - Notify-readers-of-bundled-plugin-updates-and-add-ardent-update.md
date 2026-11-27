@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-27 12:41'
-updated_date: '2026-11-27 16:23'
+updated_date: '2026-11-27 16:59'
 labels: []
 dependencies: []
 references:
@@ -55,6 +55,10 @@ deterministic failure and lock tests. Recheck the published PR.
 Cover the second review cases with regression tests. Validate project configuration and installed manifests, restore
 only proven updates without removing unrelated files, isolate recovery failures by format, preserve Unix package access,
 and share release-root checks. Run the full gate and update PR 22.
+
+Fix the six third-review findings: prepare Windows package permissions before publication, preserve per-file access,
+keep marked recovery directories out of manifest discovery, share newly created cache and lock paths, retain Unix file
+ownership, and honor Linux default ACLs. Add regressions, run the gate and cross-target checks, and publish to PR 22.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -71,15 +75,20 @@ project access on publication.
 Portable recovery now verifies the replacement before retiring the previous package and preserves unrelated files. An
 ambiguous package stays available for manual recovery while healthy formats sync. The macOS-only exacl dependency
 preserves named access rules and their inheritance on shared installations.
+
+The third review fixed Windows access rules before publication, marked backup discovery, Unix ownership, shared cache
+and lock creation, and Linux default ACL inheritance. The core layout uses the existing rustix dependency for Unix group
+changes, Linux ACL queries and exclusive directory renames. An update that cannot retain the previous owner fails before
+publication.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-The browser identifies available format plugin updates and reports comparison errors. The update command validates
-project configuration and plugin names, preserves shared package access, and uses the same release-root checks as init.
-After an interruption the next command can restore the original or verify the replacement. Ambiguous recovery keeps both
-copies. On macOS the full gate passed 209 Rust tests and both recipe tests with two test threads. All eight specs passed
-strict validation. The Linux and Windows CLI and test targets passed Clippy with warnings denied. Native runtime tests
-ran on macOS.
+The browser reports available format plugin updates. The update command verifies complete packages and preserves working
+originals on failure. On Windows it prepares and verifies per-path access rules before publication. On Unix it preserves
+ownership and project access to the cache and lock. Recovery preserves unrelated files in marked backups and lets
+healthy formats sync. The macOS gate passed 212 Rust tests and both recipe tests. All eight OpenSpec specs passed strict
+validation. Linux and Windows passed workspace Clippy with all test targets. PowerShell parsed the Windows scripts.
+Native Linux and Windows execution remains unverified.
 <!-- SECTION:FINAL_SUMMARY:END -->

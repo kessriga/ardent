@@ -39,13 +39,18 @@ eligible package, including removal of obsolete files.
   packages. Restore the original when the installed path is missing or empty. Record a BLAKE3 digest of the staged
   paths, entry types and file contents in the backup directory before moving the original. Retire the backup only when
   the installed tree matches that digest. For older backups without a digest, compare against the running release.
-  Preserve unrelated entries during cleanup. Keeping the backup outside the cache lets the reader clear the cache during
-  an interruption.
+  Exclude marked backups from manifest discovery, even if they contain a file named `plugin.yaml`. Preserve unrelated
+  entries during cleanup. Keeping the backup outside the cache lets the reader clear the cache during an interruption.
 - Read the project configuration before recovery or replacement and check installed manifests for reserved names. Keep a
   format with a recovery conflict out of the sync while retaining cached structures and scanning healthy formats.
-- Preserve group and access modes for existing Unix package paths. Honor named access rules on macOS and POSIX access
-  lists on Linux. New entries inherit sharing permissions from the installed directory. Use the native macOS ACL API
-  through `exacl` to retain named rules and inheritance flags.
+- Before publication, copy each existing Windows file or directory's access rules to the staged replacement. Let new
+  paths inherit from the corresponding directory. This lets another reader verify a published package after an
+  interruption.
+- Preserve the owner, group and access modes for existing Unix package paths. If ownership cannot be retained, fail
+  before publication. Create the Unix cache, lock and temporary directory with the project's sharing permissions. Keep
+  each update's staging directory private. Honor named access rules on macOS and POSIX access lists on Linux. New
+  entries inherit sharing permissions from the installed directory. Use the native macOS ACL API through `exacl` to
+  retain named rules and inheritance flags.
 
 ## Risks and rollout
 

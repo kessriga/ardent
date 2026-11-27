@@ -6,12 +6,13 @@ use super::staging_dir;
 use crate::release::{self, ReleasePlugin};
 use ardent_core::layout;
 
+const JOURNAL_PREFIX: &str = ".ardent-update-";
 const MARKER: &str = "ardent-plugin-update-v1";
 const CANDIDATE: &str = "candidate-";
 const PREVIOUS: &str = "previous";
 
 fn journal(installed: &Path) -> PathBuf {
-    let mut name = std::ffi::OsString::from(".ardent-update-");
+    let mut name = std::ffi::OsString::from(JOURNAL_PREFIX);
     name.push(installed.file_name().unwrap_or_default());
     installed.with_file_name(name)
 }
@@ -28,23 +29,32 @@ fn directory(path: &Path) -> io::Result<bool> {
     }
 }
 
+fn has_marker(path: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => directory(&path.join(MARKER)),
+        Ok(_) => Ok(false),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
+/// A marked backup can retain unrelated files after its pending update has been recovered.
+pub(crate) fn is_journal(ardent: &Path, name: &str) -> bool {
+    name.strip_prefix(JOURNAL_PREFIX)
+        .is_some_and(|suffix| release::RELEASE.iter().any(|plugin| plugin.name == suffix))
+        && has_marker(&ardent.join("plugins").join(name)).unwrap_or(false)
+}
+
 pub(super) fn pending(ardent: &Path, name: &str) -> io::Result<bool> {
     let plugins = ardent.join("plugins");
     if !directory(ardent)? || !directory(&plugins)? {
         return Ok(false);
     }
     let path = journal(&plugins.join(name));
-    // A name collision alone does not make a third-party directory ours.
-    match fs::symlink_metadata(&path) {
-        Ok(meta) if meta.is_dir() => {}
-        Ok(_) => return Ok(false),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(err) => return Err(err),
-    }
-    let marker = path.join(MARKER);
-    if !directory(&marker)? {
+    if !has_marker(&path)? {
         return Ok(false);
     }
+    let marker = path.join(MARKER);
     Ok(directory(&marker.join(PREVIOUS))?
         || receipt(&marker)?.is_some()
         || (empty(&marker)? && only_marker(&path)?))
@@ -86,20 +96,10 @@ fn receipt(marker: &Path) -> io::Result<Option<(PathBuf, blake3::Hash)>> {
     Ok(receipt)
 }
 
-fn create_journal_dir(path: &Path) -> io::Result<()> {
-    fs::create_dir(path)?;
-    #[cfg(unix)]
-    if let Err(err) = super::unix::share_journal_directory(path) {
-        fs::remove_dir(path)?;
-        return Err(err);
-    }
-    Ok(())
-}
-
 pub(super) fn start(installed: &Path, digest: blake3::Hash) -> io::Result<PathBuf> {
     let path = journal(installed);
     let marker = path.join(MARKER);
-    match create_journal_dir(&path) {
+    match layout::create_shared_dir(&path) {
         Ok(()) => {}
         Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
             if !directory(&path)? || (!directory(&marker)? && !empty(&path)?) {
@@ -112,7 +112,7 @@ pub(super) fn start(installed: &Path, digest: blake3::Hash) -> io::Result<PathBu
         Err(err) => return Err(err),
     }
     if !directory(&marker)? {
-        create_journal_dir(&marker)?;
+        layout::create_shared_dir(&marker)?;
     }
     if directory(&marker.join(PREVIOUS))? {
         return Err(io::Error::other(format!(
@@ -182,19 +182,6 @@ pub(super) fn publish(
         warn_cleanup(installed, clean_marker(marker, installed), warnings);
         return Err(err);
     }
-    #[cfg(windows)]
-    if let Err(err) = super::windows::restore_access(installed, &previous) {
-        fs::rename(installed, candidate)
-            .and_then(|()| fs::rename(&previous, installed))
-            .map_err(|restore| {
-                io::Error::other(format!(
-                    "{err}; original saved at {}: {restore}",
-                    previous.display()
-                ))
-            })?;
-        warn_cleanup(installed, clean_marker(marker, installed), warnings);
-        return Err(err);
-    }
     let retired = fs::rename(previous, candidate).and_then(|()| clean_marker(marker, installed));
     warn_cleanup(installed, retired, warnings);
     Ok(())
@@ -227,8 +214,21 @@ pub(super) fn recover(
     let marker = journal(&installed).join(MARKER);
     let previous = marker.join(PREVIOUS);
     let has_previous = directory(&previous)?;
-    let has_installed = directory(&installed)?;
-    if !has_installed || (has_previous && empty(&installed)?) {
+    let recovery_error = |err: io::Error| {
+        if !has_previous {
+            return err;
+        }
+        io::Error::new(
+            err.kind(),
+            format!(
+                "{err}; original saved at {}. To restore it, move {} aside and run ardent sync",
+                previous.display(),
+                installed.display(),
+            ),
+        )
+    };
+    let has_installed = directory(&installed).map_err(recovery_error)?;
+    if !has_installed || (has_previous && empty(&installed).map_err(recovery_error)?) {
         if !has_previous {
             return Err(io::Error::other(format!(
                 "missing installed package and backup at {}",
@@ -240,12 +240,8 @@ pub(super) fn recover(
         }
         fs::rename(&previous, &installed)?;
     } else if has_previous {
-        let verified = matches_candidate(ardent, plugin, &installed, &marker).map_err(|err| {
-            io::Error::other(format!(
-                "cannot verify installed package: {err}; original saved at {}",
-                previous.display()
-            ))
-        })?;
+        let verified =
+            matches_candidate(ardent, plugin, &installed, &marker).map_err(recovery_error)?;
         if !verified {
             return Err(io::Error::other(format!(
                 "installed package differs from the replacement; original saved at {}",
@@ -253,7 +249,8 @@ pub(super) fn recover(
             )));
         }
         #[cfg(windows)]
-        super::windows::restore_access(&installed, &previous)?;
+        // Older Windows updaters published before restoring project permissions.
+        super::windows::repair_access(&installed, &previous).map_err(recovery_error)?;
         let retired = (|| {
             let tmp = layout::create_dir(ardent, "cache/tmp")?;
             let stage = staging_dir(&tmp)?;

@@ -42,6 +42,10 @@ with the running executable. This includes disabled plugins. The command replace
 edits and extra files in a fork installed under the same name. A separately named fork keeps its files. Project settings
 and the selection of installed plugins stay as they are.
 
+In a shared project, Ardent preserves access rules for existing package files and directories. On Unix, an update that
+cannot retain an existing owner leaves that plugin in place. Run the update with an account that can preserve ownership
+throughout the package.
+
 If one package fails, Ardent names it and reports which other packages it updated. On filesystems that require two
 renames, Ardent temporarily saves the previous package in `.ardent/plugins/.ardent-update-<name>/`. After an
 interruption, run `ardent sync` or `ardent update` to recover. Recovery also works after you clear the cache. If the

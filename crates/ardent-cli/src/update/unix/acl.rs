@@ -100,21 +100,18 @@ pub(super) fn copy(
         let default = posix::get(old.unwrap_or(parent), DEFAULT)?;
         posix::set(new, DEFAULT, default.as_deref())?;
     }
-    // chmod changes a POSIX ACL's effective mask. An inherited default can be stricter than the parent mode.
+    // Linux inherits the parent's default ACL subject to the requested creation mode.
     if old.is_none() && access.is_some() {
-        use std::os::unix::fs::PermissionsExt;
-        return Ok(mode & (new.metadata()?.permissions().mode() | !0o777));
+        return Ok(inherited_mode(&new.metadata()?, mode));
     }
     Ok(mode)
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
-pub(super) fn inherited_directory_mode(path: &Path, parent: &Path, mode: u32) -> io::Result<u32> {
-    use std::os::unix::fs::PermissionsExt;
-    if posix::get(parent, posix::DEFAULT)?.is_some() {
-        return Ok(mode & (path.metadata()?.permissions().mode() | !0o777));
-    }
-    Ok(mode)
+fn inherited_mode(meta: &std::fs::Metadata, mode: u32) -> u32 {
+    use std::os::unix::fs::MetadataExt;
+    let creation = if meta.is_dir() { 0o777 } else { 0o666 };
+    (mode & !0o777) | (meta.mode() & creation)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "android")))]

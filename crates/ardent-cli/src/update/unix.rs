@@ -7,6 +7,7 @@ use std::path::Path;
 
 #[derive(Clone, Copy)]
 struct Access {
+    owner: Option<u32>,
     group: u32,
     mode: u32,
 }
@@ -16,6 +17,7 @@ impl Access {
         // A release replaces the contents. Never transfer set-user-ID or set-group-ID to a new file.
         let mask = if meta.is_dir() { 0o3777 } else { 0o777 };
         Self {
+            owner: Some(meta.uid()),
             group: meta.gid(),
             mode: meta.mode() & mask,
         }
@@ -24,31 +26,26 @@ impl Access {
     fn child(self, directory: bool) -> Self {
         let mask = if directory { 0o2777 } else { 0o666 };
         Self {
+            owner: None,
             mode: self.mode & mask,
-            ..self
+            group: self.group,
         }
     }
 
     fn apply(self, path: &Path) -> io::Result<()> {
-        if fs::symlink_metadata(path)?.gid() != self.group {
-            unix::chown(path, None, Some(self.group))?;
+        let meta = fs::symlink_metadata(path)?;
+        let owner = self.owner.filter(|uid| *uid != meta.uid());
+        let group = (self.group != meta.gid()).then_some(self.group);
+        if owner.is_some() || group.is_some() {
+            unix::chown(path, owner, group).map_err(|err| {
+                io::Error::new(
+                    err.kind(),
+                    format!("cannot preserve ownership of {}: {err}", path.display()),
+                )
+            })?;
         }
         fs::set_permissions(path, fs::Permissions::from_mode(self.mode))
     }
-}
-
-/// A collaborator who can replace packages must also be able to recover an interrupted rename.
-pub(super) fn share_journal_directory(path: &Path) -> io::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::other("missing journal parent"))?;
-    let access = Access::existing(&fs::symlink_metadata(parent)?).child(true);
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    let access = Access {
-        mode: acl::inherited_directory_mode(path, parent, access.mode)?,
-        ..access
-    };
-    access.apply(path)
 }
 
 /// Match existing paths and let added entries inherit the containing directory's sharing policy.
@@ -89,4 +86,35 @@ pub(super) fn preserve_access(candidate: &Path, installed: &Path) -> io::Result<
         access.apply(&path)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replacement_keeps_the_original_owner_or_fails_before_changing_access() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let staged = dir.path().join("staged");
+        fs::File::create_new(&staged)?;
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o600))?;
+        let creator = staged.metadata()?;
+        // A root-owned entry supplies a different original owner in an unprivileged test run.
+        let original = fs::metadata("/")?;
+        let mut access = Access::existing(&original);
+        access.group = creator.gid();
+        access.mode = 0o644;
+        match access.apply(&staged) {
+            Ok(()) => assert_eq!(staged.metadata()?.uid(), original.uid()),
+            Err(err) => {
+                assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+                assert_eq!(staged.metadata()?.mode() & 0o777, 0o600);
+            }
+        }
+        let added = dir.path().join("added");
+        fs::File::create_new(&added)?;
+        access.child(false).apply(&added)?;
+        assert_eq!(added.metadata()?.uid(), creator.uid());
+        Ok(())
+    }
 }

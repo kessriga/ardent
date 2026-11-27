@@ -12,6 +12,7 @@ use crate::release::{self, RELEASE, ReleasePlugin};
 use crate::sync;
 
 mod transaction;
+pub(crate) use transaction::is_journal;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
@@ -80,8 +81,9 @@ fn inspect(ardent: &Path, release: &Path) -> Result<Report> {
 fn validate_project(root: &Path, ardent: &Path) -> Result<()> {
     sync::validate_config(root).map_err(|err| err.to_string())?;
     let installed = InstalledPackages::discover(ardent).map_err(|err| err.to_string())?;
-    let errors =
-        installed.check_other_manifests(|name| RELEASE.iter().any(|plugin| plugin.name == name));
+    let errors = installed.check_other_manifests(|name| {
+        RELEASE.iter().any(|plugin| plugin.name == name) || is_journal(ardent, name)
+    });
     if !errors.is_empty() {
         return Err(errors
             .iter()
@@ -193,6 +195,8 @@ fn replace(
         let installed = ardent.join("plugins").join(plugin.name);
         #[cfg(unix)]
         unix::preserve_access(&candidate, &installed).map_err(|e| e.to_string())?;
+        #[cfg(windows)]
+        windows::prepare_access(&candidate, &installed).map_err(|e| e.to_string())?;
         publish(&candidate, &installed, warnings).map_err(|e| e.to_string())
     });
     close_stage(stage, plugin.name, warnings);

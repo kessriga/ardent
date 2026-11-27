@@ -112,7 +112,9 @@ pub(crate) fn run_at(root: &Path, mode: Run) -> Result<Report, SyncError> {
     report.errors.extend(
         packages
             .check_other_manifests(|name| {
-                config.formats.contains_key(name) || blocked.contains(name)
+                config.formats.contains_key(name)
+                    || blocked.contains(name)
+                    || crate::update::is_journal(&ardent_dir, name)
             })
             .into_iter()
             .map(|err| err.to_string()),
@@ -280,12 +282,7 @@ pub(crate) fn lock(ardent_dir: &Path) -> Result<File, SyncError> {
     let io_error = |path: PathBuf| move |source| SyncError::Io { path, source };
     create_dir(ardent_dir, CACHE_DIR)?;
     let path = ardent_dir.join(LOCK_FILE);
-    let file = File::options()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&path)
-        .map_err(io_error(path.clone()))?;
+    let file = layout::open_lock(&path).map_err(io_error(path.clone()))?;
     file.lock().map_err(io_error(path))?;
     Ok(file)
 }

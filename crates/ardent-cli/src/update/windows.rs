@@ -23,20 +23,20 @@ pub(super) fn pin_directory(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-fn permissions(action: &str, path: &Path, previous: Option<&Path>) -> io::Result<()> {
+fn powershell(script: &str) -> io::Result<Command> {
     let system =
         std::env::var_os("SystemRoot").ok_or_else(|| io::Error::other("missing SystemRoot"))?;
     let shell = Path::new(&system).join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
     let mut cmd = Command::new(shell);
-    cmd.args([
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        include_str!("permissions.ps1"),
-    ])
-    .env("ARDENT_ACL_ACTION", action)
-    .env("ARDENT_ACL_PATH", path)
-    .env_remove("ARDENT_PREVIOUS_ACL");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", script]);
+    Ok(cmd)
+}
+
+fn permissions(action: &str, path: &Path, previous: Option<&Path>) -> io::Result<()> {
+    let mut cmd = powershell(include_str!("permissions.ps1"))?;
+    cmd.env("ARDENT_ACL_ACTION", action)
+        .env("ARDENT_ACL_PATH", path)
+        .env_remove("ARDENT_PREVIOUS_ACL");
     if let Some(previous) = previous {
         cmd.env("ARDENT_PREVIOUS_ACL", previous);
     }
@@ -59,6 +59,13 @@ pub(super) fn private_directory(path: &Path) -> io::Result<File> {
     Ok(pin)
 }
 
-pub(super) fn restore_access(installed: &Path, previous: &Path) -> io::Result<()> {
-    permissions("restore", installed, Some(previous))
+pub(super) fn prepare_access(candidate: &Path, installed: &Path) -> io::Result<()> {
+    permissions("prepare", candidate, Some(installed))
 }
+
+pub(super) fn repair_access(installed: &Path, previous: &Path) -> io::Result<()> {
+    permissions("repair", installed, Some(previous))
+}
+
+#[cfg(test)]
+mod tests;
