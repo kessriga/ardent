@@ -23,10 +23,16 @@ pub(super) struct Changes {
     polling: bool,
 }
 
+pub(super) struct Batch {
+    pub warnings: Vec<String>,
+    pub check_plugins: bool,
+}
+
 /// Coalesce notifications at the producer. A refresh waiting on the project lock can take arbitrarily long.
 #[derive(Default)]
 struct Pending {
     since: Option<Instant>,
+    plugins_changed: bool,
     discovery: Option<Arc<Discovery>>,
     warnings: BTreeSet<String>,
     reported: BTreeSet<String>,
@@ -38,6 +44,12 @@ impl Pending {
     fn record(&mut self, event: notify::Result<Event>, cache: &Path) {
         match event {
             Ok(event) => {
+                let plugins = cache.with_file_name("plugins");
+                self.plugins_changed |= event.need_rescan()
+                    || event
+                        .paths
+                        .iter()
+                        .any(|path| path.starts_with(&plugins) || plugins.starts_with(path));
                 self.reported.clear();
                 for path in event.paths {
                     self.problem_paths.remove(&path);
@@ -121,7 +133,7 @@ impl Changes {
     }
 
     /// Return new path diagnostics when a batch of changes needs a sync.
-    pub(super) fn ready(&mut self) -> io::Result<Option<Vec<String>>> {
+    pub(super) fn ready(&mut self) -> io::Result<Option<Batch>> {
         let rules_changed = self.rules.changed(&self.root);
         let mut pending = self
             .pending
@@ -130,7 +142,10 @@ impl Changes {
         if rules_changed {
             pending.since.get_or_insert_with(Instant::now);
         }
-        pending.take_ready()
+        Ok(pending.take_ready()?.map(|warnings| Batch {
+            warnings,
+            check_plugins: std::mem::take(&mut pending.plugins_changed),
+        }))
     }
 }
 

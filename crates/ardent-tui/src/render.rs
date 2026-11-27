@@ -21,15 +21,24 @@ pub(super) struct Paging {
 
 pub(super) fn draw(frame: &mut Frame<'_>, browser: &Browser) -> Paging {
     let area = frame.area();
-    let hints = key_hints(browser);
-    let footer = footer(hints.as_slice(), area.width.into(), area.height.into());
+    let (status, diagnostic) = match browser.list.update_notice.as_deref() {
+        Some(text) if text.len() <= usize::from(area.width) && area.height >= 8 => {
+            (Some(text), None)
+        }
+        notice => (None, notice),
+    };
+    let hints = key_hints(browser, diagnostic.is_some());
+    let mut footer = footer(hints.as_slice(), area.width.into(), area.height.into());
+    if let Some(text) = status {
+        footer.insert(0, text.to_owned());
+    }
     let [content, help] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(footer.len() as u16)]).areas(area);
     frame.render_widget(Paragraph::new(footer.join("\n")), help);
 
     if area.width < 60 {
         return match browser.focus {
-            Focus::Explorer => explorer(frame, content, browser),
+            Focus::Explorer => explorer(frame, content, browser, diagnostic),
             Focus::Document => document(frame, content, browser),
         };
     }
@@ -39,7 +48,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, browser: &Browser) -> Paging {
     let divider = Block::default().borders(Borders::RIGHT);
     let inside = divider.inner(sidebar);
     frame.render_widget(divider, sidebar);
-    let messages = explorer(frame, inside, browser);
+    let messages = explorer(frame, inside, browser, diagnostic);
     let reading = document(frame, reader, browser);
     match browser.focus {
         Focus::Explorer => messages,
@@ -47,7 +56,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, browser: &Browser) -> Paging {
     }
 }
 
-fn key_hints(browser: &Browser) -> Vec<&'static str> {
+fn key_hints(browser: &Browser, has_notice: bool) -> Vec<&'static str> {
     let mut keys = match browser.focus {
         Focus::Explorer => vec!["Arrows navigate", "Enter open"],
         Focus::Document => match browser.screen() {
@@ -56,7 +65,7 @@ fn key_hints(browser: &Browser) -> Vec<&'static str> {
             None => Vec::new(),
         },
     };
-    if browser.focus == Focus::Explorer && !browser.list.messages.is_empty() {
+    if browser.focus == Focus::Explorer && (has_notice || !browser.list.messages.is_empty()) {
         keys.push("PgUp/PgDn messages");
     }
     if browser.open_path().is_some() {
@@ -80,11 +89,11 @@ fn heading(frame: &mut Frame<'_>, area: Rect, title: &str, focused: bool) -> Rec
     body
 }
 
-fn explorer(frame: &mut Frame<'_>, area: Rect, browser: &Browser) -> Paging {
+fn explorer(frame: &mut Frame<'_>, area: Rect, browser: &Browser, notice: Option<&str>) -> Paging {
     let area = heading(frame, area, "Explorer", browser.focus == Focus::Explorer);
     let entries = browser.explorer.rows();
     let list_height = entries.len().max(1).min(usize::from(area.height));
-    let list_height = if browser.list.messages.is_empty() {
+    let list_height = if browser.list.messages.is_empty() && notice.is_none() {
         list_height
     } else {
         // Keep at least one row for messages, even when the explorer fills the pane.
@@ -129,10 +138,9 @@ fn explorer(frame: &mut Frame<'_>, area: Rect, browser: &Browser) -> Paging {
         });
         selected_list(frame, files, items, selected.saturating_sub(start));
     }
-    let diagnostics = browser
-        .list
-        .messages
-        .iter()
+    let diagnostics = notice
+        .into_iter()
+        .chain(browser.list.messages.iter().map(String::as_str))
         .flat_map(|msg| wrapped(msg, messages.width.into()));
     page(
         frame,
@@ -384,6 +392,7 @@ mod tests {
         let list = FileList {
             files: vec![("a.md".into(), None)],
             messages: vec![],
+            update_notice: None,
         };
         let mut browser = Browser::new(list);
         let load = |path: &str| {
@@ -416,6 +425,7 @@ mod tests {
         let mut browser = Browser::new(FileList {
             files: vec![("a.md".into(), None)],
             messages: vec![],
+            update_notice: None,
         });
         let first_row = format!("{}❤️", "x".repeat(38));
         let text = format!("{first_row}Z");
@@ -510,6 +520,7 @@ mod tests {
         let browser = Browser::new(FileList {
             files: vec![("long_module_name.rs".into(), Some("syntax error".into()))],
             messages: vec![],
+            update_notice: None,
         });
         let rows = snapshot(&browser, 60, 14).0;
         let sidebar = rows[1].split('│').next().expect("sidebar");

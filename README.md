@@ -36,6 +36,23 @@ In a script, pass the format names explicitly. Use `--plugins ''` to start with 
 ardent init --plugins markdown,rust && ardent sync
 ```
 
+The browser names installed plugins that differ from the running release. The notice clears after you update them. Run
+`ardent update` from anywhere in a project to replace installed Markdown and Rust format plugins with the copies bundled
+with the running executable. This includes disabled plugins. The command replaces the whole package, including local
+edits and extra files in a fork installed under the same name. A separately named fork keeps its files. Project settings
+and the selection of installed plugins stay as they are.
+
+In a shared project, Ardent preserves access rules for existing package files and directories. On Unix, an update that
+cannot retain an existing owner leaves that plugin in place. Run the update with an account that can preserve ownership
+throughout the package.
+
+If one package fails, Ardent names it and reports which other packages it updated. On filesystems that require two
+renames, Ardent temporarily saves the previous package in `.ardent/plugins/.ardent-update-<name>/`. After an
+interruption, run `ardent sync` or `ardent update` to recover. Recovery also works after you clear the cache. If the
+installed directory contains files Ardent cannot identify as the staged replacement, it leaves both copies in place and
+prints the backup path. Move the installed directory aside, then run `ardent sync` to restore the backup. Other formats
+remain available while you resolve the conflict.
+
 When upgrading an existing project, copy any missing packages listed under `formats` in `.ardent/config.yaml` before the
 first sync. Sync prunes cached structures for files it no longer tracks. For example, if both packages are missing, set
 `ARDENT_RELEASE` to the directory that contains the release executable and run these commands from the project root.

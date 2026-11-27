@@ -1,6 +1,5 @@
 //! `ardent init`: make a directory an Ardent project with the initial content of the spec `ardent-layout`.
 
-mod plugins;
 mod selection;
 
 use std::env;
@@ -11,8 +10,8 @@ use std::path::{Path, PathBuf};
 
 use ardent_core::layout::{self, ARDENT_DIR, CACHE_DIR};
 
-use self::plugins::ReleasePlugin;
 use crate::project_root;
+use crate::release::{self, ReleasePlugin};
 
 const GITIGNORE: &str = "/cache/\n";
 
@@ -129,10 +128,10 @@ fn write_initial_files(
     if selected.is_empty() {
         config.push_str(" {}\n");
     } else {
-        let source = plugins::release_dir()?;
+        let source = release::release_dir()?;
         config.push('\n');
         for plugin in selected {
-            plugin.install(&source, ardent_dir)?;
+            plugin.install(&source, ardent_dir, ardent_dir)?;
             config.push_str(&format!("  {}: {{}}\n", plugin.name));
         }
     }

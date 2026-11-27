@@ -6,6 +6,9 @@ use std::path::{Component, Path, PathBuf};
 
 use tempfile::NamedTempFile;
 
+mod shared;
+pub use shared::{create_shared_dir, open_lock};
+
 /// Name of the directory that marks a project root and holds all Ardent data.
 pub const ARDENT_DIR: &str = ".ardent";
 /// Derived data, relative to `.ardent/`. Git ignores it, and Ardent rebuilds it when it is missing.
@@ -76,10 +79,17 @@ pub fn create_dir(ardent_dir: &Path, relative_path: &str) -> io::Result<PathBuf>
 }
 
 fn create_real_dirs(ardent_dir: &Path, relative_path: &Path) -> io::Result<PathBuf> {
+    let cache = ardent_dir.join(CACHE_DIR);
+    let tmp = cache.join(TMP_DIR);
     let mut dir = ardent_dir.to_path_buf();
     for part in relative_path.components() {
         dir.push(part);
-        if let Err(err) = fs::create_dir(&dir)
+        let created = if dir == cache || dir == tmp {
+            create_shared_dir(&dir)
+        } else {
+            fs::create_dir(&dir)
+        };
+        if let Err(err) = created
             && err.kind() != io::ErrorKind::AlreadyExists
         {
             return Err(at(&dir, err));

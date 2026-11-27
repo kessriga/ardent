@@ -23,6 +23,8 @@ pub struct FileList {
     pub files: Vec<(String, Option<String>)>,
     /// Project-wide errors and warnings to display alongside the file list.
     pub messages: Vec<String>,
+    /// Available release plugin updates and the command to install them.
+    pub update_notice: Option<String>,
 }
 
 impl FileList {
@@ -182,7 +184,7 @@ impl Browser {
     }
 
     fn refresh(&mut self, list: FileList, load: &impl Fn(&str) -> io::Result<Document>) {
-        if self.list.messages != list.messages {
+        if self.list.messages != list.messages || self.list.update_notice != list.update_notice {
             self.diagnostic_scroll = 0;
         }
         if self
@@ -319,6 +321,7 @@ mod tests {
         FileList {
             files: vec![("notes.md".into(), error.map(str::to_owned))],
             messages: Vec::new(),
+            update_notice: None,
         }
     }
 

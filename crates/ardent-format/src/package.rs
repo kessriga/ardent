@@ -167,6 +167,22 @@ impl<'a> InstalledPackages<'a> {
 
     /// Loads an enabled format under the project's sync lock. A missing directory gives `Ok(None)`.
     pub fn load_format(&self, name: &str) -> Result<Option<FormatPlugin>, PluginError> {
+        self.directory(name)?
+            .map(|dir| FormatPlugin::load_directory(self.ardent_dir, &dir, name))
+            .transpose()
+    }
+
+    /// Reports whether the installed manifest identifies a format with this exact name.
+    pub fn contains_format(&self, name: &str) -> Result<bool, PluginError> {
+        let Some(dir) = self.directory(name)? else {
+            return Ok(false);
+        };
+        let path = package_file(&dir, Path::new("plugin.yaml"))?;
+        let (manifest, _) = Manifest::read(&path, name)?;
+        Ok(matches!(manifest, Manifest::Format(_)))
+    }
+
+    fn directory(&self, name: &str) -> Result<Option<PathBuf>, PluginError> {
         config::check_plugin_name(name)?;
         let plugins = self.ardent_dir.join("plugins");
         let Some(dir) = exact_entry(&plugins, &self.names, OsStr::new(name))? else {
@@ -175,7 +191,7 @@ impl<'a> InstalledPackages<'a> {
         if !directory_exists(&dir)? {
             return Err(invalid(&dir, "package directory changed during discovery"));
         }
-        FormatPlugin::load_directory(self.ardent_dir, &dir, name).map(Some)
+        Ok(Some(dir))
     }
 }
 

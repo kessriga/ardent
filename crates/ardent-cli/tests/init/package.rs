@@ -127,27 +127,17 @@ fn requires_exact_spelling_for_release_files() -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
 #[test]
 fn installs_inside_a_selected_package_without_copying_its_output() -> io::Result<()> {
-    use std::os::unix::fs as unix_fs;
-
     let release = stage_release()?;
-    let external = temp_dir()?;
-    let package = external.path();
-    for name in ["plugin.yaml", "format.wasm", "README.md"] {
-        fs::write(package.join(name), name)?;
-    }
-    let source = release.path().join("plugins/rust");
-    fs::rename(&source, source.with_file_name("original-rust"))?;
-    unix_fs::symlink(package, source)?;
+    let package = release.path().join("plugins/rust");
     let project = package.join("example");
     fs::create_dir(&project)?;
     fs::write(project.join("example.rs"), "fn main() {}")?;
     let other = package.join("fixture/.ardent");
     fs::create_dir_all(&other)?;
     fs::write(other.join("config.yaml"), "schema: 1")?;
-    let expected = snapshot(package)?;
+    let expected = snapshot(&package)?;
 
     let output = Command::new(release.executable())
         .args(["init", "--plugins", "markdown,rust"])
