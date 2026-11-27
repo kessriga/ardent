@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -11,6 +12,8 @@ use crate::release::{self, RELEASE, ReleasePlugin};
 use crate::sync;
 
 mod transaction;
+#[cfg(unix)]
+mod unix;
 #[cfg(windows)]
 mod windows;
 
@@ -74,8 +77,23 @@ fn inspect(ardent: &Path, release: &Path) -> Result<Report> {
     Ok(report)
 }
 
+fn validate_project(root: &Path, ardent: &Path) -> Result<()> {
+    sync::validate_config(root).map_err(|err| err.to_string())?;
+    let installed = InstalledPackages::discover(ardent).map_err(|err| err.to_string())?;
+    let errors =
+        installed.check_other_manifests(|name| RELEASE.iter().any(|plugin| plugin.name == name));
+    if !errors.is_empty() {
+        return Err(errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"));
+    }
+    Ok(())
+}
+
 /// Compare under a shared lock when the project already has one. A fresh project needs no cache.
-fn check(ardent: &Path, release: &Path) -> Result<Report> {
+fn check(ardent: &Path, inspect: impl Fn() -> Result<Report>) -> Result<Report> {
     let path = ardent.join(LOCK_FILE);
     let existing = || match fs::File::open(&path) {
         Ok(file) => Ok(Some(file)),
@@ -85,7 +103,7 @@ fn check(ardent: &Path, release: &Path) -> Result<Report> {
     let lock = match existing()? {
         Some(file) => file,
         None => {
-            let initial = inspect(ardent, release);
+            let initial = inspect();
             // A writer may have created the lock during the first comparison.
             let Some(file) = existing()? else {
                 return initial;
@@ -94,14 +112,13 @@ fn check(ardent: &Path, release: &Path) -> Result<Report> {
         }
     };
     lock.lock_shared().map_err(|e| path_error((path, e)))?;
-    inspect(ardent, release)
+    inspect()
 }
 
 pub(super) fn available(root: &Path) -> Result<Report> {
-    check(
-        &root.join(ARDENT_DIR),
-        &release::release_dir().map_err(path_error)?,
-    )
+    let ardent = root.join(ARDENT_DIR);
+    let release = release::release_dir().map_err(path_error)?;
+    check(&ardent, || inspect(&ardent, &release))
 }
 
 pub(super) fn run(working_dir: &Path) -> Result<Report> {
@@ -122,7 +139,10 @@ fn apply(
     {
         return Err(format!("{} must be a directory", ardent.display()));
     }
-    let mut initial = check(&ardent, release)?;
+    let mut initial = check(&ardent, || {
+        validate_project(root, &ardent)?;
+        inspect(&ardent, release)
+    })?;
     if initial.packages.is_empty() && !initial.pending {
         return Ok(initial);
     }
@@ -140,6 +160,7 @@ fn apply(
             return Ok(initial);
         }
     };
+    validate_project(root, &ardent)?;
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
     let blocked = recover(&ardent, &mut warnings, &mut errors);
@@ -169,12 +190,10 @@ fn replace(
     let tmp = layout::create_dir(&ardent, "cache/tmp").map_err(|e| e.to_string())?;
     let stage = staging_dir(&tmp).map_err(|e| e.to_string())?;
     let result = stage_candidate(plugin, root, release, &stage.path).and_then(|candidate| {
-        publish(
-            &candidate,
-            &ardent.join("plugins").join(plugin.name),
-            warnings,
-        )
-        .map_err(|e| e.to_string())
+        let installed = ardent.join("plugins").join(plugin.name);
+        #[cfg(unix)]
+        unix::preserve_access(&candidate, &installed).map_err(|e| e.to_string())?;
+        publish(&candidate, &installed, warnings).map_err(|e| e.to_string())
     });
     close_stage(stage, plugin.name, warnings);
     result
@@ -207,6 +226,11 @@ fn staging_dir(tmp: &Path) -> io::Result<Stage> {
         builder.permissions(fs::Permissions::from_mode(0o700));
     }
     let outer = builder.prefix(".ardent-").tempdir_in(tmp)?;
+    #[cfg(target_os = "macos")]
+    if !exacl::getfacl(outer.path(), None)?.is_empty() {
+        // On macOS an inherited allow rule can grant access beyond mode 0700.
+        exacl::setfacl(&[outer.path()], &[], None)?;
+    }
     #[cfg(windows)]
     let (path, pins) = {
         let parent = windows::pin_directory(outer.path())?;
@@ -228,18 +252,18 @@ pub(crate) fn recover(
     ardent: &Path,
     warnings: &mut Vec<String>,
     errors: &mut Vec<String>,
-) -> Vec<&'static str> {
-    let mut blocked = Vec::new();
+) -> HashSet<&'static str> {
+    let mut blocked = HashSet::new();
     for plugin in RELEASE {
         let result = transaction::pending(ardent, plugin.name).and_then(|pending| {
             if pending {
-                transaction::recover(ardent, plugin.name, warnings)?;
+                transaction::recover(ardent, plugin, warnings)?;
             }
             Ok(())
         });
         if let Err(err) = result {
             errors.push(format!("cannot recover {}: {err}", plugin.name));
-            blocked.push(plugin.name);
+            blocked.insert(plugin.name);
         }
     }
     blocked
@@ -289,6 +313,10 @@ mod tests {
         let root = project.path();
         let ardent = root.join(ARDENT_DIR);
         fs::create_dir(&ardent)?;
+        fs::write(
+            ardent.join("config.yaml"),
+            "schema: 1\nformats: {}\nviews: {}\nexclude: []\n",
+        )?;
         let release = release::release_dir().map_err(|(_, e)| e)?;
         let plugin = &RELEASE[0];
         plugin
@@ -304,8 +332,9 @@ mod tests {
                 lock.try_lock_shared(),
                 Err(TryLockError::WouldBlock)
             ));
+            let marker = transaction::start(target, release::package_digest(candidate)?)?;
             fs::remove_dir_all(candidate)?;
-            transaction::portable(candidate, target, warnings)
+            transaction::publish(candidate, target, &marker, warnings)
         })
         .map_err(io::Error::other)?;
         assert!(called.get());
@@ -380,8 +409,16 @@ mod tests {
     fn candidate_staging_is_private() -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         let parent = tempfile::tempdir()?;
+        #[cfg(target_os = "macos")]
+        {
+            use exacl::{AclEntry, Flag, Perm};
+            let rule = AclEntry::allow_group("everyone", Perm::READ, Flag::DIRECTORY_INHERIT);
+            exacl::setfacl(&[parent.path()], &[rule], None)?;
+        }
         let stage = staging_dir(parent.path())?;
         assert_eq!(stage.path.metadata()?.permissions().mode() & 0o777, 0o700);
+        #[cfg(target_os = "macos")]
+        assert!(exacl::getfacl(&stage.path, None)?.is_empty());
         Ok(())
     }
 }

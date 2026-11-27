@@ -254,3 +254,276 @@ fn sync_and_update_recover_after_cache_removal_at_either_rename() -> io::Result<
     }
     Ok(())
 }
+
+#[test]
+fn invalid_config_prevents_replacement_and_recovery() -> io::Result<()> {
+    let project = temp_dir()?;
+    let root = project.path();
+    let binary = Path::new(env!("CARGO_BIN_EXE_ardent"));
+    success(run_init(root, &["--plugins", "markdown,rust"])?);
+    let ardent = root.join(".ardent");
+    fs::write(ardent.join("plugins/markdown/local"), "keep")?;
+    let marker = ardent.join("plugins/.ardent-update-rust/ardent-plugin-update-v1");
+    fs::create_dir_all(&marker)?;
+    fs::rename(ardent.join("plugins/rust"), marker.join("previous"))?;
+    for config in [
+        "schema: 2\n",
+        "schema: 1\nformats: {}\nviews: {}\nexclude: ['[z-a]']\n",
+    ] {
+        fs::write(ardent.join("config.yaml"), config)?;
+        let before = snapshot(&ardent)?;
+        let output = run(binary, root, "update")?;
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("config.yaml"));
+        assert_eq!(before, snapshot(&ardent)?);
+    }
+    Ok(())
+}
+
+#[test]
+fn check_reports_a_reserved_third_party_plugin() -> io::Result<()> {
+    let project = temp_dir()?;
+    let root = project.path();
+    success(run_init(root, &["--plugins", "markdown"])?);
+    let dir = root.join(".ardent/plugins/structure");
+    fs::create_dir(&dir)?;
+    fs::write(dir.join("plugin.yaml"), "schema: 1\n")?;
+    fs::write(root.join(".ardent/plugins/markdown/local"), "keep")?;
+    let before = snapshot(root)?;
+    let output = run(Path::new(env!("CARGO_BIN_EXE_ardent")), root, "update")?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("structure"));
+    assert_eq!(snapshot(root)?, before);
+    Ok(())
+}
+
+#[test]
+fn recovery_restores_into_an_empty_path_and_keeps_unrelated_files() -> io::Result<()> {
+    let project = temp_dir()?;
+    let root = project.path();
+    success(run_init(root, &["--plugins", "markdown"])?);
+    let installed = root.join(".ardent/plugins/markdown");
+    fs::write(installed.join("local"), "previous")?;
+    let journal = installed.with_file_name(".ardent-update-markdown");
+    let marker = journal.join("ardent-plugin-update-v1");
+    fs::create_dir_all(&marker)?;
+    fs::rename(&installed, marker.join("previous"))?;
+    fs::create_dir(&installed)?;
+    fs::write(journal.join(".DS_Store"), "keep")?;
+    fs::write(marker.join("note"), "also keep")?;
+    fs::write(root.join("notes.md"), "# Hello\n")?;
+    let binary = Path::new(env!("CARGO_BIN_EXE_ardent"));
+    for _ in 0..2 {
+        success(run(binary, root, "sync")?);
+        assert_eq!(fs::read(installed.join("local"))?, b"previous");
+        assert_eq!(fs::read(journal.join(".DS_Store"))?, b"keep");
+        assert_eq!(fs::read(marker.join("note"))?, b"also keep");
+    }
+    Ok(())
+}
+
+#[test]
+fn ambiguous_recovery_keeps_both_copies_and_scans_healthy_formats() -> io::Result<()> {
+    let project = temp_dir()?;
+    let root = project.path();
+    let binary = Path::new(env!("CARGO_BIN_EXE_ardent"));
+    success(run_init(root, &["--plugins", "markdown,rust"])?);
+    fs::write(root.join("notes.md"), "# Old\n")?;
+    success(run(binary, root, "sync")?);
+    let ardent = root.join(".ardent");
+    let installed = ardent.join("plugins/markdown");
+    let marker = installed
+        .with_file_name(".ardent-update-markdown")
+        .join("ardent-plugin-update-v1");
+    fs::create_dir_all(&marker)?;
+    fs::rename(&installed, marker.join("previous"))?;
+    fs::create_dir(&installed)?;
+    fs::write(installed.join("local"), "keep this too")?;
+    fs::write(root.join("code.rs"), "fn okay() {}\n")?;
+    let output = run(binary, root, "sync")?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("previous"));
+    assert!(marker.join("previous/plugin.yaml").is_file());
+    assert!(installed.join("local").is_file());
+    assert!(ardent.join("cache/files/code.rs/structure.yaml").is_file());
+    assert!(ardent.join("cache/files/notes.md/structure.yaml").is_file());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn update_preserves_shared_access_under_a_private_umask() -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let release = stage_release()?;
+    let project = temp_dir()?;
+    let root = project.path();
+    let binary = release.executable();
+    success(run_init(root, &["--plugins", "markdown"])?);
+    let installed = root.join(".ardent/plugins/markdown");
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o775))?;
+    fs::set_permissions(
+        installed.join("plugin.yaml"),
+        fs::Permissions::from_mode(0o640),
+    )?;
+    fs::create_dir_all(release.path().join("plugins/markdown/docs"))?;
+    fs::write(release.path().join("plugins/markdown/docs/guide"), "new")?;
+    success(
+        Command::new("sh")
+            .args(["-c", "umask 077 && exec \"$1\" update", "sh"])
+            .arg(binary)
+            .current_dir(root)
+            .output()?,
+    );
+    for (path, mode) in [
+        ("", 0o775),
+        ("plugin.yaml", 0o640),
+        ("docs", 0o775),
+        ("docs/guide", 0o664),
+    ] {
+        assert_eq!(
+            fs::metadata(installed.join(path))?.permissions().mode() & 0o777,
+            mode,
+            "{path}"
+        );
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn init_and_update_reject_linked_package_and_release_roots() -> io::Result<()> {
+    use std::os::unix::fs::symlink;
+    for name in ["plugins/markdown", "plugins"] {
+        let release = stage_release()?;
+        let project = temp_dir()?;
+        let fresh = temp_dir()?;
+        success(run_init(project.path(), &["--plugins", "markdown"])?);
+        let root = release.path().join(name);
+        let moved = release.path().join("bundle");
+        fs::rename(&root, &moved)?;
+        symlink(&moved, &root)?;
+        for dangling in [false, true] {
+            if dangling {
+                fs::rename(&moved, moved.with_extension("away"))?;
+            }
+            let init = Command::new(release.executable())
+                .args(["init", "--plugins", "markdown"])
+                .current_dir(fresh.path())
+                .output()?;
+            assert!(!init.status.success());
+            assert!(!fresh.path().join(".ardent").try_exists()?);
+            assert!(
+                !run(release.executable(), project.path(), "update")?
+                    .status
+                    .success()
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn update_keeps_named_access_and_inherits_it_for_new_paths() -> io::Result<()> {
+    use exacl::{AclEntry, Flag, Perm};
+
+    let project = temp_dir()?;
+    let release = stage_release()?;
+    let root = project.path();
+    success(run_init(root, &["--plugins", "markdown"])?);
+    let installed = root.join(".ardent/plugins/markdown");
+    let inheritable = AclEntry::allow_group(
+        "everyone",
+        Perm::READ,
+        Flag::DIRECTORY_INHERIT | Flag::FILE_INHERIT,
+    );
+    exacl::setfacl(&[&installed], &[inheritable], None)?;
+    let file = installed.join("plugin.yaml");
+    exacl::setfacl(
+        &[&file],
+        &[AclEntry::allow_group("everyone", Perm::READ, None)],
+        None,
+    )?;
+    let reference = installed.join("reference");
+    fs::create_dir(&reference)?;
+    fs::write(reference.join("guide"), "reference")?;
+    let expected_directory = exacl::getfacl(&reference, None)?;
+    let expected_file = exacl::getfacl(reference.join("guide"), None)?;
+    let existing_file = exacl::getfacl(&file, None)?;
+    assert!(!expected_file.is_empty());
+    let docs = release.path().join("plugins/markdown/docs");
+    fs::create_dir(&docs)?;
+    fs::write(docs.join("guide"), "new")?;
+    success(run(release.executable(), root, "update")?);
+    assert_eq!(exacl::getfacl(&file, None)?, existing_file);
+    assert_eq!(
+        exacl::getfacl(installed.join("docs"), None)?,
+        expected_directory
+    );
+    assert_eq!(
+        exacl::getfacl(installed.join("docs/guide"), None)?,
+        expected_file
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn update_preserves_posix_acls_and_the_inherited_mask() -> io::Result<()> {
+    use rustix::fs::{self as xattr, XattrFlags};
+    use std::os::unix::fs::PermissionsExt;
+
+    // Linux POSIX ACL version 2: owner, named user, owning group, effective mask, others.
+    let mut acl = 2_u32.to_le_bytes().to_vec();
+    for (tag, permissions, id) in [
+        (1_u16, 7_u16, u32::MAX),
+        (2, 6, 65534),
+        (4, 7, u32::MAX),
+        (16, 4, u32::MAX),
+        (32, 0, u32::MAX),
+    ] {
+        acl.extend(tag.to_le_bytes());
+        acl.extend(permissions.to_le_bytes());
+        acl.extend(id.to_le_bytes());
+    }
+    let project = temp_dir()?;
+    let release = stage_release()?;
+    let root = project.path();
+    success(run_init(root, &["--plugins", "markdown"])?);
+    let installed = root.join(".ardent/plugins/markdown");
+    let manifest = installed.join("plugin.yaml");
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o775))?;
+    xattr::setxattr(
+        &installed,
+        "system.posix_acl_default",
+        &acl,
+        XattrFlags::empty(),
+    )?;
+    xattr::setxattr(
+        &manifest,
+        "system.posix_acl_access",
+        &acl,
+        XattrFlags::empty(),
+    )?;
+    let reference = installed.join("reference");
+    fs::create_dir(&reference)?;
+    fs::write(reference.join("guide"), "reference")?;
+    let read_acl = |path: &Path, key: &str| -> io::Result<Vec<u8>> {
+        let mut value = vec![0; xattr::getxattr_query(path, key)?];
+        xattr::getxattr(path, key, value.as_mut_slice())?;
+        Ok(value)
+    };
+    let key = "system.posix_acl_access";
+    let new_file_acl = read_acl(&reference.join("guide"), key)?;
+    let docs = release.path().join("plugins/markdown/docs");
+    fs::create_dir(&docs)?;
+    fs::write(docs.join("guide"), "guide")?;
+    success(run(release.executable(), root, "update")?);
+    assert_eq!(read_acl(&manifest, key)?, acl);
+    assert_eq!(
+        read_acl(&installed.join("docs"), "system.posix_acl_default")?,
+        acl
+    );
+    assert_eq!(read_acl(&installed.join("docs/guide"), key)?, new_file_acl);
+    Ok(())
+}

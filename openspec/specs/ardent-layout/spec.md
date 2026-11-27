@@ -533,3 +533,17 @@ that plugin's previous package usable. A concurrent Ardent sync SHALL see a comp
 
 - **WHEN** one replacement fails and another can be installed
 - **THEN** the command reports both the successful replacement and the failed plugin and exits with failure
+
+#### Scenario: An interrupted update has conflicting files at the installed path
+
+- **WHEN** the previous package is in the backup and the installed directory contains a different nonempty tree from the
+  staged replacement
+- **THEN** Ardent preserves both trees, names the backup and continues syncing files handled by healthy formats
+- **AND** if the installed directory is empty, Ardent restores the previous package and leaves unrelated backup
+  directory entries in place
+
+#### Scenario: A shared Unix package is updated with a restrictive umask
+
+- **WHEN** a reader updates an installed plugin that other project members can read
+- **THEN** existing paths retain their sharing permissions and new files and directories inherit the containing
+  directory's access policy

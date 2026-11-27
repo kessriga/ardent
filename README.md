@@ -44,7 +44,10 @@ and the selection of installed plugins stay as they are.
 
 If one package fails, Ardent names it and reports which other packages it updated. On filesystems that require two
 renames, Ardent temporarily saves the previous package in `.ardent/plugins/.ardent-update-<name>/`. After an
-interruption, run `ardent sync` or `ardent update` to recover. Recovery also works after you clear the cache.
+interruption, run `ardent sync` or `ardent update` to recover. Recovery also works after you clear the cache. If the
+installed directory contains files Ardent cannot identify as the staged replacement, it leaves both copies in place and
+prints the backup path. Move the installed directory aside, then run `ardent sync` to restore the backup. Other formats
+remain available while you resolve the conflict.
 
 When upgrading an existing project, copy any missing packages listed under `formats` in `.ardent/config.yaml` before the
 first sync. Sync prunes cached structures for files it no longer tracks. For example, if both packages are missing, set

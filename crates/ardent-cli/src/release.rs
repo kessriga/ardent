@@ -29,8 +29,12 @@ pub(super) fn release_dir() -> Result<PathBuf, (PathBuf, io::Error)> {
         .map_err(|err| (executable, err))?
         .with_file_name("plugins");
     #[cfg(debug_assertions)]
-    if !dir.try_exists().map_err(|err| (dir.clone(), err))? {
-        return Ok(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins"));
+    match fs::symlink_metadata(&dir) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            return Ok(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins"));
+        }
+        Err(err) => return Err((dir, err)),
+        Ok(_) => {}
     }
     Ok(dir)
 }
@@ -43,7 +47,7 @@ impl ReleasePlugin {
         destination_root: &Path,
     ) -> PackageResult<()> {
         let package = source.join(self.name);
-        let files = entries(&package, Some(project_ardent), self.required_files)?;
+        let files = self.release_entries(source, project_ardent)?;
         let target = Path::new("plugins").join(self.name);
         layout::create_dir(destination_root, &format!("plugins/{}", self.name))
             .map_err(|err| (destination_root.join(&target), err))?;
@@ -65,15 +69,7 @@ impl ReleasePlugin {
     pub(super) fn differs(&self, release: &Path, project_ardent: &Path) -> PackageResult<bool> {
         let source = release.join(self.name);
         let installed = project_ardent.join("plugins").join(self.name);
-        for dir in [release, &source, &installed] {
-            if !fs::symlink_metadata(dir)
-                .map_err(|err| (dir.to_owned(), err))?
-                .is_dir()
-            {
-                return Err(invalid_entry(dir, "expected a package directory"));
-            }
-        }
-        let bundled = entries(&source, Some(project_ardent), self.required_files)?;
+        let bundled = self.release_entries(release, project_ardent)?;
         if entries(&installed, None, &[])? != bundled {
             return Ok(true);
         }
@@ -83,6 +79,15 @@ impl ReleasePlugin {
             }
         }
         Ok(false)
+    }
+
+    fn release_entries(
+        &self,
+        release: &Path,
+        project: &Path,
+    ) -> PackageResult<BTreeMap<PathBuf, fs::FileType>> {
+        require_directory(release)?;
+        entries(&release.join(self.name), Some(project), self.required_files)
     }
 }
 
@@ -96,11 +101,31 @@ fn digest(path: &Path) -> PackageResult<blake3::Hash> {
     Ok(hash.finalize())
 }
 
+/// Identify a complete staged package across renames and changes to the running release.
+pub(super) fn package_digest(root: &Path) -> io::Result<blake3::Hash> {
+    let mut hash = blake3::Hasher::new();
+    for (path, kind) in entries(root, None, &[]).map_err(|(_, err)| err)? {
+        for component in path.iter() {
+            let bytes = component.as_encoded_bytes();
+            hash.update(&(bytes.len() as u64).to_le_bytes());
+            hash.update(bytes);
+        }
+        hash.update(&0_u64.to_le_bytes());
+        hash.update(&[u8::from(kind.is_file())]);
+        if kind.is_file() {
+            let content = digest(&root.join(path)).map_err(|(_, err)| err)?;
+            hash.update(content.as_bytes());
+        }
+    }
+    Ok(hash.finalize())
+}
+
 fn entries(
     root: &Path,
     skip: Option<&Path>,
     required: &[&str],
 ) -> PackageResult<BTreeMap<PathBuf, fs::FileType>> {
+    require_directory(root)?;
     let mut files = BTreeMap::new();
     let mut dirs = vec![PathBuf::new()];
     while let Some(relative) = dirs.pop() {
@@ -138,6 +163,16 @@ fn entries(
         }
     }
     Ok(files)
+}
+
+fn require_directory(path: &Path) -> PackageResult<()> {
+    if !fs::symlink_metadata(path)
+        .map_err(|err| (path.to_owned(), err))?
+        .is_dir()
+    {
+        return Err(invalid_entry(path, "expected a package directory"));
+    }
+    Ok(())
 }
 
 fn invalid_entry(path: &Path, message: &'static str) -> (PathBuf, io::Error) {

@@ -98,17 +98,10 @@ pub(crate) enum Run<'a> {
 pub(crate) fn run_at(root: &Path, mode: Run) -> Result<Report, SyncError> {
     let ardent_dir = root.join(ARDENT_DIR);
     let config = read_config(&ardent_dir)?;
-    let config_error = |source| SyncError::Pattern {
-        path: ardent_dir.join(config::FILE_NAME),
-        source,
-    };
-    let mut patterns = Patterns::new(root, &config.exclude).map_err(config_error)?;
-    let overrides = configured_patterns(root, &config).map_err(config_error)?;
+    let (mut patterns, overrides) = project_patterns(root, &config)?;
     let _lock = lock(&ardent_dir)?;
     let mut report = Report::default();
-    if !crate::update::recover(&ardent_dir, &mut report.warnings, &mut report.errors).is_empty() {
-        return Ok(report);
-    }
+    let blocked = crate::update::recover(&ardent_dir, &mut report.warnings, &mut report.errors);
     let packages = match InstalledPackages::discover(&ardent_dir) {
         Ok(packages) => packages,
         Err(err) => {
@@ -118,12 +111,20 @@ pub(crate) fn run_at(root: &Path, mode: Run) -> Result<Report, SyncError> {
     };
     report.errors.extend(
         packages
-            .check_other_manifests(|name| config.formats.contains_key(name))
+            .check_other_manifests(|name| {
+                config.formats.contains_key(name) || blocked.contains(name)
+            })
             .into_iter()
             .map(|err| err.to_string()),
     );
-    let (mut plugins, unavailable) =
-        load_plugins(root, &packages, overrides, &mut patterns, &mut report);
+    let (mut plugins, unavailable) = load_plugins(
+        root,
+        &packages,
+        overrides,
+        &mut patterns,
+        &mut report,
+        blocked,
+    );
     let files_dir = create_dir(&ardent_dir, FILES_DIR)?;
     let walk = tracked::walk(root, &patterns);
     if matches!(mode, Run::Browse { .. }) {
@@ -186,6 +187,26 @@ fn read_config(ardent_dir: &Path) -> Result<Config, SyncError> {
     Config::from_yaml(&text).map_err(|source| SyncError::Config { path, source })
 }
 
+pub(super) fn validate_config(root: &Path) -> Result<(), SyncError> {
+    let config = read_config(&root.join(ARDENT_DIR))?;
+    project_patterns(root, &config)?;
+    Ok(())
+}
+
+fn project_patterns<'a>(
+    root: &Path,
+    config: &'a Config,
+) -> Result<(Patterns<'a>, Vec<ConfiguredFormat<'a>>), SyncError> {
+    let config_error = |source| SyncError::Pattern {
+        path: root.join(ARDENT_DIR).join(config::FILE_NAME),
+        source,
+    };
+    Ok((
+        Patterns::new(root, &config.exclude).map_err(config_error)?,
+        configured_patterns(root, config).map_err(config_error)?,
+    ))
+}
+
 struct ConfiguredFormat<'a> {
     name: &'a str,
     files: Option<Gitignore>,
@@ -219,10 +240,13 @@ fn load_plugins<'a>(
     overrides: Vec<ConfiguredFormat<'a>>,
     patterns: &mut Patterns<'a>,
     report: &mut Report,
+    mut unavailable: HashSet<&'a str>,
 ) -> (Vec<FormatPlugin>, HashSet<&'a str>) {
     let mut plugins = Vec::new();
-    let mut unavailable = HashSet::new();
     for ConfiguredFormat { name, files } in overrides {
+        if unavailable.contains(name) {
+            continue;
+        }
         let plugin = match packages.load_format(name) {
             Ok(Some(plugin)) => plugin,
             Ok(None) => {

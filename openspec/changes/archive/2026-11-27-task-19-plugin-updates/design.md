@@ -36,8 +36,16 @@ eligible package, including removal of obsolete files.
   a failure during staging. Replacement is per plugin. Report both successes and failures.
 - Where directory exchange is unavailable, put a marked backup directory at `.ardent/plugins/.ardent-update-<name>/`
   before moving the original. Sync, browse and update recover under the project lock before using the installed
-  packages. If the installed path is missing, restore the original. If the replacement is in place, finish cleanup.
-  Keeping the backup outside the cache lets the reader clear the cache during an interruption.
+  packages. Restore the original when the installed path is missing or empty. Record a BLAKE3 digest of the staged
+  paths, entry types and file contents in the backup directory before moving the original. Retire the backup only when
+  the installed tree matches that digest. For older backups without a digest, compare against the running release.
+  Preserve unrelated entries during cleanup. Keeping the backup outside the cache lets the reader clear the cache during
+  an interruption.
+- Read the project configuration before recovery or replacement and check installed manifests for reserved names. Keep a
+  format with a recovery conflict out of the sync while retaining cached structures and scanning healthy formats.
+- Preserve group and access modes for existing Unix package paths. Honor named access rules on macOS and POSIX access
+  lists on Linux. New entries inherit sharing permissions from the installed directory. Use the native macOS ACL API
+  through `exacl` to retain named rules and inheritance flags.
 
 ## Risks and rollout
 
