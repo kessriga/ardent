@@ -161,6 +161,44 @@ fn reuses_a_user_package_under_a_symlinked_configuration_directory() -> io::Resu
 }
 
 #[test]
+fn installs_a_missing_package_through_a_linked_user_configuration_root() -> io::Result<()> {
+    let release = stage_release()?;
+    let project = temp_dir()?;
+    let home = temp_dir()?;
+    let managed = temp_dir()?;
+    fs::write(managed.path().join("config.yaml"), "schema: 1\n")?;
+    std::os::unix::fs::symlink(managed.path(), home.path().join("ardent"))?;
+    let install = || {
+        interact_with_home(
+            project.path(),
+            24,
+            home.path(),
+            release.executable(),
+            |term, _| term.write_all(b"\r\r\x1b[B \r"),
+        )
+    };
+    let elsewhere = temp_dir()?;
+    let plugins = managed.path().join("plugins");
+    std::os::unix::fs::symlink(elsewhere.path(), &plugins)?;
+    let (status, output) = install()?;
+    assert!(!status.success() && output.contains("plugins"), "{output}");
+    assert!(super::snapshot(elsewhere.path())?.is_empty());
+    fs::remove_file(plugins)?;
+    let (status, output) = install()?;
+    assert!(status.success(), "{output}");
+    assert_eq!(
+        super::snapshot(&managed.path().join("plugins/rust"))?,
+        super::snapshot(&release.path().join("plugins/rust"))?
+    );
+    assert_eq!(
+        fs::read_to_string(managed.path().join("config.yaml"))?,
+        "schema: 1\n"
+    );
+    assert!(!project.path().join(".ardent/plugins").exists());
+    Ok(())
+}
+
+#[test]
 fn interrupt_leaves_the_cursor_visible_and_creates_no_project() -> io::Result<()> {
     let project = temp_dir()?;
     let (status, output) = interact(project.path(), 24, |terminal, _| {

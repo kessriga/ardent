@@ -16,13 +16,14 @@ pub(super) fn install(
     plugins: &[&ReleasePlugin],
     published: &mut Vec<&'static str>,
 ) -> Result<()> {
-    let home = xdg::config_home().ok_or_else(|| {
+    let user = xdg::config_dir().ok_or_else(|| {
         (
             PathBuf::from("XDG_CONFIG_HOME"),
             io::Error::other("cannot locate user configuration"),
         )
     })?;
-    let user = home.join("ardent");
+    fs::create_dir_all(&user).map_err(|err| (user.clone(), err))?;
+    let user = user.canonicalize().map_err(|err| (user, err))?;
     let packages = user.join("plugins");
     // Verification records belong to this init, including when reusing a read-only user package.
     let scratch = Stage::new(project).map_err(|err| (project.to_owned(), err))?;
@@ -34,8 +35,7 @@ pub(super) fn install(
             require_package(verify(&user)?, &destination)?;
             continue;
         }
-        fs::create_dir_all(&home).map_err(|err| (home.clone(), err))?;
-        layout::create_dir(&home, "ardent/plugins").map_err(|err| (packages.clone(), err))?;
+        layout::create_dir(&user, "plugins").map_err(|err| (packages.clone(), err))?;
         match verify(&user) {
             Ok(true) => continue,
             Ok(false) => {}
