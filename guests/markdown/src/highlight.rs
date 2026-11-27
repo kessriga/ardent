@@ -1,4 +1,5 @@
 use ardent_format_guest::highlighting::{self, Category, Span};
+use tree_sitter::Node;
 use tree_sitter_md::{MarkdownParser, MarkdownTree};
 
 mod indented;
@@ -26,7 +27,11 @@ pub(super) fn spans(source: &[u8]) -> Vec<Span> {
                 indented::append(&mut spans, node, source);
                 false
             }
-            "code_span" | "fenced_code_block" => {
+            "fenced_code_block" => {
+                push_code(&mut spans, start, fence_end(node, source) as u32);
+                false
+            }
+            "code_span" => {
                 push_code(&mut spans, start, end);
                 false
             }
@@ -41,6 +46,35 @@ pub(super) fn spans(source: &[u8]) -> Vec<Span> {
             }
         }
     }
+}
+
+// A fence node can extend into the next block's indentation when its container ends.
+fn fence_end(node: Node<'_>, source: &[u8]) -> usize {
+    let mut cursor = node.walk();
+    let Some(last) = node
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() != "block_continuation")
+        .last()
+    else {
+        return node.end_byte();
+    };
+    let end = last.end_byte();
+    if last.kind() == "code_fence_content" {
+        return end;
+    }
+    // Include trailing spaces and the line ending of the delimiter or opening info string.
+    let tail = &source[end..node.end_byte()];
+    let padding = tail
+        .iter()
+        .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
+        .count();
+    let eol = &tail[padding..];
+    end + padding
+        + if eol.starts_with(b"\r\n") {
+            2
+        } else {
+            usize::from(eol.starts_with(b"\n") || eol.starts_with(b"\r"))
+        }
 }
 
 // The block grammar includes quote and list prefixes in multiline nodes, even after a closing fence.

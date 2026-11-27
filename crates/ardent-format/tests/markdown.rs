@@ -58,3 +58,37 @@ fn packaged_syntax_spans() -> Result<(), Box<dyn Error>> {
     assert_eq!(actual, expected);
     Ok(())
 }
+
+#[test]
+fn quoted_fences_end_before_the_next_blocks_indentation() -> Result<(), Box<dyn Error>> {
+    use ardent_core::highlight::Category::{Code, Heading};
+    let mut plugin = common::plugin("markdown")?;
+    for (source, expected) in [
+        (
+            "> ~~~\n> ~~~\n    code\n\n# Next\n",
+            vec![
+                ("~~~\n", Code),
+                ("~~~\n    code\n\n", Code),
+                ("# Next\n", Heading),
+            ],
+        ),
+        (
+            "> ~~~\r\n> ~~~  \r\n   prose\r\n",
+            vec![("~~~\r\n", Code), ("~~~  \r\n", Code)],
+        ),
+        ("> ~~~\n    code\n", vec![("~~~\n    code\n", Code)]),
+        (
+            "> ~~~\n> body without newline",
+            vec![("~~~\n", Code), ("body without newline", Code)],
+        ),
+        ("> ~~~\n> ~~~\n   ", vec![("~~~\n", Code), ("~~~\n", Code)]),
+    ] {
+        let spans = plugin.highlight(source.as_bytes())?;
+        let actual: Vec<_> = spans
+            .into_iter()
+            .map(|s| (&source[s.range], s.category))
+            .collect();
+        assert_eq!(actual, expected, "{source:?}");
+    }
+    Ok(())
+}
