@@ -70,3 +70,44 @@ fn packaged_syntax_spans() -> Result<(), Box<dyn Error>> {
     assert_eq!(actual, expected);
     Ok(())
 }
+
+#[test]
+fn contextual_words_in_macro_tokens() -> Result<(), Box<dyn Error>> {
+    use ardent_core::highlight::Category::{Comment, Keyword};
+    let source = concat!(
+        "fn f() { let union = 1; let default = 2; let raw = 3; ",
+        "dbg!(union, default, raw, r#union, &raw const raw, && /* ref */ raw mut raw); } ",
+        "items!(union U { x: u32 } default fn f() {}); ",
+        "fn g() { inspect!({ for union in xs {} }); } ",
+        "items!(fn h<'union>(x: &'union u32) {} fn j<'default>(x: &'default fn()) {});"
+    );
+    let spans = common::plugin("rust")?.highlight(source.as_bytes())?;
+    let actual: Vec<_> = spans
+        .into_iter()
+        .map(|s| (&source[s.range], s.category))
+        .collect();
+    assert_eq!(
+        actual,
+        [
+            ("fn", Keyword),
+            ("let", Keyword),
+            ("let", Keyword),
+            ("let", Keyword),
+            ("raw", Keyword),
+            ("const", Keyword),
+            ("/* ref */", Comment),
+            ("raw", Keyword),
+            ("mut", Keyword),
+            ("union", Keyword),
+            ("default", Keyword),
+            ("fn", Keyword),
+            ("fn", Keyword),
+            ("for", Keyword),
+            ("in", Keyword),
+            ("fn", Keyword),
+            ("fn", Keyword),
+            ("fn", Keyword),
+        ]
+    );
+    Ok(())
+}

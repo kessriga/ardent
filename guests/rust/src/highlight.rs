@@ -33,28 +33,64 @@ fn category(node: Node<'_>, source: &[u8]) -> Option<Category> {
     match node.kind() {
         "string_literal" | "raw_string_literal" => Some(Category::StringLiteral),
         "line_comment" | "block_comment" => Some(Category::Comment),
-        "default" | "gen" | "macro_rules!" | "mutable_specifier" | "raw" | "try" | "union"
-        | "yield" | "boolean_literal" => Some(Category::Keyword),
         "type_identifier" | "identifier" if source.get(node.byte_range()) == Some(b"Self") => {
             Some(Category::Keyword)
         }
-        // Macro token trees expose some strict keywords, such as `else`, as identifiers.
-        "identifier"
-            if node.utf8_text(source).is_ok_and(strict_keyword)
-                && node.parent().is_some_and(|parent| {
-                    matches!(
-                        parent.kind(),
-                        "token_tree"
-                            | "token_tree_pattern"
-                            | "token_repetition"
-                            | "token_repetition_pattern"
-                    )
-                }) =>
-        {
-            Some(Category::Keyword)
+        "identifier" | "default" | "union" if in_macro_tokens(node) => {
+            let word = node.utf8_text(source).ok()?;
+            (strict_keyword(word) || contextual_macro_keyword(node, word, source))
+                .then_some(Category::Keyword)
         }
+        "default" | "gen" | "macro_rules!" | "mutable_specifier" | "raw" | "try" | "union"
+        | "yield" | "boolean_literal" => Some(Category::Keyword),
         kind if strict_keyword(kind) => Some(Category::Keyword),
         _ => None,
+    }
+}
+
+fn in_macro_tokens(node: Node<'_>) -> bool {
+    node.parent().is_some_and(|parent| {
+        matches!(
+            parent.kind(),
+            "token_tree" | "token_tree_pattern" | "token_repetition" | "token_repetition_pattern"
+        )
+    })
+}
+
+// Macro arguments expose tokens rather than Rust expressions or item nodes.
+fn contextual_macro_keyword(node: Node<'_>, word: &str, source: &[u8]) -> bool {
+    // Macro token trees split a lifetime into an apostrophe and its name.
+    if node.prev_sibling().is_some_and(|token| token.kind() == "'") {
+        return false;
+    }
+    let next = || {
+        std::iter::successors(node.next_sibling(), Node::next_sibling)
+            .find(|token| !token.is_extra())
+    };
+    match word {
+        "union" => next().is_some_and(|name| {
+            matches!(
+                name.kind(),
+                "identifier" | "primitive_type" | "metavariable" | "union" | "default"
+            ) && name
+                .utf8_text(source)
+                .is_ok_and(|word| !strict_keyword(word))
+        }),
+        "default" => matches!(
+            next().and_then(|token| token.utf8_text(source).ok()),
+            Some("impl" | "fn" | "type" | "const" | "unsafe" | "async" | "extern")
+        ),
+        "raw"
+            if matches!(
+                next().map(|token| token.kind()),
+                Some("const" | "mutable_specifier")
+            ) =>
+        {
+            std::iter::successors(node.prev_sibling(), Node::prev_sibling)
+                .find(|token| !token.is_extra())
+                .is_some_and(|token| matches!(token.kind(), "&" | "&&"))
+        }
+        _ => false,
     }
 }
 

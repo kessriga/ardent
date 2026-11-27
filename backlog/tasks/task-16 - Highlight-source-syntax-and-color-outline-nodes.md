@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-26 13:13'
-updated_date: '2026-11-26 16:04'
+updated_date: '2026-11-27 11:54'
 labels: []
 dependencies: []
 references:
@@ -47,6 +47,8 @@ format plugins identify source ranges and their syntax categories so the termina
 
 5. Reuse highlights across unrelated saves, cover Rust macro keywords and Markdown code indentation, and verify the
    rebuilt packages.
+
+6. Fix fence boundaries and contextual Rust macro keywords, then verify the release plugins through the host.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -55,6 +57,9 @@ format plugins identify source ranges and their syntax categories so the termina
 The browser reuses spans only while the source hash and verified component digest match. Regression tests cover
 unrelated saves, changed source and plugins, Rust macro keywords and raw identifiers, and Markdown code indentation in
 nested containers.
+
+Packaged host tests cover quoted fences followed by prose or indented code and distinguish contextual Rust keywords from
+macro arguments used as variable names.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
