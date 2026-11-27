@@ -11,11 +11,30 @@ use std::num::NonZeroU16;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Child, Command};
+use std::sync::LazyLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use rustix::termios;
 use vt100::{Parser, Screen};
+
+// Keep cold component compilation outside the deadlines for terminal interaction.
+static BROWSER_CACHE: LazyLock<io::Result<()>> = LazyLock::new(|| {
+    let project = common::temp_dir()?;
+    let release = common::stage_release()?;
+    for args in [&["init", "--plugins", "markdown,rust"][..], &["sync"]] {
+        let output = common::ardent_command(release.executable())
+            .args(args)
+            .current_dir(project.path())
+            .output()?;
+        if !output.status.success() {
+            return Err(io::Error::other(
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            ));
+        }
+    }
+    Ok(())
+});
 
 struct Session {
     child: Child,
@@ -26,7 +45,7 @@ struct Session {
 impl Session {
     fn open(dir: &Path, slave: &File, master: File) -> io::Result<Self> {
         Self::open_command(
-            Command::new(env!("CARGO_BIN_EXE_ardent")),
+            common::ardent_command(env!("CARGO_BIN_EXE_ardent")),
             dir,
             slave,
             master,
@@ -39,6 +58,7 @@ impl Session {
         slave: &File,
         master: File,
     ) -> io::Result<Self> {
+        BROWSER_CACHE.as_ref().map_err(io::Error::other)?;
         let mut terminal = Parser::default();
         set_terminal_size(&mut terminal, slave)?;
         Ok(Self {
@@ -171,7 +191,7 @@ fn notices_a_rebuilt_component_and_clears_after_external_update() -> io::Result<
             .append(true)
             .open(root.join(".ardent/plugins/markdown/format.wasm"))?
             .write_all(&[0, 1, 0])?;
-        let synced = Command::new(release.executable())
+        let synced = common::ardent_command(release.executable())
             .arg("sync")
             .current_dir(root)
             .output()?;
@@ -181,7 +201,7 @@ fn notices_a_rebuilt_component_and_clears_after_external_update() -> io::Result<
             String::from_utf8_lossy(&synced.stderr)
         );
         let (master, slave) = pty::open_terminal(16)?;
-        let mut command = Command::new(release.executable());
+        let mut command = common::ardent_command(release.executable());
         command.args(args);
         let mut session = Session::open_command(command, root, &slave, master)?;
         session.wait_for("Plugin updates: markdown. Run ardent update")?;
@@ -194,7 +214,7 @@ fn notices_a_rebuilt_component_and_clears_after_external_update() -> io::Result<
             &["fn notes()", "Plugin updates: markdown. Run ardent update"],
             &[],
         )?;
-        let updated = Command::new(release.executable())
+        let updated = common::ardent_command(release.executable())
             .arg("update")
             .current_dir(root)
             .output()?;
@@ -226,8 +246,12 @@ fn shows_available_updates_alongside_a_bundle_error() -> io::Result<()> {
     fs::write(release.path().join("plugins/markdown/guide"), "new")?;
     fs::remove_file(release.path().join("plugins/rust/README.md"))?;
     let (master, slave) = pty::open_terminal(24)?;
-    let mut session =
-        Session::open_command(Command::new(release.executable()), root, &slave, master)?;
+    let mut session = Session::open_command(
+        common::ardent_command(release.executable()),
+        root,
+        &slave,
+        master,
+    )?;
     session.wait_screen(
         &[
             "Plugin updates: markdown. Run ardent update",
@@ -584,7 +608,7 @@ fn repairs_an_open_syntax_error_without_a_size_or_mtime_change() -> io::Result<(
 #[test]
 fn help_lists_commands_outside_a_project() -> io::Result<()> {
     let dir = common::temp_dir()?;
-    let output = Command::new(env!("CARGO_BIN_EXE_ardent"))
+    let output = common::ardent_command(env!("CARGO_BIN_EXE_ardent"))
         .current_dir(dir.path())
         .arg("--help")
         .output()?;
@@ -650,7 +674,7 @@ fn redirected_browse_rejects_the_terminal_before_creating_a_cache() -> io::Resul
             .success()
     );
     fs::write(root.join("notes.md"), "# Hello\n")?;
-    let output = Command::new(env!("CARGO_BIN_EXE_ardent"))
+    let output = common::ardent_command(env!("CARGO_BIN_EXE_ardent"))
         .current_dir(root)
         .arg("browse")
         .output()?;
@@ -694,7 +718,13 @@ fn highlights_packaged_examples_and_navigates_a_scanner_only_file() -> io::Resul
     fs::write(root.join("c.probe"), "fn plain() {}")?;
     let (master, slave) = pty::open_terminal(32)?;
     pty::resize_to(&slave, 32, 58)?;
-    let mut session = Session::open(root, &slave, master)?;
+    let user = common::temp_dir()?;
+    let user_packages = user.path().join("ardent/plugins");
+    fs::create_dir_all(&user_packages)?;
+    fs::rename(packages.join("rust"), user_packages.join("rust"))?;
+    let mut command = common::ardent_command(env!("CARGO_BIN_EXE_ardent"));
+    command.env("XDG_CONFIG_HOME", user.path());
+    let mut session = Session::open_command(command, root, &slave, master)?;
     session.wait_for("c.probe")?;
     session.keys(b"\r")?;
     session.wait_source_color("//! Heights", 0, Idx(6))?;

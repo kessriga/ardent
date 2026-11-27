@@ -10,7 +10,7 @@ use std::time::SystemTime;
 use common::{run_init, snapshot, stage_release, temp_dir};
 
 fn run(binary: &Path, project: &Path, command: &str) -> io::Result<Output> {
-    Command::new(binary)
+    common::ardent_command(binary)
         .arg(command)
         .current_dir(project)
         .output()
@@ -131,7 +131,7 @@ fn concurrent_sync_and_update_leave_a_complete_package() -> io::Result<()> {
     lock.lock()?;
     fs::write(release.path().join("plugins/markdown/notes"), "new")?;
     let start = |command| {
-        Command::new(release.executable())
+        common::ardent_command(release.executable())
             .arg(command)
             .current_dir(root)
             .stdout(Stdio::piped())

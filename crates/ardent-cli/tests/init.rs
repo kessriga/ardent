@@ -80,7 +80,7 @@ fn rust_selection_installs_the_release_and_scans_only_rust()
     assert_eq!(config.formats.keys().collect::<Vec<_>>(), ["rust"]);
     assert_eq!(config.formats["rust"].files, None);
 
-    let sync = Command::new(env!("CARGO_BIN_EXE_ardent"))
+    let sync = common::ardent_command(env!("CARGO_BIN_EXE_ardent"))
         .arg("sync")
         .current_dir(dir)
         .output()?;

@@ -18,6 +18,7 @@ use ardent_format::{FormatPlugin, InstalledPackages, MAX_SOURCE_BYTES};
 use ignore::gitignore::Gitignore;
 
 mod cache_names;
+mod settings;
 pub(crate) mod source;
 use cache_names::CacheNames;
 
@@ -97,18 +98,25 @@ pub(crate) enum Run<'a> {
 /// content check for one source when its open preview has evidence that the stamp is stale.
 pub(crate) fn run_at(root: &Path, mode: Run) -> Result<Report, SyncError> {
     let ardent_dir = root.join(ARDENT_DIR);
-    let config = read_config(&ardent_dir)?;
-    let (mut patterns, overrides) = project_patterns(root, &config)?;
+    let user_dir = settings::config_dir();
+    let config = settings::load(root, user_dir.as_deref())?;
+    let cache_dir = settings::compilation_dir(root, config.compilation_cache.unwrap_or_default());
+    let (mut patterns, overrides) =
+        project_patterns(root, &config).map_err(|source| SyncError::Pattern {
+            path: ardent_dir.join(config::FILE_NAME),
+            source,
+        })?;
     let _lock = lock(&ardent_dir)?;
     let mut report = Report::default();
     let blocked = crate::update::recover(&ardent_dir, &mut report.warnings, &mut report.errors);
-    let packages = match InstalledPackages::discover(&ardent_dir) {
-        Ok(packages) => packages,
-        Err(err) => {
-            report.errors.push(err.to_string());
-            return Ok(report);
-        }
-    };
+    let packages =
+        match InstalledPackages::for_sync(&ardent_dir, user_dir.as_deref(), cache_dir.as_deref()) {
+            Ok(packages) => packages,
+            Err(err) => {
+                report.errors.push(err.to_string());
+                return Ok(report);
+            }
+        };
     report.errors.extend(
         packages
             .check_other_manifests(|name| {
@@ -180,32 +188,20 @@ pub(crate) fn find_root(working_dir: &Path) -> Result<PathBuf, SyncError> {
     }
 }
 
-fn read_config(ardent_dir: &Path) -> Result<Config, SyncError> {
-    let path = ardent_dir.join(config::FILE_NAME);
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(source) => return Err(SyncError::Io { path, source }),
-    };
-    Config::from_yaml(&text).map_err(|source| SyncError::Config { path, source })
-}
-
 pub(super) fn validate_config(root: &Path) -> Result<(), SyncError> {
-    let config = read_config(&root.join(ARDENT_DIR))?;
-    project_patterns(root, &config)?;
+    let path = root.join(ARDENT_DIR).join(config::FILE_NAME);
+    let config = settings::read(&path)?;
+    project_patterns(root, &config).map_err(|source| SyncError::Pattern { path, source })?;
     Ok(())
 }
 
 fn project_patterns<'a>(
     root: &Path,
     config: &'a Config,
-) -> Result<(Patterns<'a>, Vec<ConfiguredFormat<'a>>), SyncError> {
-    let config_error = |source| SyncError::Pattern {
-        path: root.join(ARDENT_DIR).join(config::FILE_NAME),
-        source,
-    };
+) -> Result<(Patterns<'a>, Vec<ConfiguredFormat<'a>>), PatternError> {
     Ok((
-        Patterns::new(root, &config.exclude).map_err(config_error)?,
-        configured_patterns(root, config).map_err(config_error)?,
+        Patterns::new(root, config.exclude.as_deref().unwrap_or_default())?,
+        configured_patterns(root, config)?,
     ))
 }
 
