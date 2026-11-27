@@ -23,14 +23,18 @@ can address a function or a section by its place in a tree rather than by line n
 
 ## How it should work
 
-Keep the release's `plugins/` directory beside the `ardent` executable. Run `ardent init` in the project root. Use the
-arrow keys to move between Markdown and Rust, Space to toggle each format, and Enter to confirm. Press q or Ctrl-C to
-cancel. Init copies the selected packages into `.ardent/plugins/` and enables them in `.ardent/config.yaml`. It refuses
-to run where `.ardent` already exists or inside another Ardent project.
+Keep the release's `plugins/` directory beside the `ardent` executable. Run `ardent init` in the project root.
 
-In MSYS and Cygwin terminals that use pipes, enter the format names separated by commas at the prompt.
+1. Press Enter at `Install format plugins? [Y/n]` to continue, or press N to create a project with no formats enabled.
+2. Choose **For my user account** (the default) to share packages across projects, or **In this project** to keep them
+   in `.ardent/plugins/`. Use the arrow keys and Enter.
+3. Choose the formats to enable in `.ardent/config.yaml`. Every checkbox starts empty. Use the arrow keys to move, Space
+   to toggle a format, and Enter to confirm. Confirming an empty list installs nothing.
 
-In a script, pass the format names explicitly. Use `--plugins ''` to start with an empty selection.
+Press q, Escape, or Ctrl-C at any prompt to cancel. Init refuses to run where `.ardent` already exists or inside another
+Ardent project. In MSYS and Cygwin pipe terminals, enter the numbered scope, then the format names separated by commas.
+
+In scripts, `--plugins` installs the named formats in the project without prompting. Use `--plugins ''` for none.
 
 ```sh
 ardent init --plugins markdown,rust && ardent sync
@@ -70,9 +74,9 @@ format, keeps existing structures, scans files for healthy formats and exits wit
 
 ### Share format plugins and settings
 
-To use one Markdown installation across projects, copy the release's complete `plugins/markdown/` directory to
-`$XDG_CONFIG_HOME/ardent/plugins/markdown/`. The configuration home defaults to `~/.config`. Enable Markdown in each
-project's `.ardent/config.yaml`:
+Choose **For my user account** during init to install missing packages under `$XDG_CONFIG_HOME/ardent/plugins/`. The
+configuration home defaults to `~/.config`. Init reuses an existing valid package, including a different version. Each
+project enables its own formats. For example, selecting Markdown writes this entry to `.ardent/config.yaml`:
 
 ```yaml
 schema: 1
@@ -81,9 +85,8 @@ formats:
 ```
 
 A package in `.ardent/plugins/markdown/` pins that project to its own copy. Removing the pin selects the user copy on
-the next sync. If the pin fails verification, sync reports the error and keeps the last good structure. To start a new
-project with shared packages, run `ardent init --plugins ''` and add the names you want under `formats`. Manage user
-packages by copying their release directories. `ardent update` updates project installations.
+the next sync. If the pin fails verification, sync reports the error and keeps the last good structure. To enable a
+shared package in an existing project, add its name under `formats`. `ardent update` updates project installations.
 
 Put shared settings in the optional `$XDG_CONFIG_HOME/ardent/config.yaml`. For example:
 

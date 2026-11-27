@@ -22,7 +22,7 @@ pub fn create_shared_dir(path: &Path) -> io::Result<()> {
     if !inherit_access(path, &File::open(stage.path())?)? {
         return fs::create_dir(path);
     }
-    publish_directory(stage.path(), path, parent)?;
+    publish_directory(stage.path(), path)?;
     let _ = stage.keep();
     Ok(())
 }
@@ -93,8 +93,19 @@ fn check_absent(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Publish a complete directory on the same filesystem without replacing an existing installation.
+#[cfg(not(unix))]
+pub fn publish_directory(source: &Path, destination: &Path) -> io::Result<()> {
+    let mut staged = tempfile::TempPath::try_from_path(source)?;
+    staged.disable_cleanup(true);
+    staged
+        .persist_noclobber(destination)
+        .map_err(|err| err.error)
+}
+
+/// Publish a complete directory on the same filesystem without replacing an existing installation.
 #[cfg(unix)]
-fn publish_directory(source: &Path, destination: &Path, parent: &Path) -> io::Result<()> {
+pub fn publish_directory(source: &Path, destination: &Path) -> io::Result<()> {
     #[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
     {
         use rustix::fs::{self as posix, CWD, RenameFlags};
@@ -106,7 +117,7 @@ fn publish_directory(source: &Path, destination: &Path, parent: &Path) -> io::Re
         }
     }
     // Older filesystems without exclusive rename serialize first-time creators on the parent.
-    let guard = File::open(parent)?;
+    let guard = File::open(parent_dir(destination)?)?;
     guard.lock()?;
     check_absent(destination)?;
     fs::rename(source, destination)
@@ -140,6 +151,23 @@ fn inherit_access(path: &Path, file: &File) -> io::Result<bool> {
     }
     file.set_permissions(fs::Permissions::from_mode(mode))?;
     Ok(true)
+}
+
+#[cfg(test)]
+#[test]
+fn publication_preserves_an_existing_empty_directory() -> io::Result<()> {
+    let root = tempfile::tempdir()?;
+    let candidate = root.path().join("candidate");
+    let installed = root.path().join("installed");
+    fs::create_dir(&candidate)?;
+    fs::write(candidate.join("ready"), "complete")?;
+    fs::create_dir(&installed)?;
+    assert!(publish_directory(&candidate, &installed).is_err());
+    assert!(!installed.join("ready").exists());
+    fs::remove_dir(&installed)?;
+    publish_directory(&candidate, &installed)?;
+    assert_eq!(fs::read(installed.join("ready"))?, b"complete");
+    Ok(())
 }
 
 #[cfg(all(test, unix))]

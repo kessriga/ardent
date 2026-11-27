@@ -1,4 +1,3 @@
-use std::env;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -7,25 +6,12 @@ use ardent_core::config::{self, CompilationCache, Config};
 use ardent_core::layout::ARDENT_DIR;
 use ardent_core::structure;
 
+use crate::xdg;
+
 use super::{SyncError, project_patterns};
 
-fn xdg_home(variable: &str, default: &str) -> Option<PathBuf> {
-    env::var_os(variable)
-        .map(PathBuf::from)
-        .filter(|dir| dir.is_absolute())
-        .or_else(|| {
-            env::home_dir()
-                .filter(|dir| dir.is_absolute())
-                .map(|home| home.join(default))
-        })
-}
-
-pub(super) fn config_dir() -> Option<PathBuf> {
-    Some(xdg_home("XDG_CONFIG_HOME", ".config")?.join("ardent"))
-}
-
 pub(super) fn compilation_dir(root: &Path, scope: CompilationCache) -> Option<PathBuf> {
-    let compiled = xdg_home("XDG_CACHE_HOME", ".cache")?.join("ardent/compiled");
+    let compiled = xdg::home("XDG_CACHE_HOME", ".cache")?.join("ardent/compiled");
     let root = root.canonicalize().ok()?;
     let directory = match scope {
         CompilationCache::User => compiled.join("shared"),

@@ -5,6 +5,7 @@ mod release;
 mod sync;
 mod tracked;
 mod update;
+mod xdg;
 
 use std::env;
 use std::fmt;
@@ -26,7 +27,7 @@ struct Cli {
 enum Command {
     /// Make the working directory an Ardent project by creating `.ardent/` in it
     Init {
-        /// Install these comma-separated format plugins (e.g. markdown,rust). Omit to select in a terminal.
+        /// Install these comma-separated format plugins in this project (e.g. markdown,rust). Omit to select in a terminal.
         #[arg(long, value_name = "NAMES")]
         plugins: Option<String>,
     },

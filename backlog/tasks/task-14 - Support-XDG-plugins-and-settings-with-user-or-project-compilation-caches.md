@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-24 13:08'
-updated_date: '2026-11-27 17:23'
+updated_date: '2026-11-27 18:16'
 labels: []
 milestone: m-3
 dependencies:
@@ -17,6 +17,7 @@ references:
   - openspec/specs/sync/spec.md
   - openspec/specs/ardent-layout/spec.md
   - openspec/changes/archive/2026-11-27-task-14-xdg-plugins
+  - openspec/changes/archive/2026-11-27-task-14-init-install-scope
 priority: medium
 type: feature
 ordinal: 14000
@@ -39,6 +40,7 @@ compilation cache holds derived code and has a separate choice of scope.
 - [x] #5 Sync may write to the selected cache. Its existing write boundary applies elsewhere.
 
 - [x] #6 Clearing either compilation cache preserves installed plugins and settings.
+- [x] #7 Init offers plugins, asks for user or project scope, and enables only the boxes the user checks.
 <!-- AC:END -->
 
 ## Definition of Done
@@ -57,13 +59,16 @@ compilation cache holds derived code and has a separate choice of scope.
 3. Select a trusted Wasmtime cache independently of package location. Test both installation scopes against both cache
    scopes, including clearing the cache and preserving inputs.
 4. Update the README, run the workspace gate and archive the approved change.
+
+5. Extend interactive init with the requested opt-in, scope and plugin prompts. Test both installation locations, shared
+   package reuse, cancellation and scripted compatibility.
 <!-- SECTION:PLAN:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Projects select their enabled formats and inherit user settings by key. Sync and browse verify the project pin or the
-shared XDG package and use the selected compilation cache. The CLI tests cover two projects, the four installation and
-cache combinations, cache clearing, digest changes after removing a pin, and a broken pin. The browser test reads
-highlighted Rust source through a user installation. All 217 workspace tests, formatting and Clippy passed on macOS.
+Projects enable their own formats, inherit user settings by key and can pin a project package. Interactive init offers
+user or project installation with every plugin initially unchecked. Explicit --plugins installs in the project. The full
+macOS gate passed with 221 Rust tests and two recipe tests. Terminal tests cover both scopes, concurrent installation,
+cancellation, retained packages and retry. Linux and Windows workspace checks passed.
 <!-- SECTION:FINAL_SUMMARY:END -->

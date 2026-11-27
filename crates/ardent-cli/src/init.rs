@@ -1,6 +1,7 @@
 //! `ardent init`: make a directory an Ardent project with the initial content of the spec `ardent-layout`.
 
 mod selection;
+mod shared;
 
 use std::env;
 use std::fmt;
@@ -11,7 +12,8 @@ use std::path::{Path, PathBuf};
 use ardent_core::layout::{self, ARDENT_DIR, CACHE_DIR};
 
 use crate::project_root;
-use crate::release::{self, ReleasePlugin};
+use crate::release;
+use selection::{Scope, Selection};
 
 const GITIGNORE: &str = "/cache/\n";
 
@@ -23,8 +25,6 @@ pub enum InitError {
     AlreadyExists(PathBuf),
     /// A parent directory is already a project root. Nothing changed.
     InsideProject(PathBuf),
-    /// The file system failed at `path`. Nothing changed: either init had not started, or it removed the `.ardent/` it
-    /// had started.
     Io {
         path: PathBuf,
         source: io::Error,
@@ -55,7 +55,9 @@ impl fmt::Display for InitError {
                 "this directory is inside the Ardent project at {}; nothing changed",
                 root.display()
             ),
-            Self::Io { path, source } => write!(f, "{}: {source}; nothing changed", path.display()),
+            Self::Io { path, source } => {
+                write!(f, "{}: {source}; project not created", path.display())
+            }
             Self::Incomplete {
                 path,
                 source,
@@ -89,8 +91,16 @@ pub fn run(project_dir: &Path, names: Option<&str>) -> Result<PathBuf, InitError
     // Relative writes and rollback stay in the process's working directory even if it is renamed.
     let destination = Path::new(ARDENT_DIR);
     create_ardent_dir(destination)?;
-    write_initial_files(destination, &selected)
-        .map_err(|(path, source)| roll_back(destination, path, source))?;
+    let mut published = Vec::new();
+    write_initial_files(destination, &selected, &mut published).map_err(|(path, mut source)| {
+        if !published.is_empty() {
+            source = io::Error::new(
+                source.kind(),
+                format!("{source}; retained user plugins: {}", published.join(", ")),
+            );
+        }
+        roll_back(destination, path, source)
+    })?;
     Ok(ardent_dir)
 }
 
@@ -122,16 +132,24 @@ fn create_ardent_dir(ardent_dir: &Path) -> Result<(), InitError> {
 
 fn write_initial_files(
     ardent_dir: &Path,
-    selected: &[&ReleasePlugin],
+    selected: &Selection,
+    published: &mut Vec<&'static str>,
 ) -> Result<(), (PathBuf, io::Error)> {
     let mut config = String::from("schema: 1\nformats:");
-    if selected.is_empty() {
+    if selected.plugins.is_empty() {
         config.push_str(" {}\n");
     } else {
-        let source = release::release_dir()?;
+        match selected.scope {
+            Scope::Project => {
+                let source = release::release_dir()?;
+                for plugin in &selected.plugins {
+                    plugin.install(&source, ardent_dir, ardent_dir)?;
+                }
+            }
+            Scope::User => shared::install(ardent_dir, &selected.plugins, published)?,
+        }
         config.push('\n');
-        for plugin in selected {
-            plugin.install(&source, ardent_dir, ardent_dir)?;
+        for plugin in &selected.plugins {
             config.push_str(&format!("  {}: {{}}\n", plugin.name));
         }
     }

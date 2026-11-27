@@ -98,7 +98,7 @@ pub(crate) enum Run<'a> {
 /// content check for one source when its open preview has evidence that the stamp is stale.
 pub(crate) fn run_at(root: &Path, mode: Run) -> Result<Report, SyncError> {
     let ardent_dir = root.join(ARDENT_DIR);
-    let user_dir = settings::config_dir();
+    let user_dir = crate::xdg::config_home().map(|home| home.join("ardent"));
     let config = settings::load(root, user_dir.as_deref())?;
     let cache_dir = settings::compilation_dir(root, config.compilation_cache.unwrap_or_default());
     let (mut patterns, overrides) =
