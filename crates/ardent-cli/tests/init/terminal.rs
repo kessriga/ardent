@@ -104,6 +104,37 @@ fn selects_rust_in_a_short_terminal_and_after_resizing() -> io::Result<()> {
 }
 
 #[test]
+fn scope_picker_redraws_with_compact_labels_after_resize() -> io::Result<()> {
+    let project = temp_dir()?;
+    let (status, output) = interact(project.path(), 24, |term, _| {
+        term.write_all(b"\r")?;
+        let mut display = Vec::new();
+        let start = Instant::now();
+        while !String::from_utf8_lossy(&display).contains("In this project") {
+            match term.read_to_end(&mut display) {
+                Err(err) if err.kind() != io::ErrorKind::WouldBlock => return Err(err),
+                _ => {}
+            }
+            if start.elapsed() > Duration::from_secs(5) {
+                return Err(io::Error::other("scope picker did not appear"));
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        resize_to(term, 2, 14)?;
+        term.write_all(b"\x1b[B\r \r")
+    })?;
+    assert!(status.success(), "{output}");
+    assert!(output.contains("Per-project"), "{output}");
+    assert!(
+        project
+            .path()
+            .join(".ardent/plugins/markdown/format.wasm")
+            .is_file()
+    );
+    Ok(())
+}
+
+#[test]
 fn reuses_a_user_package_under_a_symlinked_configuration_directory() -> io::Result<()> {
     let release = stage_release()?;
     let project = temp_dir()?;

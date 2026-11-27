@@ -153,12 +153,7 @@ fn pick(
     }
     term.write_line(LOCATION)?;
     term.write_line("Use arrows to move, Enter to confirm, q to cancel.")?;
-    let scopes = if usize::from(term.size().1) > SCOPES[0].len() + 2 {
-        SCOPES
-    } else {
-        ["Per-user", "Per-project"]
-    };
-    let Some(index) = menu(&mut term, &mut read_key, &scopes, None)? else {
+    let Some(index) = menu(&mut term, &mut read_key, scope_labels, None)? else {
         return Ok(None);
     };
     let scope = if index == 0 {
@@ -171,7 +166,7 @@ fn pick(
     )?;
     let names: Vec<_> = RELEASE.iter().map(|plugin| plugin.name).collect();
     let mut checked = [false; RELEASE.len()];
-    if menu(&mut term, &mut read_key, &names, Some(&mut checked))?.is_none() {
+    if menu(&mut term, &mut read_key, |_| &names, Some(&mut checked))?.is_none() {
         return Ok(None);
     }
     let plugins = RELEASE
@@ -182,15 +177,25 @@ fn pick(
     Ok(Some(Selection { scope, plugins }))
 }
 
-fn menu(
+fn scope_labels(width: u16) -> &'static [&'static str] {
+    if usize::from(width) > SCOPES[0].len() + 2 {
+        &SCOPES
+    } else {
+        &["Per-user", "Per-project"]
+    }
+}
+
+fn menu<'a>(
     term: &mut Term,
     read_key: &mut impl FnMut() -> io::Result<Key>,
-    names: &[&str],
+    labels: impl Fn(u16) -> &'a [&'a str],
     mut checked: Option<&mut [bool]>,
 ) -> io::Result<Option<usize>> {
     let mut focus = 0;
     loop {
-        let lines = draw_menu(term, names, focus, checked.as_deref())?;
+        let size = term.size();
+        let names = labels(size.1);
+        let lines = draw_menu(term, size, names, focus, checked.as_deref())?;
         match read_key()? {
             Key::ArrowUp | Key::ArrowLeft | Key::BackTab | Key::Char('k') => {
                 focus = (focus + names.len() - 1) % names.len()
@@ -220,11 +225,11 @@ fn menu(
 
 fn draw_menu(
     term: &Term,
+    (height, width): (u16, u16),
     names: &[&str],
     focus: usize,
     checked: Option<&[bool]>,
 ) -> io::Result<usize> {
-    let (height, width) = term.size();
     let stacked = usize::from(height) >= names.len();
     let mut lines = 0;
     for (index, name) in names.iter().enumerate() {
