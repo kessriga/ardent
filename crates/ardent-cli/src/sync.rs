@@ -249,7 +249,7 @@ fn load_plugins<'a>(
 }
 
 /// Takes the lock of the spec `ardent-layout`, which the operating system releases when the process ends.
-fn lock(ardent_dir: &Path) -> Result<File, SyncError> {
+pub(crate) fn lock(ardent_dir: &Path) -> Result<File, SyncError> {
     let io_error = |path: PathBuf| move |source| SyncError::Io { path, source };
     create_dir(ardent_dir, CACHE_DIR)?;
     let path = ardent_dir.join(LOCK_FILE);

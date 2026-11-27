@@ -10,8 +10,9 @@ use std::time::{Duration, Instant};
 use ardent_format::FormatPlugin;
 use ardent_tui::FileList;
 
-use super::watch::Changes;
+use super::watch::{Batch, Changes};
 use crate::sync::{self, Run, source};
+use crate::update;
 
 /// The source currently on screen, including a file whose scan failed.
 /// Record its revision before verifying it, so a second edit during sync is still detectable.
@@ -172,7 +173,11 @@ fn watch(
     let mut changes = Changes::new(root)?;
     let mut denied: Vec<String> = Vec::new();
     let mut preview: Option<Preview> = None;
-    let mut warnings = Some(Vec::new());
+    let mut batch = Some(Batch {
+        warnings: Vec::new(),
+        check_plugins: true,
+    });
+    let mut notice = Ok(None);
     let mut checked = Instant::now();
     loop {
         let check_access = checked.elapsed() >= Duration::from_secs(1);
@@ -187,7 +192,7 @@ fn watch(
             && denied
                 .iter()
                 .any(|path| source::open_regular(&root.join(path)).is_ok());
-        if warnings.is_some() || verify.is_some() || repaired {
+        if batch.is_some() || verify.is_some() || repaired {
             let report = sync::run_at(root, Run::Browse { verify })
                 .map_err(|err| io::Error::other(err.to_string()))?;
             if let Some(open) = &preview
@@ -204,10 +209,23 @@ fn watch(
                 !report.errors.is_empty() || report.files.iter().any(|(_, error)| error.is_some());
             let mut messages = report.errors;
             messages.extend(report.warnings);
-            messages.extend(warnings.take().unwrap_or_default());
+            if let Some(batch) = batch.take() {
+                messages.extend(batch.warnings);
+                if batch.check_plugins {
+                    notice = update::notice(root);
+                }
+            }
+            let update_notice = match &notice {
+                Ok(message) => message.clone(),
+                Err(error) => {
+                    messages.push(format!("Cannot check plugin updates: {error}"));
+                    None
+                }
+            };
             let list = FileList {
                 files: report.files,
                 messages,
+                update_notice,
             };
             if updates
                 .send(Ok(Update {
@@ -225,6 +243,6 @@ fn watch(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return Ok(()),
         }
-        warnings = changes.ready()?;
+        batch = changes.ready()?;
     }
 }

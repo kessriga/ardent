@@ -25,10 +25,24 @@ struct Session {
 
 impl Session {
     fn open(dir: &Path, slave: &File, master: File) -> io::Result<Self> {
+        Self::open_command(
+            Command::new(env!("CARGO_BIN_EXE_ardent")),
+            dir,
+            slave,
+            master,
+        )
+    }
+
+    fn open_command(
+        mut command: Command,
+        dir: &Path,
+        slave: &File,
+        master: File,
+    ) -> io::Result<Self> {
         let mut terminal = Parser::default();
         set_terminal_size(&mut terminal, slave)?;
         Ok(Self {
-            child: Command::new(env!("CARGO_BIN_EXE_ardent"))
+            child: command
                 .current_dir(dir)
                 .env_remove("NO_COLOR")
                 .stdin(slave.try_clone()?)
@@ -132,6 +146,71 @@ impl Drop for Session {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+#[test]
+fn notices_a_rebuilt_component_and_clears_after_external_update() -> io::Result<()> {
+    let release = common::stage_release()?;
+    for args in [vec![], vec!["browse"]] {
+        let project = common::temp_dir()?;
+        let root = project.path();
+        assert!(
+            common::run_init(root, &["--plugins", "markdown,rust"])?
+                .status
+                .success()
+        );
+        if !args.is_empty() {
+            fs::write(
+                root.join(".ardent/config.yaml"),
+                "schema: 1\nformats: {rust: {}}\n",
+            )?;
+        }
+        fs::write(root.join("notes.rs"), "fn notes() {}\n")?;
+        // A custom section changes the bytes without changing the scanner or its manifest version.
+        fs::OpenOptions::new()
+            .append(true)
+            .open(root.join(".ardent/plugins/markdown/format.wasm"))?
+            .write_all(&[0, 1, 0])?;
+        let synced = Command::new(release.executable())
+            .arg("sync")
+            .current_dir(root)
+            .output()?;
+        assert!(
+            synced.status.success(),
+            "{}",
+            String::from_utf8_lossy(&synced.stderr)
+        );
+        let (master, slave) = pty::open_terminal(16)?;
+        let mut command = Command::new(release.executable());
+        command.args(args);
+        let mut session = Session::open_command(command, root, &slave, master)?;
+        session.wait_for("Plugin updates: markdown. Run ardent update")?;
+        session.resize(&slave, 16, 30)?;
+        session.wait_screen(&["ardent update", "q quit"], &[])?;
+        session.keys(b"\r")?;
+        session.wait_for("fn notes()")?;
+        session.resize(&slave, 16, 80)?;
+        session.wait_screen(
+            &["fn notes()", "Plugin updates: markdown. Run ardent update"],
+            &[],
+        )?;
+        let updated = Command::new(release.executable())
+            .arg("update")
+            .current_dir(root)
+            .output()?;
+        assert!(
+            updated.status.success(),
+            "{}",
+            String::from_utf8_lossy(&updated.stderr)
+        );
+        session.wait_screen(
+            &["fn notes()", "q quit"],
+            &["Plugin updates", "ardent update"],
+        )?;
+        session.keys(b"q")?;
+        assert!(session.child.wait()?.success());
+    }
+    Ok(())
 }
 
 #[test]

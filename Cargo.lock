@@ -115,6 +115,7 @@ dependencies = [
  "ardent-core",
  "ardent-format",
  "ardent-tui",
+ "blake3",
  "clap",
  "console",
  "ignore",

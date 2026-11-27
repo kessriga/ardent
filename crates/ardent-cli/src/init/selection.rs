@@ -7,7 +7,7 @@ use winapi_util::file;
 
 use console::{Key, Term};
 
-use super::plugins::{RELEASE, ReleasePlugin};
+use crate::release::{RELEASE, ReleasePlugin};
 
 #[cfg(unix)]
 mod unix_keys;

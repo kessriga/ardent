@@ -1,8 +1,10 @@
 mod browse;
 mod init;
 mod project_root;
+mod release;
 mod sync;
 mod tracked;
+mod update;
 
 use std::env;
 use std::fmt;
@@ -30,6 +32,8 @@ enum Command {
     },
     /// Bring the structure of each tracked source file in `.ardent/cache/` up to date
     Sync,
+    /// Replace installed release format plugins with the copies bundled with this executable
+    Update,
     /// Browse tracked files, their outlines, and source text in a terminal
     Browse,
 }
@@ -42,6 +46,18 @@ fn main() -> ExitCode {
     };
     match command {
         Command::Init { plugins } => init(working_dir, plugins.as_deref()),
+        Command::Update => match update::run(&working_dir) {
+            Ok(names) => {
+                let mut out = io::stdout().lock();
+                if names.is_empty() {
+                    let _ = writeln!(out, "Installed release plugins are up to date.");
+                } else {
+                    let _ = writeln!(out, "Updated {}", names.join(", "));
+                }
+                ExitCode::SUCCESS
+            }
+            Err(err) => fail(err),
+        },
         Command::Sync => sync(working_dir),
         Command::Browse => match browse::run(&working_dir) {
             Ok(status) => status,

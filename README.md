@@ -36,6 +36,12 @@ In a script, pass the format names explicitly. Use `--plugins ''` to start with 
 ardent init --plugins markdown,rust && ardent sync
 ```
 
+The browser names installed plugins that differ from the running release. The notice clears after you update them. Run
+`ardent update` from anywhere in a project to replace installed Markdown and Rust format plugins with the copies bundled
+with the running executable. This includes disabled plugins. The command replaces the whole package, including local
+edits and extra files in a fork installed under the same name. A separately named fork keeps its files. Project settings
+and the selection of installed plugins stay as they are.
+
 When upgrading an existing project, copy any missing packages listed under `formats` in `.ardent/config.yaml` before the
 first sync. Sync prunes cached structures for files it no longer tracks. For example, if both packages are missing, set
 `ARDENT_RELEASE` to the directory that contains the release executable and run these commands from the project root.

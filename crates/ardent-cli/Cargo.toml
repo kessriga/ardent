@@ -9,6 +9,8 @@ name = "ardent"
 path = "src/main.rs"
 
 [dependencies]
+tempfile.workspace = true
+blake3 = "1.8.7"
 ardent-core.workspace = true
 ardent-tui = { path = "../ardent-tui" }
 notify = "9"
@@ -27,9 +29,6 @@ winapi-util = "0.1.11"
 
 [lints]
 workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dev-dependencies]
 rustix = { version = "1.1.6", features = ["process", "pty", "termios"] }
