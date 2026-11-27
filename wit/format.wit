@@ -48,6 +48,22 @@ interface query-preparation {
     prepare: func();
 }
 
+interface highlighter {
+    enum category { keyword, string-literal, comment, heading, code }
+
+    record span {
+        start: u32,
+        end: u32,
+        category: category,
+    }
+
+    highlight: func(source: list<u8>) -> list<span>;
+}
+
+world syntax-highlighting {
+    export highlighter;
+}
+
 world query-setup {
     export query-preparation;
 }

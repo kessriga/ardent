@@ -7,6 +7,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError
 use std::thread;
 use std::time::{Duration, Instant};
 
+use ardent_format::FormatPlugin;
 use ardent_tui::FileList;
 
 use super::watch::Changes;
@@ -106,7 +107,11 @@ impl Revision {
     }
 }
 
-pub(super) type Update = (FileList, bool);
+pub(super) struct Update {
+    pub files: FileList,
+    pub failed: bool,
+    pub formats: Vec<FormatPlugin>,
+}
 
 pub(super) struct Refresh {
     updates: Receiver<io::Result<Update>>,
@@ -204,7 +209,14 @@ fn watch(
                 files: report.files,
                 messages,
             };
-            if updates.send(Ok((list, failed))).is_err() {
+            if updates
+                .send(Ok(Update {
+                    files: list,
+                    failed,
+                    formats: report.browse_formats,
+                }))
+                .is_err()
+            {
                 return Ok(());
             }
         }

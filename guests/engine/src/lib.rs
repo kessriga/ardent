@@ -9,6 +9,28 @@ pub use engine::{PluginError, QueryEngine, ScanError as QueryScanError};
 
 wit_bindgen::generate!({ path: "../../wit", world: "format-plugin", pub_export_macro: true });
 
+pub mod highlighting {
+    use tree_sitter::{Node, Tree};
+
+    /// Visit nodes in document order. The callback returns whether to descend into the node.
+    pub fn visit(tree: &Tree, mut descend: impl FnMut(Node<'_>) -> bool) {
+        let mut cursor = tree.walk();
+        loop {
+            if descend(cursor.node()) && cursor.goto_first_child() {
+                continue;
+            }
+            while !cursor.goto_next_sibling() {
+                if !cursor.goto_parent() {
+                    return;
+                }
+            }
+        }
+    }
+
+    wit_bindgen::generate!({ path: "../../wit", world: "syntax-highlighting", pub_export_macro: true });
+    pub use exports::ardent::format::highlighter::{Category, Guest, Span};
+}
+
 pub mod query {
     wit_bindgen::generate!({ path: "../../wit", world: "query-setup", pub_export_macro: true });
     pub use exports::ardent::format::query_preparation::Guest;

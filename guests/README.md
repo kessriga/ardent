@@ -19,7 +19,8 @@ parser-limit documentation from `guests/rust/README.md`.
 python guests/package.py target/guests/wasm32-wasip2/release plugins
 ```
 
-The build also produces the scanner for the CLI integration tests. Copy it to the fixture directory after rebuilding.
+The CLI integration tests use a scanner-only component to check compatibility with existing plugins. When the test
+scanner changes, copy its rebuilt component to the fixture directory.
 
 ```sh
 cp target/guests/wasm32-wasip2/release/test_scanner.wasm crates/ardent-cli/tests/components/test-scanner.wasm
@@ -35,9 +36,8 @@ python -B -m unittest guests.test_package
 
 ## Selecting the scanner world
 
-The WIT package defines two worlds. A scanner that generates bindings with `wit-bindgen` must select `format-plugin`. If
-your crate previously called `wit_bindgen::generate!()`, keep the WIT file in its `wit/` directory and select the
-scanner world explicitly.
+A scanner that generates bindings with `wit-bindgen` must select `format-plugin`. If your crate previously called
+`wit_bindgen::generate!()`, keep the WIT file in its `wit/` directory and select the scanner world explicitly.
 
 ```rust
 wit_bindgen::generate!({ world: "format-plugin" });
@@ -45,6 +45,12 @@ wit_bindgen::generate!({ world: "format-plugin" });
 
 A query-based scanner can also export `query-setup` for separate query preparation. See
 [`guests/rust/src/lib.rs`](rust/src/lib.rs) for an implementation using the shared guest bindings.
+
+A plugin can also export the `syntax-highlighting` world alongside its scanner. The browser passes the open file's bytes
+to `ardent:format/highlighter@0.1.0`. Return spans in source order with an inclusive start and exclusive end byte
+offset, plus a category: keyword, string-literal, comment, heading or code. Each span must be nonempty, fit in the
+source and end before or at the next span's start. Gaps appear as plain text. If the export is absent, the call fails or
+any span is invalid, the browser displays plain source and keeps the outline available.
 
 ## Host limits for format plugins
 

@@ -1,12 +1,12 @@
 //! Draw the directory explorer, the open outline and its source on a Ratatui frame.
 
-use std::borrow::Cow;
+mod source;
 
 use ratatui::Frame;
 use ratatui::buffer::CellWidth;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListState, Paragraph};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -134,7 +134,11 @@ fn explorer(frame: &mut Frame<'_>, area: Rect, browser: &Browser) -> Paging {
         .messages
         .iter()
         .flat_map(|msg| wrapped(msg, messages.width.into()));
-    page(frame, messages, diagnostics.skip(browser.diagnostic_scroll))
+    page(
+        frame,
+        messages,
+        diagnostics.skip(browser.diagnostic_scroll).map(Line::from),
+    )
 }
 
 fn document(frame: &mut Frame<'_>, area: Rect, browser: &Browser) -> Paging {
@@ -149,7 +153,9 @@ fn document(frame: &mut Frame<'_>, area: Rect, browser: &Browser) -> Paging {
         }) => page(
             frame,
             area,
-            wrapped(message, area.width.into()).skip(*scroll),
+            wrapped(message, area.width.into())
+                .skip(*scroll)
+                .map(Line::from),
         ),
         None => {
             if !browser.list.files.is_empty() {
@@ -179,26 +185,32 @@ fn outline(frame: &mut Frame<'_>, area: Rect, open: &Page) -> Paging {
         .take(nodes.height.into())
         .map(|i| {
             let (depth, marker) = tree.row_prefix(i);
-            let label = &open.document.outline.nodes[i].label;
+            let node = &open.document.outline.nodes[i];
             let indent = " ".repeat(depth.saturating_mul(2).min(usize::from(nodes.width) / 2));
-            Line::from(format!("{indent}{marker} {}", printable(label)))
+            Line::from(vec![
+                Span::raw(format!("{indent}{marker}")),
+                Span::styled(
+                    format!(" {}", printable(&node.label)),
+                    kind_color(&node.kind),
+                ),
+            ])
         });
     selected_list(frame, nodes, visible, selected.saturating_sub(start));
     frame.render_widget(Block::default().borders(Borders::TOP), divider);
 
-    let node = &open.document.outline.nodes[tree.selected];
-    // Slice before decoding because replacing an invalid UTF-8 byte can move later offsets.
-    let text = open
-        .document
-        .bytes
-        .get(node.range.clone())
-        .map(String::from_utf8_lossy)
-        .unwrap_or(Cow::Borrowed("Invalid source range"));
-    page(
-        frame,
-        source,
-        wrapped(&text, source.width.into()).skip(open.scroll),
-    )
+    source::draw(frame, source, open)
+}
+
+fn kind_color(kind: &str) -> Color {
+    match kind {
+        "heading" | "mod" | "impl" | "list" => Color::Cyan,
+        "struct" | "enum" | "trait" | "union" | "type" | "table" => Color::Yellow,
+        "fn" | "macro" | "code" => Color::Green,
+        "variant" | "const" | "static" | "quote" => Color::Magenta,
+        "file" | "extern" | "front_matter" => Color::Blue,
+        "paragraph" | "item" | "field" => Color::Reset,
+        _ => Color::LightBlue,
+    }
 }
 
 fn selected_list(
@@ -218,9 +230,13 @@ fn selected_list(
 }
 
 /// Only decode and hold the rows that reach the viewport, plus one to decide whether Page Down can advance.
-fn page(frame: &mut Frame<'_>, area: Rect, mut rows: impl Iterator<Item = String>) -> Paging {
+fn page(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    mut rows: impl Iterator<Item = Line<'static>>,
+) -> Paging {
     let page_height = usize::from(area.height);
-    let text: Vec<_> = rows.by_ref().take(page_height).map(Line::from).collect();
+    let text: Vec<_> = rows.by_ref().take(page_height).collect();
     frame.render_widget(Paragraph::new(text), area);
     Paging {
         page_height,
@@ -302,16 +318,24 @@ fn display(ch: char) -> char {
 }
 
 fn wrapped(text: &str, width: usize) -> impl Iterator<Item = String> + '_ {
+    styled_rows(text, width, |_| Style::default()).map(|line| line.to_string())
+}
+
+fn styled_rows<'a>(
+    text: &'a str,
+    width: usize,
+    mut style_at: impl FnMut(usize) -> Style + 'a,
+) -> impl Iterator<Item = Line<'static>> + 'a {
     // Ratatui draws one extended grapheme per cell sequence. Wrap with the same width calculation.
-    let mut graphemes = text.graphemes(true).peekable();
+    let mut graphemes = text.grapheme_indices(true).peekable();
     std::iter::from_fn(move || {
         if width == 0 {
             return None;
         }
         graphemes.peek()?;
-        let mut row = String::new();
+        let mut row = Line::default();
         let mut used = 0;
-        while let Some(&grapheme) = graphemes.peek() {
+        while let Some(&(offset, grapheme)) = graphemes.peek() {
             let printable = match grapheme {
                 "\n" | "\r\n" => {
                     graphemes.next();
@@ -333,7 +357,14 @@ fn wrapped(text: &str, width: usize) -> impl Iterator<Item = String> + '_ {
             }
             graphemes.next();
             used += cells;
-            row.push_str(symbol);
+            let style = style_at(offset);
+            if let Some(last) = row.spans.last_mut()
+                && (cells == 0 || last.style == style)
+            {
+                last.content.to_mut().push_str(symbol);
+            } else {
+                row.spans.push(Span::styled(symbol.to_owned(), style));
+            }
         }
         Some(row)
     })
@@ -342,6 +373,7 @@ fn wrapped(text: &str, width: usize) -> impl Iterator<Item = String> + '_ {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ardent_core::highlight::{Category, Highlight};
 
     #[test]
     fn a_four_row_terminal_keeps_the_selection_source_paging_and_focus_keys() {
@@ -357,6 +389,7 @@ mod tests {
         let load = |path: &str| {
             let bytes = b"first\nsecond".to_vec();
             Ok(Document {
+                highlights: Default::default(),
                 outline: Outline::build(path, &bytes, &[]),
                 bytes,
             })
@@ -388,6 +421,7 @@ mod tests {
         let text = format!("{first_row}Z");
         browser.enter(&|path| {
             Ok(Document {
+                highlights: Default::default(),
                 outline: Outline::build(path, text.as_bytes(), &[]),
                 bytes: text.as_bytes().to_vec(),
             })
@@ -398,6 +432,75 @@ mod tests {
                 .any(|pair| pair[0] == first_row && pair[1] == "Z"),
             "{rows:?}"
         );
+    }
+
+    #[test]
+    fn wrapped_child_styles_follow_original_bytes_across_pages()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use ardent_core::outline::{Outline, ScannedNode};
+        use crossterm::event::KeyCode;
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let mut bytes = b"skip\nA\xff\t".to_vec();
+        let start = bytes.len();
+        bytes.extend_from_slice("界e\u{301}xy\r\nz".as_bytes());
+        let child = ScannedNode {
+            kind: "heading".into(),
+            label: "H".into(),
+            range: 5..bytes.len(),
+            label_ranges: vec![],
+            children: vec![],
+        };
+        let mut open = Page::new(crate::Document {
+            outline: Outline::build("a", &bytes, &[child]),
+            highlights: [Highlight {
+                range: start..start + "界e\u{301}x".len(),
+                category: Category::Code,
+            }]
+            .into(),
+            bytes,
+        })?;
+        open.tree.navigate(KeyCode::Right);
+        let mut terminal = Terminal::new(TestBackend::new(7, 4))?;
+        terminal.draw(|frame| {
+            outline(frame, frame.area(), &open);
+        })?;
+        let cells = terminal.backend().buffer();
+        assert_eq!(cells[(0, 1)].symbol(), ">");
+        assert_eq!(cells[(4, 0)].fg, Color::Blue);
+        assert_eq!(cells[(6, 1)].fg, Color::Cyan);
+        assert!(cells[(6, 1)].modifier.contains(Modifier::BOLD));
+        assert_eq!(cells[(1, 3)].symbol(), "�");
+        for (x, symbol, color) in [
+            (0, "A", Color::Reset),
+            (2, " ", Color::Reset),
+            (3, "界", Color::Green),
+            (5, "e\u{301}", Color::Green),
+            (6, "x", Color::Green),
+        ] {
+            assert_eq!((cells[(x, 3)].symbol(), cells[(x, 3)].fg), (symbol, color));
+        }
+        // Narrow the pane so that the last colored character moves onto the next page.
+        terminal.backend_mut().resize(6, 4);
+        open.scroll = 1;
+        terminal.draw(|frame| {
+            outline(frame, frame.area(), &open);
+        })?;
+        let cells = terminal.backend().buffer();
+        assert_eq!(
+            (cells[(0, 3)].symbol(), cells[(0, 3)].fg),
+            ("x", Color::Green)
+        );
+        assert_eq!(
+            (cells[(1, 3)].symbol(), cells[(1, 3)].fg),
+            ("y", Color::Reset)
+        );
+        open.scroll = 2;
+        terminal.draw(|frame| {
+            outline(frame, frame.area(), &open);
+        })?;
+        assert_eq!(terminal.backend().buffer()[(0, 3)].symbol(), "z");
+        Ok(())
     }
 
     #[test]
@@ -414,6 +517,21 @@ mod tests {
             sidebar.contains('!') && sidebar.contains("long_module"),
             "{sidebar:?}"
         );
+    }
+
+    #[test]
+    fn combining_accent_stays_on_a_substituted_tab_across_a_style_boundary() {
+        let row = styled_rows("\t\u{301}x", 4, |offset| {
+            if offset == 0 {
+                Style::default().fg(Color::Cyan)
+            } else {
+                Style::default()
+            }
+        })
+        .next()
+        .expect("one row");
+        assert_eq!(row.spans[0].content, " \u{301}");
+        assert_eq!(row.spans[1].content, "x");
     }
 
     #[test]

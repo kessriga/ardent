@@ -5,6 +5,8 @@
 use ardent_format_guest::{self as guest, PluginError, QueryEngine};
 use guest::scanner::{Guest, Metadata, Node, ScanError};
 
+mod highlight;
+
 struct Component;
 
 fn plugin() -> Result<QueryEngine, PluginError> {
@@ -24,6 +26,12 @@ impl guest::query::Guest for Component {
     }
 }
 
+impl guest::highlighting::Guest for Component {
+    fn highlight(source: Vec<u8>) -> Vec<guest::highlighting::Span> {
+        highlight::spans(&source)
+    }
+}
+
 impl Guest for Component {
     fn describe() -> Metadata {
         guest::metadata("rust", env!("CARGO_PKG_VERSION"), &["*.rs"])
@@ -38,6 +46,8 @@ impl Guest for Component {
 guest::export!(Component with_types_in guest);
 #[cfg(target_arch = "wasm32")]
 guest::query::export!(Component with_types_in guest::query);
+#[cfg(target_arch = "wasm32")]
+guest::highlighting::export!(Component with_types_in guest::highlighting);
 
 #[cfg(test)]
 mod tests {

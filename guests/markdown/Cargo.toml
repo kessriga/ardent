@@ -12,7 +12,8 @@ workspace = true
 
 [dependencies]
 ardent-format-guest.workspace = true
-tree-sitter-md.workspace = true
+tree-sitter.workspace = true
+tree-sitter-md = { workspace = true, features = ["parser"] }
 
 [dev-dependencies]
 ardent-core.workspace = true

@@ -1,7 +1,9 @@
 //! Keyboard navigation and terminal display for the outline browser.
 
 use std::io;
+use std::sync::Arc;
 
+use ardent_core::highlight::Highlight;
 use ardent_core::outline::Outline;
 use crossterm::event::KeyCode;
 
@@ -35,6 +37,8 @@ impl FileList {
 
 /// A snapshot for browsing one tracked source file.
 pub struct Document {
+    /// Sorted, disjoint syntax spans in these source bytes. An empty list displays plain text.
+    pub highlights: Arc<[Highlight]>,
     /// Nodes in document order, starting with the file node. Their byte ranges index [`Self::bytes`].
     pub outline: Outline,
     /// Source bytes whose content hash matches the structure stamp used to load the outline.
@@ -328,6 +332,7 @@ mod tests {
             children: vec![],
         };
         Ok(Document {
+            highlights: Default::default(),
             outline: Outline::build("notes.md", text.as_bytes(), &[entry]),
             bytes: text.into_bytes(),
         })

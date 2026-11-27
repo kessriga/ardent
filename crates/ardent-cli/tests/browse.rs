@@ -30,6 +30,7 @@ impl Session {
         Ok(Self {
             child: Command::new(env!("CARGO_BIN_EXE_ardent"))
                 .current_dir(dir)
+                .env_remove("NO_COLOR")
                 .stdin(slave.try_clone()?)
                 .stdout(slave.try_clone()?)
                 .stderr(slave.try_clone()?)
@@ -62,6 +63,26 @@ impl Session {
             let text = screen.contents();
             present.iter().all(|s| text.contains(s)) && absent.iter().all(|s| !text.contains(s))
         })
+    }
+
+    fn wait_source_color(
+        &mut self,
+        line: &str,
+        column: u16,
+        color: vt100::Color,
+    ) -> io::Result<()> {
+        self.wait_until(line, |screen| {
+            screen
+                .rows(0, screen.size().1.get())
+                .enumerate()
+                .any(|(row, text)| {
+                    text.starts_with(line)
+                        && screen
+                            .cell(row as u16, column)
+                            .is_some_and(|cell| cell.fgcolor() == color)
+                })
+        })?;
+        Ok(())
     }
 
     fn wait_restored(&mut self) -> io::Result<()> {
@@ -493,16 +514,20 @@ fn numbers_list_items_within_each_list_and_previews_the_selection() -> io::Resul
     session.wait_screen(&["item.1", "item.2"], &[])?;
     // Enter the first item, expand it, enter its list, expand, then select the lone child.
     session.keys(b"\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C")?;
-    let selected = session.wait_screen(
-        &["- Only child", "item.1", "item.2"],
-        &["- First step", "- Last step"],
+    session.wait_until(
+        "select the lone child and display only its source",
+        |screen| {
+            let text = screen.contents();
+            ["- Only child", "item.1", "item.2"]
+                .iter()
+                .all(|s| text.contains(s))
+                && !text.contains("- First step")
+                && !text.contains("- Last step")
+                && text
+                    .lines()
+                    .any(|row| row.contains('>') && row.trim_end().ends_with(" item"))
+        },
     )?;
-    assert!(
-        selected
-            .lines()
-            .any(|row| row.contains('>') && row.trim_end().ends_with(" item")),
-        "{selected}"
-    );
     session.keys(b"q")?;
     session.wait_restored()?;
     assert!(session.child.wait()?.success());
@@ -526,5 +551,63 @@ fn redirected_browse_rejects_the_terminal_before_creating_a_cache() -> io::Resul
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("requires an interactive terminal"));
     assert!(!root.join(".ardent/cache").exists());
+    Ok(())
+}
+
+#[test]
+fn highlights_packaged_examples_and_navigates_a_scanner_only_file() -> io::Result<()> {
+    use vt100::Color::{Default, Idx};
+    let project = common::temp_dir()?;
+    let root = project.path();
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let packages = root.join(".ardent/plugins");
+    for name in ["markdown", "rust"] {
+        let dir = packages.join(name);
+        fs::create_dir_all(&dir)?;
+        let example = examples.join(".ardent/plugins").join(name);
+        for file in ["plugin.yaml", "format.wasm"] {
+            fs::copy(example.join(file), dir.join(file))?;
+        }
+    }
+    fs::write(
+        root.join(".ardent/config.yaml"),
+        "schema: 1\nformats: {markdown: {}, rust: {}, probe: {}}\n",
+    )?;
+    let probe = packages.join("probe");
+    fs::create_dir(&probe)?;
+    fs::write(
+        probe.join("plugin.yaml"),
+        "schema: 1\nkind: format\nname: probe\nversion: 0.1.0\ncomponent: format.wasm\nfiles: ['*.probe']\n",
+    )?;
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/components/test-scanner.wasm"),
+        probe.join("format.wasm"),
+    )?;
+    fs::copy(examples.join("rust/gauge.rs"), root.join("a.rs"))?;
+    fs::copy(examples.join("markdown/shift-log.md"), root.join("b.md"))?;
+    fs::write(root.join("c.probe"), "fn plain() {}")?;
+    let (master, slave) = pty::open_terminal(32)?;
+    pty::resize_to(&slave, 32, 58)?;
+    let mut session = Session::open(root, &slave, master)?;
+    session.wait_for("c.probe")?;
+    session.keys(b"\r")?;
+    session.wait_source_color("//! Heights", 0, Idx(6))?;
+    session.wait_source_color("pub mod gauge", 0, Idx(5))?;
+    session.keys(b"\t\x1b[B\r")?;
+    session.wait_source_color("# North Pier shift log", 0, Idx(3))?;
+    fs::write(root.join("b.md"), "Now `code` here.\n")?;
+    session.wait_source_color("Now `code` here.", 4, Idx(2))?;
+    session.wait_source_color("Now `code` here.", 0, Default)?;
+    session.keys(b"\t\x1b[B\r\x1b[C")?;
+    session.wait_source_color("fn plain() {}", 0, Default)?;
+    session.wait_until("select the scanner-only child", |screen| {
+        screen
+            .contents()
+            .lines()
+            .any(|line| line.starts_with('>') && line.trim_end().ends_with(" text"))
+    })?;
+    session.keys(b"q")?;
+    session.wait_restored()?;
+    assert!(session.child.wait()?.success());
     Ok(())
 }
