@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::staging::Stage;
 use ardent_core::layout::{self, ARDENT_DIR, LOCK_FILE};
-use ardent_format::{FormatPlugin, InstalledPackages, patterns};
+use ardent_format::{InstalledPackages, patterns};
 
 use crate::release::{self, RELEASE, ReleasePlugin};
 use crate::sync;
@@ -246,7 +246,8 @@ fn stage_candidate(
     plugin
         .install(release, &ardent, stage)
         .map_err(path_error)?;
-    let format = FormatPlugin::load(stage, plugin.name)
+    let format = InstalledPackages::for_sync(stage, None, None)
+        .and_then(|packages| packages.load_format(plugin.name))
         .map_err(|e| e.to_string())?
         .ok_or("missing staged package")?;
     patterns::compile_defaults(root, &format.default_files, &format.default_prefixes)
@@ -271,6 +272,7 @@ fn publish(candidate: &Path, installed: &Path, warnings: &mut Vec<String>) -> io
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ardent_format::FormatPlugin;
     use std::fs::TryLockError;
 
     #[test]

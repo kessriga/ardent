@@ -72,6 +72,30 @@ fn updates_installed_formats_without_touching_selection_or_configuration() -> io
     Ok(())
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn verifying_an_update_leaves_compilation_caches_untouched() -> io::Result<()> {
+    let release = stage_release()?;
+    let project = temp_dir()?;
+    let home = temp_dir()?;
+    success(run_init(project.path(), &["--plugins", "markdown"])?);
+    let ardent = project.path().join(".ardent");
+    fs::write(
+        ardent.join("config.yaml"),
+        "schema: 1\ncompilation_cache: project\nformats: {markdown: {}}\n",
+    )?;
+    fs::write(ardent.join("plugins/markdown/obsolete"), "old package")?;
+    let output = common::ardent_command(release.executable())
+        .arg("update")
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("XDG_CACHE_HOME", home.path().join("cache"))
+        .output()?;
+    assert!(success(output).contains("Updated markdown"));
+    assert!(snapshot(home.path())?.is_empty());
+    Ok(())
+}
+
 #[test]
 fn preserves_a_view_with_the_same_name_as_a_release_format() -> io::Result<()> {
     let project = temp_dir()?;
