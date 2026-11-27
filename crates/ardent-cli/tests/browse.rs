@@ -169,6 +169,73 @@ impl Drop for Session {
 }
 
 #[test]
+fn refreshes_when_user_format_patterns_change_outside_the_project() -> io::Result<()> {
+    let project = common::temp_dir()?;
+    let home = common::temp_dir()?;
+    let root = project.path();
+    let init = common::run_init(root, &["--plugins", "markdown"])?;
+    assert!(
+        init.status.success(),
+        "{}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+    fs::write(root.join("first.md"), "# First\n")?;
+    fs::write(root.join("second.txt"), "# Second\n")?;
+    let (master, slave) = pty::open_terminal(24)?;
+    let mut command = common::ardent_command(env!("CARGO_BIN_EXE_ardent"));
+    command.env("XDG_CONFIG_HOME", home.path());
+    let mut session = Session::open_command(command, root, &slave, master)?;
+    session.wait_screen(&["first.md"], &["second.txt"])?;
+    let settings = home.path().join("ardent/config.yaml");
+    fs::create_dir(home.path().join("ardent"))?;
+    fs::write(
+        &settings,
+        "schema: 1\nformats: {markdown: {files: ['*.txt']}}\n",
+    )?;
+    session.wait_screen(&["second.txt"], &["first.md"])?;
+    fs::remove_file(settings)?;
+    let screen = session.wait_screen(&["first.md"], &["second.txt"])?;
+    session.keys(b"q")?;
+    let status = session.child.wait()?;
+    assert!(status.success(), "{status}\n{screen}");
+    Ok(())
+}
+
+#[test]
+fn discovers_an_enabled_plugin_installed_while_browsing() -> io::Result<()> {
+    let release = common::stage_release()?;
+    let home = tempfile::tempdir_in(release.path())?;
+    let project = common::temp_dir()?;
+    let root = project.path();
+    assert!(common::run_init(root, &["--plugins", ""])?.status.success());
+    fs::write(
+        root.join(".ardent/config.yaml"),
+        "schema: 1\nformats: {markdown: {}}\n",
+    )?;
+    fs::write(root.join("notes.md"), "# Notes\n")?;
+    let packages = home.path().join("ardent/plugins");
+    fs::create_dir_all(&packages)?;
+    let (master, slave) = pty::open_terminal(24)?;
+    let mut command = common::ardent_command(release.executable());
+    command.env("XDG_CONFIG_HOME", home.path());
+    let mut session = Session::open_command(command, root, &slave, master)?;
+    session.wait_screen(&["no plugin"], &["notes.md"])?;
+    fs::rename(
+        release.path().join("plugins/markdown"),
+        packages.join("markdown"),
+    )?;
+    session.wait_screen(&["notes.md"], &["no plugin"])?;
+    fs::rename(
+        packages.join("markdown"),
+        release.path().join("plugins/markdown"),
+    )?;
+    session.wait_screen(&["no plugin"], &["notes.md"])?;
+    session.keys(b"q")?;
+    assert!(session.child.wait()?.success());
+    Ok(())
+}
+
+#[test]
 fn notices_a_rebuilt_component_and_clears_after_external_update() -> io::Result<()> {
     let release = common::stage_release()?;
     for args in [vec![], vec!["browse"]] {

@@ -12,14 +12,14 @@ use notify::{
 
 use crate::tracked::Discovery;
 
-mod git_rules;
+mod external_rules;
 
 /// Collect filesystem notifications for the next browser sync. The watcher stays alive for the session.
 pub(super) struct Changes {
     _watcher: Box<dyn Watcher>,
     pending: Arc<Mutex<Pending>>,
     root: PathBuf,
-    rules: git_rules::Inputs,
+    rules: external_rules::Inputs,
     polling: bool,
 }
 
@@ -110,7 +110,7 @@ impl Changes {
                     true,
                 ),
             };
-        let rules = git_rules::Inputs::new(&root);
+        let rules = external_rules::Inputs::new(&root, crate::xdg::config_dir());
         Ok(Self {
             _watcher: watcher,
             pending,
@@ -140,6 +140,7 @@ impl Changes {
             .lock()
             .map_err(|_| io::Error::other("watcher state poisoned"))?;
         if rules_changed {
+            pending.discovery = None;
             pending.since.get_or_insert_with(Instant::now);
         }
         Ok(pending.take_ready()?.map(|warnings| Batch {

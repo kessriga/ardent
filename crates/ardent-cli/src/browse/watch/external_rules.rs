@@ -1,20 +1,30 @@
-//! Git inputs outside the recursive project watch can disappear or be replaced atomically.
+//! Discovery inputs outside the recursive project watch can disappear or be replaced atomically.
 
+use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 pub(super) struct Inputs {
     pub(super) linked_worktrees: Vec<PathBuf>,
-    previous: Vec<(PathBuf, Option<Vec<u8>>)>,
+    user_dir: Option<PathBuf>,
+    previous: Snapshot,
     checked: Instant,
 }
 
+#[derive(Debug, PartialEq)]
+struct Snapshot {
+    files: Vec<(PathBuf, Option<Vec<u8>>)>,
+    packages: Option<BTreeSet<OsString>>,
+}
+
 impl Inputs {
-    pub(super) fn new(root: &Path) -> Self {
+    pub(super) fn new(root: &Path, user_dir: Option<PathBuf>) -> Self {
         Self {
             linked_worktrees: Vec::new(),
-            previous: read(root, &[]),
+            previous: read(root, &[], user_dir.as_deref()),
+            user_dir,
             checked: Instant::now(),
         }
     }
@@ -24,7 +34,7 @@ impl Inputs {
             return false;
         }
         self.checked = Instant::now();
-        let next = read(root, &self.linked_worktrees);
+        let next = read(root, &self.linked_worktrees, self.user_dir.as_deref());
         if self.previous == next {
             return false;
         }
@@ -33,8 +43,11 @@ impl Inputs {
     }
 }
 
-fn read(root: &Path, linked_worktrees: &[PathBuf]) -> Vec<(PathBuf, Option<Vec<u8>>)> {
-    let mut inputs = Vec::new();
+fn read(root: &Path, linked_worktrees: &[PathBuf], user_dir: Option<&Path>) -> Snapshot {
+    let mut inputs: Vec<_> = user_dir
+        .into_iter()
+        .map(|dir| dir.join(ardent_core::config::FILE_NAME))
+        .collect();
     let nearest = crate::tracked::git_root(root);
     if let Some(repo) = nearest {
         for ancestor in root.ancestors().skip(1) {
@@ -59,13 +72,21 @@ fn read(root: &Path, linked_worktrees: &[PathBuf]) -> Vec<(PathBuf, Option<Vec<u
     }
     inputs.sort_unstable();
     inputs.dedup();
-    inputs
+    let files = inputs
         .into_iter()
         .map(|path| {
             let bytes = path.is_file().then(|| fs::read(&path).ok()).flatten();
             (path, bytes)
         })
-        .collect()
+        .collect();
+    let packages = user_dir.and_then(|dir| {
+        fs::read_dir(dir.join("plugins"))
+            .ok()?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<std::io::Result<_>>()
+            .ok()
+    });
+    Snapshot { files, packages }
 }
 
 fn common_directory(repo: &Path, git_file: &Path) -> Option<PathBuf> {
@@ -89,9 +110,9 @@ mod tests {
         fs::create_dir_all(temp.path().join("common/info"))?;
         fs::write(repo.join(".git"), format!("gitdir: {}\n", git.display()))?;
         fs::write(git.join("commondir"), "../..\n")?;
-        let before = read(&repo, &[]);
+        let before = read(&repo, &[], None);
         fs::write(temp.path().join("common/info/exclude"), "private.md")?;
-        assert_ne!(before, read(&repo, &[]));
+        assert_ne!(before, read(&repo, &[], None));
         Ok(())
     }
 
@@ -122,7 +143,7 @@ mod tests {
         assert!(walk.files.is_empty());
         let discovery = Discovery::from_walk(&walk, &patterns);
         assert!(discovery.affects_files(&root, Path::new("linked")));
-        let mut inputs = Inputs::new(&root);
+        let mut inputs = Inputs::new(&root, None);
         inputs.linked_worktrees = discovery.linked_worktrees;
         let mut changed = || {
             inputs.checked = Instant::now() - Duration::from_secs(2);
@@ -146,7 +167,7 @@ mod tests {
         let root = repo.join("work/project");
         fs::create_dir_all(repo.join(".git/info"))?;
         fs::create_dir_all(&root)?;
-        let mut rules = Inputs::new(&root);
+        let mut rules = Inputs::new(&root, None);
         let mut changed = || {
             rules.checked = Instant::now() - Duration::from_secs(2);
             assert!(rules.changed(&root));
@@ -157,9 +178,9 @@ mod tests {
         changed();
         fs::write(repo.join(".git/info/exclude"), "*.md")?;
         changed();
-        let snapshot = read(&root, &[]);
+        let snapshot = read(&root, &[], None);
         fs::write(temp.path().join(".gitignore"), "*.rs")?;
-        assert_eq!(snapshot, read(&root, &[]));
+        assert_eq!(snapshot, read(&root, &[], None));
         Ok(())
     }
 }

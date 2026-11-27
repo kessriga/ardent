@@ -15,3 +15,7 @@ pub(crate) fn home(variable: &str, default: &str) -> Option<PathBuf> {
 pub(crate) fn config_home() -> Option<PathBuf> {
     home("XDG_CONFIG_HOME", ".config")
 }
+
+pub(crate) fn config_dir() -> Option<PathBuf> {
+    config_home().map(|home| home.join("ardent"))
+}
