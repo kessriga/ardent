@@ -6,6 +6,7 @@ use ardent_core::layout;
 use ardent_format::{InstalledPackages, patterns};
 
 use crate::release::{self, ReleasePlugin};
+use crate::staging::Stage;
 use crate::xdg;
 
 type Result<T> = std::result::Result<T, (PathBuf, io::Error)>;
@@ -21,27 +22,31 @@ pub(super) fn install(
             io::Error::other("cannot locate user configuration"),
         )
     })?;
-    fs::create_dir_all(&home).map_err(|err| (home.clone(), err))?;
-    let user = layout::create_dir(&home, "ardent").map_err(|err| (home.join("ardent"), err))?;
-    let packages =
-        layout::create_dir(&user, "plugins").map_err(|err| (user.join("plugins"), err))?;
+    let user = home.join("ardent");
+    let packages = user.join("plugins");
     // Verification records belong to this init, including when reusing a read-only user package.
-    let scratch = tempfile::tempdir_in(project).map_err(|err| (project.to_owned(), err))?;
+    let scratch = Stage::new(project).map_err(|err| (project.to_owned(), err))?;
     for plugin in plugins {
         let destination = packages.join(plugin.name);
         let verify = |root: &Path| verify(scratch.path(), root, plugin.name);
         let was_missing = matches!(fs::symlink_metadata(&destination), Err(err) if err.kind() == io::ErrorKind::NotFound);
+        if !was_missing {
+            require_package(verify(&user)?, &destination)?;
+            continue;
+        }
+        fs::create_dir_all(&home).map_err(|err| (home.clone(), err))?;
+        layout::create_dir(&home, "ardent/plugins").map_err(|err| (packages.clone(), err))?;
         match verify(&user) {
             Ok(true) => continue,
             Ok(false) => {}
             // Discovery may list the directory just before another init publishes this package.
-            Err(_) if was_missing && destination.exists() => {
+            Err(_) if destination.exists() => {
                 require_package(verify(&user)?, &destination)?;
                 continue;
             }
             Err(err) => return Err(err),
         }
-        let stage = tempfile::tempdir_in(&packages).map_err(|err| (packages.clone(), err))?;
+        let stage = Stage::new(&packages).map_err(|err| (packages.clone(), err))?;
         plugin.install(&release::release_dir()?, project, stage.path())?;
         let candidate = stage.path().join("plugins").join(plugin.name);
         require_package(verify(stage.path())?, &candidate)?;

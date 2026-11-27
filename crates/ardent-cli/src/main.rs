@@ -2,9 +2,12 @@ mod browse;
 mod init;
 mod project_root;
 mod release;
+mod staging;
 mod sync;
 mod tracked;
 mod update;
+#[cfg(windows)]
+mod windows_access;
 mod xdg;
 
 use std::env;

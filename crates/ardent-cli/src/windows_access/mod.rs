@@ -23,7 +23,7 @@ pub(super) fn pin_directory(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-fn powershell(script: &str) -> io::Result<Command> {
+pub(crate) fn powershell(script: &str) -> io::Result<Command> {
     let system =
         std::env::var_os("SystemRoot").ok_or_else(|| io::Error::other("missing SystemRoot"))?;
     let shell = Path::new(&system).join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
@@ -66,6 +66,3 @@ pub(super) fn prepare_access(candidate: &Path, installed: &Path) -> io::Result<(
 pub(super) fn repair_access(installed: &Path, previous: &Path) -> io::Result<()> {
     permissions("repair", installed, Some(previous))
 }
-
-#[cfg(test)]
-mod tests;

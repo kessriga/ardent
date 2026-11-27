@@ -104,6 +104,32 @@ fn selects_rust_in_a_short_terminal_and_after_resizing() -> io::Result<()> {
 }
 
 #[test]
+fn reuses_a_user_package_under_a_symlinked_configuration_directory() -> io::Result<()> {
+    let release = stage_release()?;
+    let project = temp_dir()?;
+    let home = temp_dir()?;
+    let managed = tempfile::tempdir_in(release.path())?;
+    fs::rename(
+        release.path().join("plugins"),
+        managed.path().join("plugins"),
+    )?;
+    std::os::unix::fs::symlink(managed.path(), home.path().join("ardent"))?;
+    let before = super::snapshot(managed.path())?;
+    let (status, output) = interact_with_home(
+        project.path(),
+        24,
+        home.path(),
+        release.executable(),
+        |term, _| term.write_all(b"\r\r\x1b[B \r"),
+    )?;
+    assert!(status.success(), "{output}");
+    assert!(fs::read_to_string(project.path().join(".ardent/config.yaml"))?.contains("rust: {}"));
+    assert_eq!(fs::read_dir(project.path().join(".ardent"))?.count(), 2);
+    assert_eq!(super::snapshot(managed.path())?, before);
+    Ok(())
+}
+
+#[test]
 fn interrupt_leaves_the_cursor_visible_and_creates_no_project() -> io::Result<()> {
     let project = temp_dir()?;
     let (status, output) = interact(project.path(), 24, |terminal, _| {
