@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-24 13:08'
-updated_date: '2026-11-27 21:11'
+updated_date: '2026-11-27 23:27'
 labels: []
 milestone: m-3
 dependencies:
@@ -68,16 +68,19 @@ compilation cache holds derived code and has a separate choice of scope.
 
 7. Fix the five PR review findings and verify private staging, shared package reuse, browser refresh, terminal resizing
    and cache paths.
+
+8. Handle shared package repairs in browse, verify update candidates in memory, and install through a linked user
+   configuration root. Exercise each case through the CLI.
 <!-- SECTION:PLAN:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Projects can share user settings and format plugins or pin a package locally. Interactive init defaults to per-user
-installation with all plugins unchecked. Scripts can pass `--project` with `--plugins` to make project scope explicit.
-Init stages packages privately, reuses verified packages through symlinked configuration directories, and adapts its
-scope picker when the terminal shrinks. Browse refreshes when user settings change or a shared plugin appears or
-disappears. The compilation cache accepts resolved paths outside the checkout. The macOS workspace checks passed with
-230 Rust tests and two recipe tests. Linux and Windows workspace targets passed compilation checks. All eight OpenSpec
-specifications passed strict validation.
+Projects can share settings and format plugins or pin a package locally. Interactive init defaults to per-user
+installation with all plugins unchecked. Scripts can pass `--project` with `--plugins`. Init stages packages privately
+and supports installing or reusing packages through a linked user configuration root. It checks the directories beneath
+that root before writing. Browse refreshes after shared plugin installation, removal, or repairs to the manifest or
+component. If the native package watcher fails, browse switches to polling. Update verifies replacement packages in
+memory. The macOS serial workspace check passed with 233 Rust tests and two recipe tests. Linux and Windows workspace
+targets passed compilation checks, and all eight OpenSpec specifications passed strict validation.
 <!-- SECTION:FINAL_SUMMARY:END -->
