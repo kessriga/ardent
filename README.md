@@ -158,10 +158,10 @@ a scanner-only plugin have a plain source preview and the same navigation keys.
 | Escape | Close the open document and return to the explorer. |
 | q | Quit. |
 
-When you save a tracked file, change your user configuration, or add or remove a user plugin, the browser runs sync in
-the background. You can navigate or quit while it waits for the project lock. If the watcher cannot read a path, the
-file list shows a warning and other files stay available. Changes to Git ignore rules also update the file list. If the
-project loses its `.ardent/` directory, the browser exits and reports the missing project file.
+When you save a tracked file, change your user configuration, or install, repair, or remove a user plugin, the browser
+runs sync in the background. You can navigate or quit while it waits for the project lock. If the watcher cannot read a
+path, the file list shows a warning and other files stay available. Changes to Git ignore rules also update the file
+list. If the project loses its `.ardent/` directory, the browser exits and reports the missing project file.
 
 After a refresh, the browser keeps the selected node if its node path still exists. It also keeps your place in the
 source preview if the selected passage is unchanged. In the explorer, `!` marks a file with a scan error. Open it to

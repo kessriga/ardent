@@ -102,14 +102,7 @@ impl Changes {
         let config = Config::default()
             .with_follow_symlinks(false)
             .with_poll_interval(Duration::from_secs(1));
-        let (watcher, polling) =
-            match start::<RecommendedWatcher>(&root, handle.clone(), config.clone()) {
-                Ok(watcher) => (watcher, false),
-                Err(_) => (
-                    start::<PollWatcher>(&root, handle, config).map_err(io::Error::other)?,
-                    true,
-                ),
-            };
+        let (watcher, polling) = watch_tree(&root, handle, config).map_err(io::Error::other)?;
         let rules = external_rules::Inputs::new(&root, crate::xdg::config_dir());
         Ok(Self {
             _watcher: watcher,
@@ -147,6 +140,17 @@ impl Changes {
             warnings,
             check_plugins: std::mem::take(&mut pending.plugins_changed),
         }))
+    }
+}
+
+fn watch_tree(
+    root: &Path,
+    handle: impl EventHandler + Clone,
+    config: Config,
+) -> notify::Result<(Box<dyn Watcher>, bool)> {
+    match start::<RecommendedWatcher>(root, handle.clone(), config.clone()) {
+        Ok(watcher) => Ok((watcher, false)),
+        Err(_) => start::<PollWatcher>(root, handle, config).map(|watcher| (watcher, true)),
     }
 }
 

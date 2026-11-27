@@ -214,17 +214,26 @@ fn discovers_an_enabled_plugin_installed_while_browsing() -> io::Result<()> {
     )?;
     fs::write(root.join("notes.md"), "# Notes\n")?;
     let packages = home.path().join("ardent/plugins");
-    fs::create_dir_all(&packages)?;
     let (master, slave) = pty::open_terminal(24)?;
     let mut command = common::ardent_command(release.executable());
     command.env("XDG_CONFIG_HOME", home.path());
     let mut session = Session::open_command(command, root, &slave, master)?;
     session.wait_screen(&["no plugin"], &["notes.md"])?;
+    fs::create_dir_all(&packages)?;
     fs::rename(
         release.path().join("plugins/markdown"),
         packages.join("markdown"),
     )?;
     session.wait_screen(&["notes.md"], &["no plugin"])?;
+    let package = packages.join("markdown");
+    for input in ["plugin.yaml", "format.wasm"] {
+        let input = package.join(input);
+        let original = fs::read(&input)?;
+        fs::write(&input, b"unfinished")?;
+        session.wait_screen(&["No tracked source files"], &["notes.md"])?;
+        fs::write(input, original)?;
+        session.wait_screen(&["notes.md"], &["No tracked source files"])?;
+    }
     fs::rename(
         packages.join("markdown"),
         release.path().join("plugins/markdown"),

@@ -4,12 +4,20 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+
+use ardent_core::layout::{ARDENT_DIR, CACHE_DIR};
+use notify::{Config, Event, Watcher};
+use same_file::Handle;
 
 pub(super) struct Inputs {
     pub(super) linked_worktrees: Vec<PathBuf>,
     user_dir: Option<PathBuf>,
     previous: Snapshot,
+    package_watch: Option<(Handle, Box<dyn Watcher>)>,
+    package_event: Arc<AtomicBool>,
     checked: Instant,
 }
 
@@ -21,12 +29,16 @@ struct Snapshot {
 
 impl Inputs {
     pub(super) fn new(root: &Path, user_dir: Option<PathBuf>) -> Self {
-        Self {
+        let mut inputs = Self {
             linked_worktrees: Vec::new(),
             previous: read(root, &[], user_dir.as_deref()),
             user_dir,
+            package_watch: None,
+            package_event: Arc::default(),
             checked: Instant::now(),
-        }
+        };
+        inputs.watch_packages(root);
+        inputs
     }
 
     pub(super) fn changed(&mut self, root: &Path) -> bool {
@@ -34,13 +46,58 @@ impl Inputs {
             return false;
         }
         self.checked = Instant::now();
+        let watch_changed = self.watch_packages(root);
+        let package_changed = self.package_event.swap(false, Ordering::Relaxed);
         let next = read(root, &self.linked_worktrees, self.user_dir.as_deref());
         if self.previous == next {
-            return false;
+            return watch_changed || package_changed;
         }
         self.previous = next;
         true
     }
+
+    // Reattach after the package tree is created or replaced, including through a managed config symlink.
+    fn watch_packages(&mut self, root: &Path) -> bool {
+        let Some((path, handle)) = self.user_dir.as_deref().and_then(package_directory) else {
+            return self.package_watch.take().is_some();
+        };
+        if self
+            .package_watch
+            .as_ref()
+            .is_some_and(|(watched, _)| *watched == handle)
+        {
+            return false;
+        }
+        let event = Arc::clone(&self.package_event);
+        let cache = root.join(ARDENT_DIR).join(CACHE_DIR);
+        let observe = move |result: notify::Result<Event>| {
+            if let Ok(change) = result
+                && (change.need_rescan()
+                    || (!change.kind.is_access()
+                        && change.paths.iter().any(|path| !path.starts_with(&cache))))
+            {
+                event.store(true, Ordering::Relaxed);
+            }
+        };
+        let config = Config::default()
+            .with_follow_symlinks(false)
+            .with_poll_interval(Duration::from_secs(1))
+            .with_compare_contents(true);
+        let was_watched = self.package_watch.is_some();
+        self.package_watch = super::watch_tree(&path, observe, config)
+            .ok()
+            .map(|(watcher, _)| (handle, watcher));
+        was_watched || self.package_watch.is_some()
+    }
+}
+
+fn package_directory(user: &Path) -> Option<(PathBuf, Handle)> {
+    let path = user.canonicalize().ok()?.join("plugins");
+    if !path.symlink_metadata().ok()?.is_dir() {
+        return None;
+    }
+    let handle = Handle::from_path(&path).ok()?;
+    Some((path, handle))
 }
 
 fn read(root: &Path, linked_worktrees: &[PathBuf], user_dir: Option<&Path>) -> Snapshot {
