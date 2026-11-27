@@ -20,17 +20,31 @@ pub(super) fn compilation_dir(root: &Path, scope: CompilationCache) -> Option<Pa
             compiled.join("projects").join(id)
         }
     };
-    // The cache contains native code. A checkout must never supply it, even via an XDG path alias.
-    if directory
-        .components()
-        .any(|part| part == Component::ParentDir)
-    {
-        return None;
-    }
+    let resolved = resolve_cache_directory(&directory)?;
+    (!resolved.starts_with(root)).then_some(resolved)
+}
+
+// Resolve aliases before allowing Wasmtime to create any missing directories.
+fn resolve_cache_directory(directory: &Path) -> Option<PathBuf> {
     for ancestor in directory.ancestors() {
         match ancestor.canonicalize() {
-            Ok(path) => return (!path.starts_with(&root)).then_some(directory),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Ok(path) => {
+                let suffix = directory.strip_prefix(ancestor).ok()?;
+                if !path.is_dir()
+                    || !suffix
+                        .components()
+                        .all(|part| matches!(part, Component::Normal(_)))
+                {
+                    return None;
+                }
+                return Some(path.join(suffix));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // A dangling symlink is not a directory we can safely create.
+                if ancestor.symlink_metadata().is_ok() {
+                    return None;
+                }
+            }
             Err(_) => return None,
         }
     }

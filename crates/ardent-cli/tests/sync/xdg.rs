@@ -183,3 +183,40 @@ fn checkout_local_cache_home_leaves_compiled_code_in_memory() -> TestResult {
     assert!(!project.path("cache").exists());
     Ok(())
 }
+
+#[test]
+fn parent_components_in_cache_home_use_the_resolved_location() -> TestResult {
+    let home = temp_dir()?;
+    let project = Project::new()?;
+    project.install_probe()?;
+    project.write(
+        ".ardent/config.yaml",
+        "schema: 1\nformats: {probe: {files: ['*.md']}}\n",
+    )?;
+    fs::create_dir(home.path().join("other"))?;
+    sync(&project, &home.path().join("other/.."))?.assert_success();
+    assert!(
+        snapshot(&compiled_cache(&project, home.path(), "user")?)?
+            .values()
+            .any(Option::is_some)
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn cache_home_with_a_symlink_and_parent_component_inside_checkout_uses_memory() -> TestResult {
+    let home = temp_dir()?;
+    let project = Project::new()?;
+    project.install_probe()?;
+    project.write(
+        ".ardent/config.yaml",
+        "schema: 1\nformats: {probe: {files: ['*.md']}}\n",
+    )?;
+    fs::create_dir(project.path("directory"))?;
+    std::os::unix::fs::symlink(project.path("directory"), home.path().join("alias"))?;
+    sync(&project, &home.path().join("alias/.."))?.assert_success();
+    assert!(project.structure_path("README.md").is_file());
+    assert!(!project.path("cache").exists());
+    Ok(())
+}
