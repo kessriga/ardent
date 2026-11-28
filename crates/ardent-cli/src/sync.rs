@@ -72,6 +72,8 @@ pub struct Report {
     pub read_denied: Vec<String>,
     /// Verified formats available to highlight documents from this browser sync.
     pub browse_formats: Vec<FormatPlugin>,
+    /// The selected palette name from this sync's effective configuration.
+    pub theme: Option<String>,
     pub scanned: usize,
     pub removed: usize,
     pub warnings: Vec<String>,
@@ -107,7 +109,10 @@ pub(crate) fn run_at(root: &Path, mode: Run) -> Result<Report, SyncError> {
             source,
         })?;
     let _lock = lock(&ardent_dir)?;
-    let mut report = Report::default();
+    let mut report = Report {
+        theme: config.theme.clone(),
+        ..Report::default()
+    };
     let blocked = crate::update::recover(&ardent_dir, &mut report.warnings, &mut report.errors);
     let packages =
         match InstalledPackages::for_sync(&ardent_dir, user_dir.as_deref(), cache_dir.as_deref()) {

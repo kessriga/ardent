@@ -14,6 +14,7 @@ use crate::sync;
 
 mod highlights;
 mod refresh;
+mod theme;
 mod watch;
 
 use crate::sync::source;

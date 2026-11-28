@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use ardent_format::FormatPlugin;
 use ardent_tui::FileList;
 
+use super::theme::ActiveTheme;
 use super::watch::{Batch, Changes};
 use crate::sync::{self, Run, source};
 use crate::update;
@@ -178,6 +179,8 @@ fn watch(
         check_plugins: true,
     });
     let mut available = Ok(update::Report::default());
+    let user_dir = crate::xdg::config_dir();
+    let mut theme = ActiveTheme::default();
     let mut checked = Instant::now();
     loop {
         let check_access = checked.elapsed() >= Duration::from_secs(1);
@@ -192,7 +195,8 @@ fn watch(
             && denied
                 .iter()
                 .any(|path| source::open_regular(&root.join(path)).is_ok());
-        if batch.is_some() || verify.is_some() || repaired {
+        let theme_changed = check_access && theme.refresh(user_dir.as_deref());
+        if batch.is_some() || verify.is_some() || repaired || theme_changed {
             let report = sync::run_at(root, Run::Browse { verify })
                 .map_err(|err| io::Error::other(err.to_string()))?;
             if let Some(open) = &preview
@@ -209,6 +213,11 @@ fn watch(
                 !report.errors.is_empty() || report.files.iter().any(|(_, error)| error.is_some());
             let mut messages = report.errors;
             messages.extend(report.warnings);
+            if theme.name != report.theme {
+                theme.name = report.theme;
+                theme.refresh(user_dir.as_deref());
+            }
+            messages.extend(theme.diagnostic.iter().cloned());
             if let Some(batch) = batch.take() {
                 messages.extend(batch.warnings);
                 if batch.check_plugins {
@@ -233,6 +242,7 @@ fn watch(
                 }
             };
             let list = FileList {
+                theme: theme.colors.clone(),
                 files: report.files,
                 messages,
                 update_notice,

@@ -32,6 +32,9 @@ pub struct Config {
     /// Where sync reuses compiled format components. An omitted setting inherits the user's choice.
     #[serde(default, deserialize_with = "specified")]
     pub compilation_cache: Option<CompilationCache>,
+    /// Name of the user-installed palette to display in the browser.
+    #[serde(default, deserialize_with = "specified")]
+    pub theme: Option<String>,
 }
 
 // An omitted key inherits, while an explicit value must have the declared type.
@@ -97,6 +100,7 @@ impl Config {
     pub fn inherit(&mut self, user: Self) {
         self.exclude = self.exclude.take().or(user.exclude);
         self.compilation_cache = self.compilation_cache.or(user.compilation_cache);
+        self.theme = self.theme.take().or(user.theme);
         for (name, defaults) in user.formats {
             if let Some(format) = self.formats.get_mut(&name) {
                 format.files = format.files.take().or(defaults.files);

@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 
 use ardent_core::highlight::{Category, Highlight};
+use ardent_core::theme::Theme;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
@@ -11,7 +12,7 @@ use ratatui::text::Line;
 use super::{Paging, page, styled_rows};
 use crate::Page;
 
-pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, open: &Page) -> Paging {
+pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, open: &Page, theme: &Theme) -> Paging {
     let node = &open.document.outline.nodes[open.tree.selected];
     let Some(bytes) = open.document.bytes.get(node.range.clone()) else {
         return page(
@@ -28,7 +29,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, open: &Page) -> Paging {
     } else {
         &[]
     };
-    let style_at = source_style(lossy_bytes, node.range.start, &spans[first..]);
+    let style_at = source_style(lossy_bytes, node.range.start, &spans[first..], theme);
     page(
         frame,
         area,
@@ -40,6 +41,7 @@ fn source_style<'a>(
     lossy_bytes: &'a [u8],
     start: usize,
     mut spans: &'a [Highlight],
+    theme: &'a Theme,
 ) -> impl FnMut(usize) -> Style + 'a {
     // Each invalid UTF-8 sequence becomes a three-byte replacement character in the displayed string.
     let mut replacements = lossy_bytes
@@ -67,6 +69,9 @@ fn source_style<'a>(
         let Some(span) = spans.first().filter(|span| span.range.contains(&offset)) else {
             return Style::default();
         };
+        if let Some(rgb) = theme.source.get(&span.category) {
+            return Style::default().fg(super::rgb(rgb));
+        }
         Style::default().fg(match span.category {
             Category::Keyword => Color::Magenta,
             Category::StringLiteral => Color::Green,

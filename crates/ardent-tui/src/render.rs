@@ -2,6 +2,7 @@
 
 mod source;
 
+use ardent_core::theme::{Rgb, Theme};
 use ratatui::Frame;
 use ratatui::buffer::CellWidth;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -155,7 +156,7 @@ fn document(frame: &mut Frame<'_>, area: Rect, browser: &Browser) -> Paging {
     let title = path.map_or_else(|| "Outline".to_string(), |path| format!("Outline  {path}"));
     let area = heading(frame, area, &title, focused);
     match browser.screen() {
-        Some(Screen::Outline(open)) => outline(frame, area, open),
+        Some(Screen::Outline(open)) => outline(frame, area, open, &browser.list.theme),
         Some(Screen::Unavailable {
             message, scroll, ..
         }) => page(
@@ -174,7 +175,7 @@ fn document(frame: &mut Frame<'_>, area: Rect, browser: &Browser) -> Paging {
     }
 }
 
-fn outline(frame: &mut Frame<'_>, area: Rect, open: &Page) -> Paging {
+fn outline(frame: &mut Frame<'_>, area: Rect, open: &Page, theme: &Theme) -> Paging {
     let [nodes, divider, source] = Layout::vertical([
         Constraint::Length(area.height / 2),
         Constraint::Length(u16::from(area.height >= 3)),
@@ -199,14 +200,21 @@ fn outline(frame: &mut Frame<'_>, area: Rect, open: &Page) -> Paging {
                 Span::raw(format!("{indent}{marker}")),
                 Span::styled(
                     format!(" {}", printable(&node.label)),
-                    kind_color(&node.kind),
+                    theme
+                        .outline
+                        .get(&node.kind)
+                        .map_or_else(|| kind_color(&node.kind), rgb),
                 ),
             ])
         });
     selected_list(frame, nodes, visible, selected.saturating_sub(start));
     frame.render_widget(Block::default().borders(Borders::TOP), divider);
 
-    source::draw(frame, source, open)
+    source::draw(frame, source, open, theme)
+}
+
+fn rgb(&Rgb(r, g, b): &Rgb) -> Color {
+    Color::Rgb(r, g, b)
 }
 
 fn kind_color(kind: &str) -> Color {
@@ -392,6 +400,7 @@ mod tests {
         let list = FileList {
             files: vec![("a.md".into(), None)],
             messages: vec![],
+            theme: Theme::default(),
             update_notice: None,
         };
         let mut browser = Browser::new(list);
@@ -425,6 +434,7 @@ mod tests {
         let mut browser = Browser::new(FileList {
             files: vec![("a.md".into(), None)],
             messages: vec![],
+            theme: Theme::default(),
             update_notice: None,
         });
         let first_row = format!("{}❤️", "x".repeat(38));
@@ -473,7 +483,7 @@ mod tests {
         open.tree.navigate(KeyCode::Right);
         let mut terminal = Terminal::new(TestBackend::new(7, 4))?;
         terminal.draw(|frame| {
-            outline(frame, frame.area(), &open);
+            outline(frame, frame.area(), &open, &Theme::default());
         })?;
         let cells = terminal.backend().buffer();
         assert_eq!(cells[(0, 1)].symbol(), ">");
@@ -494,7 +504,7 @@ mod tests {
         terminal.backend_mut().resize(6, 4);
         open.scroll = 1;
         terminal.draw(|frame| {
-            outline(frame, frame.area(), &open);
+            outline(frame, frame.area(), &open, &Theme::default());
         })?;
         let cells = terminal.backend().buffer();
         assert_eq!(
@@ -507,7 +517,7 @@ mod tests {
         );
         open.scroll = 2;
         terminal.draw(|frame| {
-            outline(frame, frame.area(), &open);
+            outline(frame, frame.area(), &open, &Theme::default());
         })?;
         assert_eq!(terminal.backend().buffer()[(0, 3)].symbol(), "z");
         Ok(())
@@ -520,6 +530,7 @@ mod tests {
         let browser = Browser::new(FileList {
             files: vec![("long_module_name.rs".into(), Some("syntax error".into()))],
             messages: vec![],
+            theme: Theme::default(),
             update_notice: None,
         });
         let rows = snapshot(&browser, 60, 14).0;

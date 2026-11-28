@@ -168,6 +168,34 @@ source preview if the selected passage is unchanged. In the explorer, `!` marks 
 read the full message. The browser shows the diagnostic until the file parses again, then returns to the previous node
 if it still exists.
 
+### Choose browser colors
+
+Create `themes/` under your Ardent user configuration directory and save this example as
+`$XDG_CONFIG_HOME/ardent/themes/catppuccin.yaml`. The default path is `~/.config/ardent/themes/catppuccin.yaml`. The
+same file is available to every project.
+
+```yaml
+schema: 1
+source:
+  heading: "#E6BB70"
+  comment: "#8DAA90"
+outline:
+  heading: "#80BBFF"
+  fn: "#B694F6"
+```
+
+The `source` keys are `keyword`, `string_literal`, `comment`, `heading` and `code`. For `outline`, use the exact node
+kind, such as `fn` for a Rust function or `heading` for a Markdown heading. Quote each six-digit hex color. Omitted
+entries use the built-in foreground.
+
+Add `theme: catppuccin` alongside `schema: 1` in your user `config.yaml` to select it everywhere. Set `theme` in
+`.ardent/config.yaml` to select a different installed theme for one project. To switch while reading, change that name
+to another theme's filename stem. The browser also picks up edits to the active theme and keeps your place. If a theme
+is missing or invalid, the explorer shows the error and the browser keeps its last usable colors.
+
+Remove the project selector to use your user setting. Remove both selectors to restore the built-in palette. You can
+keep your installed themes in either case.
+
 ### Supported outlines
 
 The outline of a Markdown file holds headings, paragraphs, lists and their items, code blocks, block quotes, tables, and

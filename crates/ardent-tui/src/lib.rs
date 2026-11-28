@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use ardent_core::highlight::Highlight;
 use ardent_core::outline::Outline;
+use ardent_core::theme::Theme;
 use crossterm::event::KeyCode;
 
 mod explorer;
@@ -18,6 +19,8 @@ use tree::Tree;
 
 /// Tracked source files and project diagnostics from one sync.
 pub struct FileList {
+    /// Active foreground overrides for this browser refresh.
+    pub theme: Theme,
     /// Project-relative source paths in ascending string order, each paired with its scan error, if any.
     /// The browser uses this order to find the selected file again after a refresh.
     pub files: Vec<(String, Option<String>)>,
@@ -319,6 +322,7 @@ mod tests {
 
     fn files(error: Option<&str>) -> FileList {
         FileList {
+            theme: Theme::default(),
             files: vec![("notes.md".into(), error.map(str::to_owned))],
             messages: Vec::new(),
             update_notice: None,
