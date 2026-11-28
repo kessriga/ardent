@@ -72,8 +72,6 @@ pub struct Report {
     pub read_denied: Vec<String>,
     /// Verified formats available to highlight documents from this browser sync.
     pub browse_formats: Vec<FormatPlugin>,
-    /// The selected palette name from this sync's effective configuration.
-    pub theme: Option<String>,
     pub scanned: usize,
     pub removed: usize,
     pub warnings: Vec<String>,
@@ -101,7 +99,11 @@ pub(crate) enum Run<'a> {
 pub(crate) fn run_at(root: &Path, mode: Run) -> Result<Report, SyncError> {
     let ardent_dir = root.join(ARDENT_DIR);
     let user_dir = crate::xdg::config_dir();
-    let config = settings::load(root, user_dir.as_deref())?;
+    let parse = match mode {
+        Run::Once => Config::from_yaml,
+        Run::Browse { .. } => Config::browse_settings,
+    };
+    let config = settings::load(root, user_dir.as_deref(), parse)?;
     let cache_dir = settings::compilation_dir(root, config.compilation_cache.unwrap_or_default());
     let (mut patterns, overrides) =
         project_patterns(root, &config).map_err(|source| SyncError::Pattern {
@@ -109,10 +111,7 @@ pub(crate) fn run_at(root: &Path, mode: Run) -> Result<Report, SyncError> {
             source,
         })?;
     let _lock = lock(&ardent_dir)?;
-    let mut report = Report {
-        theme: config.theme.clone(),
-        ..Report::default()
-    };
+    let mut report = Report::default();
     let blocked = crate::update::recover(&ardent_dir, &mut report.warnings, &mut report.errors);
     let packages =
         match InstalledPackages::for_sync(&ardent_dir, user_dir.as_deref(), cache_dir.as_deref()) {
@@ -195,7 +194,7 @@ pub(crate) fn find_root(working_dir: &Path) -> Result<PathBuf, SyncError> {
 
 pub(super) fn validate_config(root: &Path) -> Result<(), SyncError> {
     let path = root.join(ARDENT_DIR).join(config::FILE_NAME);
-    let config = settings::read(&path)?;
+    let config = settings::read(&path, Config::from_yaml)?;
     project_patterns(root, &config).map_err(|source| SyncError::Pattern { path, source })?;
     Ok(())
 }

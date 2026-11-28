@@ -17,7 +17,8 @@ names, `.` and `..`, path separators and absolute paths before looking up a them
 
 Ardent SHALL look up the selected name only in `$XDG_CONFIG_HOME/ardent/themes/<name>.yaml`, using the existing XDG
 configuration home rules. The theme mapping SHALL contain `schema: 1` in any key order. Each omitted source category or
-outline kind SHALL use its built-in color. Reading a theme SHALL leave the directory and file untouched.
+outline kind SHALL use its built-in color. Reading a theme SHALL leave the directory and file untouched. The browser
+SHALL reject theme files larger than 1 MiB and report the limit and file path.
 
 #### Scenario: A checkout contains a theme of the same name
 

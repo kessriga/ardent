@@ -186,14 +186,14 @@ outline:
 
 The `source` keys are `keyword`, `string_literal`, `comment`, `heading` and `code`. For `outline`, use the exact node
 kind, such as `fn` for a Rust function or `heading` for a Markdown heading. Quote each six-digit hex color. Omitted
-entries use the built-in foreground.
+entries use the built-in foreground. Theme files can contain up to 1 MiB.
 
 Add `theme: catppuccin` alongside `schema: 1` in your user `config.yaml` to select it everywhere. Set `theme` in
 `.ardent/config.yaml` to select a different installed theme for one project. To switch while reading, change that name
-to another theme's filename stem. Edits to the active theme take effect even while a project sync is waiting for its
-lock. If you save an invalid selector or palette while reading, the explorer shows the error and the browser keeps your
-place. Correct the setting or theme file to clear the error. A missing theme also leaves the last usable colors on
-screen.
+to another theme's filename stem. You can switch themes or edit the active theme even while a project sync is waiting
+for its lock. If you save an invalid selector or palette while reading, the explorer shows the error and the browser
+keeps your place and its last usable colors. Correct the setting or theme file to clear the error. A missing theme also
+leaves the last usable colors on screen.
 
 Remove the project selector to use your user setting. Remove both selectors to restore the built-in palette. You can
 keep your installed themes in either case.

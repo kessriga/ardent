@@ -39,7 +39,6 @@ pub struct BrowserTheme {
 pub enum BrowserUpdate {
     Files(FileList),
     Theme(BrowserTheme),
-    ConfigError(String),
 }
 
 impl FileList {
@@ -167,7 +166,6 @@ enum Focus {
 
 struct Browser {
     theme: BrowserTheme,
-    config_error: Option<String>,
     list: FileList,
     explorer: Explorer,
     /// The reader can move the explorer cursor while keeping another file open.
@@ -180,7 +178,6 @@ impl Browser {
     fn new(list: FileList) -> Self {
         Self {
             theme: BrowserTheme::default(),
-            config_error: None,
             explorer: Explorer::new(&list.files),
             list,
             opened: None,
@@ -203,9 +200,9 @@ impl Browser {
     }
 
     fn messages(&self) -> impl Iterator<Item = &str> {
-        self.config_error
+        self.theme
+            .diagnostic
             .iter()
-            .chain(&self.theme.diagnostic)
             .chain(&self.list.messages)
             .map(String::as_str)
     }
@@ -219,20 +216,11 @@ impl Browser {
                 }
                 self.theme = theme;
             }
-            BrowserUpdate::ConfigError(message) => {
-                if self.config_error.as_ref() != Some(&message) {
-                    self.config_error = Some(message);
-                    self.diagnostic_scroll = 0;
-                }
-            }
         }
     }
 
     fn refresh(&mut self, list: FileList, load: &impl Fn(&str) -> io::Result<Document>) {
-        if self.config_error.take().is_some()
-            || self.list.messages != list.messages
-            || self.list.update_notice != list.update_notice
-        {
+        if self.list.messages != list.messages || self.list.update_notice != list.update_notice {
             self.diagnostic_scroll = 0;
         }
         if self
@@ -404,11 +392,26 @@ mod tests {
     fn theme_and_config_updates_keep_the_scrolled_page_without_reloading() {
         let mut browser = reading_passage();
         let load = |_: &str| Err(io::Error::other("unexpected document reload"));
-        browser.apply(BrowserUpdate::ConfigError("invalid selector".into()), &load);
-        browser.apply(BrowserUpdate::Theme(BrowserTheme::default()), &load);
-        assert_eq!(browser.messages().collect::<Vec<_>>(), ["invalid selector"]);
+        browser.apply(
+            BrowserUpdate::Theme(BrowserTheme {
+                diagnostic: Some("invalid selector".into()),
+                ..BrowserTheme::default()
+            }),
+            &load,
+        );
         assert!(
             matches!(browser.screen(), Some(Screen::Outline(page)) if page.tree.selected == 1 && page.scroll == 5)
+        );
+        let mut list = files(None);
+        list.messages
+            .push("Watcher reported an unreadable directory".into());
+        browser.apply(BrowserUpdate::Files(list), &document);
+        assert_eq!(
+            browser.messages().collect::<Vec<_>>(),
+            [
+                "invalid selector",
+                "Watcher reported an unreadable directory"
+            ]
         );
     }
 

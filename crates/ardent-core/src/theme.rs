@@ -2,6 +2,8 @@
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::error::Error;
+use std::fmt;
 
 use crate::highlight::Category;
 use crate::yaml::{self, ReadError};
@@ -10,8 +12,23 @@ use crate::yaml::{self, ReadError};
 #[serde(try_from = "String")]
 pub struct Rgb(pub u8, pub u8, pub u8);
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct InvalidRgb(String);
+
+impl fmt::Display for InvalidRgb {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "expected a color of the form #RRGGBB, found {:?}",
+            self.0
+        )
+    }
+}
+
+impl Error for InvalidRgb {}
+
 impl TryFrom<String> for Rgb {
-    type Error = String;
+    type Error = InvalidRgb;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         let digits = value
@@ -19,7 +36,7 @@ impl TryFrom<String> for Rgb {
             .filter(|s| s.len() == 6 && s.bytes().all(|b| b.is_ascii_hexdigit()));
         let number = digits
             .and_then(|s| u32::from_str_radix(s, 16).ok())
-            .ok_or_else(|| format!("expected a color of the form #RRGGBB, found {value:?}"))?;
+            .ok_or(InvalidRgb(value))?;
         let [_, red, green, blue] = number.to_be_bytes();
         Ok(Self(red, green, blue))
     }
@@ -58,6 +75,13 @@ mod tests {
         );
         assert_eq!(theme.outline["widget"], Rgb(0xab, 0xcd, 0xef));
         Ok(())
+    }
+
+    #[test]
+    fn invalid_rgb_retains_the_input_in_a_typed_error() {
+        let error = Rgb::try_from("red".to_owned()).expect_err("invalid RGB");
+        assert_eq!(error, InvalidRgb("red".to_owned()));
+        assert!(error.to_string().contains("#RRGGBB"));
     }
 
     #[test]

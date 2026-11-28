@@ -272,13 +272,15 @@ show the diagnostic and keep the last usable palette, using built-in colors if n
 
 #### Scenario: Edit a theme during sync
 
-- **WHEN** a project sync is waiting for the lock and the reader edits the selected theme file
+- **WHEN** a project sync is waiting for the lock and the reader switches the selector or edits the selected theme file
 - **THEN** the browser repaints the open document before the lock is released
 
 #### Scenario: Correct a selector while reading
 
 - **WHEN** a reader saves an invalid `theme` value in a configuration file while browsing
 - **THEN** the explorer shows the configuration error and the document stays open at the same position
+- **AND** edits to the previously selected palette leave the displayed colors unchanged while the selector is invalid
+- **AND** the explorer continues to show project and watcher diagnostics
 - **AND** correcting the selector clears the error and applies the selected palette
 
 #### Scenario: Recover from an incomplete save

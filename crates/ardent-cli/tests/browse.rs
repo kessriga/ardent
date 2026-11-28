@@ -217,12 +217,19 @@ fn switches_global_themes_and_recovers_while_reading() -> io::Result<()> {
     session.wait_source_color(">     Two", 6, Rgb(0x80, 0xbb, 0xff))?;
     session.wait_source_color("# Two", 0, Rgb(0xe6, 0xbb, 0x70))?;
 
+    let lock = File::options()
+        .write(true)
+        .open(root.join(".ardent/cache/lock"))?;
+    lock.lock()?;
     for selector in ["theme:", "theme: [daylight]"] {
         fs::write(&config, format!("{original}\n{selector}\n"))?;
         session.keys(b"\t")?;
         session.wait_for("config.yaml")?;
+        fs::write(themes.join("catppuccin.yaml"), "schema: 1\n")?;
+        thread::sleep(Duration::from_millis(1500));
         session.keys(b"\t")?;
         session.wait_source_color(">     Two", 6, Rgb(0x80, 0xbb, 0xff))?;
+        fs::write(themes.join("catppuccin.yaml"), example)?;
         fs::write(&config, format!("{original}\ntheme: catppuccin\n"))?;
         session.keys(b"\t")?;
         session.wait_screen(&["notes.md"], &["config.yaml"])?;
@@ -240,10 +247,10 @@ fn switches_global_themes_and_recovers_while_reading() -> io::Result<()> {
     session.wait_source_color("# Two", 0, Rgb(0x12, 0x34, 0x56))?;
     session.wait_source_color(">     Two", 6, Idx(6))?;
 
-    let lock = File::options()
-        .write(true)
-        .open(root.join(".ardent/cache/lock"))?;
-    lock.lock()?;
+    fs::write(&user_config, "schema: 1\ntheme: catppuccin\n")?;
+    session.wait_source_color("# Two", 0, Rgb(0xe6, 0xbb, 0x70))?;
+    fs::write(&user_config, "schema: 1\ntheme: daylight\n")?;
+    session.wait_source_color("# Two", 0, Rgb(0x12, 0x34, 0x56))?;
     fs::write(root.join("pending.md"), "# Pending\n")?;
     fs::write(&daylight, "schema: 1\nsource: {comment: '#GG1020'}")?;
     session.keys(b"\t")?;
@@ -265,6 +272,28 @@ fn switches_global_themes_and_recovers_while_reading() -> io::Result<()> {
     session.wait_source_color(">     Two", 6, Idx(6))?;
     session.keys(b"q")?;
     assert!(session.child.wait()?.success());
+    Ok(())
+}
+
+#[test]
+fn an_unsupported_config_schema_ends_a_live_browser() -> io::Result<()> {
+    let project = common::temp_dir()?;
+    let dir = project.path().join(".ardent");
+    fs::create_dir(&dir)?;
+    let config = dir.join("config.yaml");
+    fs::write(&config, "schema: 1\n")?;
+    let (master, slave) = pty::open_terminal(24)?;
+    pty::resize_to(&slave, 24, 58)?;
+    let mut session = Session::open(project.path(), &slave, master)?;
+    session.wait_for("Explorer")?;
+    fs::write(
+        &config,
+        "schema: 1\nformats: {html: {}}\ntheme: [daylight]\n",
+    )?;
+    session.wait_screen(&["config.yaml", "has no plugin"], &[])?;
+    fs::write(&config, "schema: 2\n")?;
+    session.wait_restored()?;
+    assert!(!session.child.wait()?.success());
     Ok(())
 }
 

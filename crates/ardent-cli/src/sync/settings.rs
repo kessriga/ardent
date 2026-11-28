@@ -2,7 +2,7 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use ardent_core::config::{self, CompilationCache, Config};
+use ardent_core::config::{self, CompilationCache, Config, ConfigError};
 use ardent_core::layout::ARDENT_DIR;
 use ardent_core::structure;
 
@@ -51,22 +51,29 @@ fn resolve_cache_directory(directory: &Path) -> Option<PathBuf> {
     None
 }
 
-pub(super) fn read(path: &Path) -> Result<Config, SyncError> {
+pub(super) fn read(
+    path: &Path,
+    parse: fn(&str) -> Result<Config, ConfigError>,
+) -> Result<Config, SyncError> {
     let text = fs::read_to_string(path).map_err(|source| SyncError::Io {
         path: path.to_owned(),
         source,
     })?;
-    Config::from_yaml(&text).map_err(|source| SyncError::Config {
+    parse(&text).map_err(|source| SyncError::Config {
         path: path.to_owned(),
         source,
     })
 }
 
-pub(super) fn load(root: &Path, user_dir: Option<&Path>) -> Result<Config, SyncError> {
-    let mut project = read(&root.join(ARDENT_DIR).join(config::FILE_NAME))?;
+pub(super) fn load(
+    root: &Path,
+    user_dir: Option<&Path>,
+    parse: fn(&str) -> Result<Config, ConfigError>,
+) -> Result<Config, SyncError> {
+    let mut project = read(&root.join(ARDENT_DIR).join(config::FILE_NAME), parse)?;
     if let Some(dir) = user_dir {
         let path = dir.join(config::FILE_NAME);
-        match read(&path) {
+        match read(&path, parse) {
             Ok(user) => {
                 project_patterns(root, &user)
                     .map_err(|source| SyncError::Pattern { path, source })?;

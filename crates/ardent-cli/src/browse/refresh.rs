@@ -109,19 +109,13 @@ impl Revision {
 }
 
 pub(super) struct Update {
-    pub theme: Option<String>,
     pub files: FileList,
     pub failed: bool,
     pub formats: Vec<FormatPlugin>,
 }
 
-pub(super) enum ProjectUpdate {
-    Synced(Update),
-    ConfigError(String),
-}
-
 pub(super) struct Refresh {
-    updates: Receiver<io::Result<ProjectUpdate>>,
+    updates: Receiver<io::Result<Update>>,
     previews: mpsc::Sender<Option<Preview>>,
     displayed: Option<String>,
 }
@@ -143,17 +137,14 @@ impl Refresh {
     }
 
     pub(super) fn initial(&self) -> io::Result<Update> {
-        match self.updates.recv().map_err(io::Error::other)?? {
-            ProjectUpdate::Synced(update) => Ok(update),
-            ProjectUpdate::ConfigError(message) => Err(io::Error::other(message)),
-        }
+        self.updates.recv().map_err(io::Error::other)?
     }
 
     pub(super) fn ready(
         &mut self,
         path: Option<&str>,
         observed: Option<Preview>,
-    ) -> io::Result<Option<ProjectUpdate>> {
+    ) -> io::Result<Option<Update>> {
         // Successful loads supply their exact revision. Error screens can open without loading
         // a document, and returning to the picker ends monitoring of the former source.
         if self.displayed.as_deref() != path || observed.is_some() {
@@ -175,7 +166,7 @@ impl Refresh {
 
 fn watch(
     root: &Path,
-    updates: &SyncSender<io::Result<ProjectUpdate>>,
+    updates: &SyncSender<io::Result<Update>>,
     opened: Receiver<Option<Preview>>,
 ) -> io::Result<()> {
     // Register before the first sync to catch edits that happen during the scan.
@@ -183,7 +174,6 @@ fn watch(
     let mut denied: Vec<String> = Vec::new();
     let mut preview: Option<Preview> = None;
     let mut initial = true;
-    let mut config_invalid = false;
     let mut available = Ok(update::Report::default());
     let mut checked = Instant::now();
     loop {
@@ -216,26 +206,8 @@ fn watch(
         if batch.is_none() && verify.is_none() && !repaired {
             continue;
         }
-        // Edits made while the configuration was invalid may still need a content check.
-        let verify = if config_invalid {
-            preview.as_ref().map(|p| p.path.as_str())
-        } else {
-            verify
-        };
-        let report = match sync::run_at(root, Run::Browse { verify }) {
-            Ok(report) => report,
-            Err(error @ sync::SyncError::Config { .. }) => {
-                config_invalid = true;
-                if updates
-                    .send(Ok(ProjectUpdate::ConfigError(error.to_string())))
-                    .is_err()
-                {
-                    return Ok(());
-                }
-                continue;
-            }
-            Err(error) => return Err(io::Error::other(error.to_string())),
-        };
+        let report = sync::run_at(root, Run::Browse { verify })
+            .map_err(|error| io::Error::other(error.to_string()))?;
         if let Some(open) = &preview
             && report
                 .files
@@ -250,10 +222,9 @@ fn watch(
             !report.errors.is_empty() || report.files.iter().any(|(_, error)| error.is_some());
         let mut messages = report.errors;
         messages.extend(report.warnings);
-        if config_invalid || batch.as_ref().is_some_and(|b| b.check_plugins) {
+        if batch.as_ref().is_some_and(|b| b.check_plugins) {
             available = update::available(root);
         }
-        config_invalid = false;
         if let Some(batch) = batch {
             messages.extend(batch.warnings);
         }
@@ -280,12 +251,11 @@ fn watch(
             update_notice,
         };
         if updates
-            .send(Ok(ProjectUpdate::Synced(Update {
-                theme: report.theme,
+            .send(Ok(Update {
                 files: list,
                 failed,
                 formats: report.browse_formats,
-            })))
+            }))
             .is_err()
         {
             return Ok(());

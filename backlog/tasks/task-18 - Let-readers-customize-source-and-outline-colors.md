@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-26 15:35'
-updated_date: '2026-11-28 10:17'
+updated_date: '2026-11-28 11:34'
 labels: []
 dependencies:
   - TASK-16
@@ -58,13 +58,17 @@ source preview and the outline, and readers may want different colors in each.
 <!-- SECTION:NOTES:BEGIN -->
 Review fixes: preserve the open document during selector errors and palette edits, accept Unix theme stems with colons,
 and document YAML mapping order.
+
+Second review: decouple selectors from sync, freeze colors during invalid edits, preserve schema failures and watcher
+warnings, bound palette reads, and type RGB parse errors.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Readers can switch user-installed themes while browsing. Invalid selector edits keep the open document and show a
-diagnostic until corrected. Palette edits repaint during a blocked project sync. Unix theme names accept colons, and the
-schema key can appear anywhere in the theme mapping. All 239 tests passed across the workspace and the additional TUI
-regression run. Rust formatting, Clippy, the build and all eight OpenSpec checks passed.
+Readers select globally installed themes in project or user settings. Selector changes and palette edits repaint during
+a blocked project sync. Invalid selectors retain the last colors alongside watcher and project warnings. An unsupported
+configuration schema ends the browser. Theme reads accept up to 1 MiB, and RGB parsing returns a typed error. All 243
+workspace tests passed on macOS, along with Rust formatting, Clippy, the build, Markdown checks and all eight OpenSpec
+checks.
 <!-- SECTION:FINAL_SUMMARY:END -->
