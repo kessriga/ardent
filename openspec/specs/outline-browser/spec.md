@@ -270,6 +270,17 @@ show the diagnostic and keep the last usable palette, using built-in colors if n
 - **WHEN** the reader saves a new source heading color in the selected theme file
 - **THEN** the visible heading changes on refresh and the outline keeps its configured color
 
+#### Scenario: Edit a theme during sync
+
+- **WHEN** a project sync is waiting for the lock and the reader edits the selected theme file
+- **THEN** the browser repaints the open document before the lock is released
+
+#### Scenario: Correct a selector while reading
+
+- **WHEN** a reader saves an invalid `theme` value in a configuration file while browsing
+- **THEN** the explorer shows the configuration error and the document stays open at the same position
+- **AND** correcting the selector clears the error and applies the selected palette
+
 #### Scenario: Recover from an incomplete save
 
 - **WHEN** the selected palette becomes invalid and the reader then saves a valid palette at the same path

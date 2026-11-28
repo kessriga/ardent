@@ -66,7 +66,7 @@ fn key_hints(browser: &Browser, has_notice: bool) -> Vec<&'static str> {
             None => Vec::new(),
         },
     };
-    if browser.focus == Focus::Explorer && (has_notice || !browser.list.messages.is_empty()) {
+    if browser.focus == Focus::Explorer && (has_notice || browser.messages().next().is_some()) {
         keys.push("PgUp/PgDn messages");
     }
     if browser.open_path().is_some() {
@@ -94,7 +94,7 @@ fn explorer(frame: &mut Frame<'_>, area: Rect, browser: &Browser, notice: Option
     let area = heading(frame, area, "Explorer", browser.focus == Focus::Explorer);
     let entries = browser.explorer.rows();
     let list_height = entries.len().max(1).min(usize::from(area.height));
-    let list_height = if browser.list.messages.is_empty() && notice.is_none() {
+    let list_height = if browser.messages().next().is_none() && notice.is_none() {
         list_height
     } else {
         // Keep at least one row for messages, even when the explorer fills the pane.
@@ -141,7 +141,7 @@ fn explorer(frame: &mut Frame<'_>, area: Rect, browser: &Browser, notice: Option
     }
     let diagnostics = notice
         .into_iter()
-        .chain(browser.list.messages.iter().map(String::as_str))
+        .chain(browser.messages())
         .flat_map(|msg| wrapped(msg, messages.width.into()));
     page(
         frame,
@@ -156,7 +156,7 @@ fn document(frame: &mut Frame<'_>, area: Rect, browser: &Browser) -> Paging {
     let title = path.map_or_else(|| "Outline".to_string(), |path| format!("Outline  {path}"));
     let area = heading(frame, area, &title, focused);
     match browser.screen() {
-        Some(Screen::Outline(open)) => outline(frame, area, open, &browser.list.theme),
+        Some(Screen::Outline(open)) => outline(frame, area, open, &browser.theme.colors),
         Some(Screen::Unavailable {
             message, scroll, ..
         }) => page(
@@ -400,7 +400,6 @@ mod tests {
         let list = FileList {
             files: vec![("a.md".into(), None)],
             messages: vec![],
-            theme: Theme::default(),
             update_notice: None,
         };
         let mut browser = Browser::new(list);
@@ -434,7 +433,6 @@ mod tests {
         let mut browser = Browser::new(FileList {
             files: vec![("a.md".into(), None)],
             messages: vec![],
-            theme: Theme::default(),
             update_notice: None,
         });
         let first_row = format!("{}❤️", "x".repeat(38));
@@ -530,7 +528,6 @@ mod tests {
         let browser = Browser::new(FileList {
             files: vec![("long_module_name.rs".into(), Some("syntax error".into()))],
             messages: vec![],
-            theme: Theme::default(),
             update_notice: None,
         });
         let rows = snapshot(&browser, 60, 14).0;

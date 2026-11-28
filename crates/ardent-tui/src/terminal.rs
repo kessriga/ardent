@@ -11,7 +11,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use crate::render::{self, Paging};
-use crate::{Browser, Document, FileList};
+use crate::{Browser, BrowserUpdate, Document};
 
 /// Check that the browser can take input and draw on an interactive terminal.
 /// Call this before starting project work for a terminal-only command.
@@ -31,7 +31,7 @@ pub fn require_terminal() -> io::Result<()> {
 pub(super) fn run(
     browser: Browser,
     load: impl Fn(&str) -> io::Result<Document>,
-    refresh: impl FnMut(Option<&str>) -> io::Result<Option<FileList>>,
+    refresh: impl FnMut(Option<&str>) -> io::Result<Option<BrowserUpdate>>,
 ) -> io::Result<()> {
     require_terminal()?;
     #[cfg(unix)]
@@ -73,7 +73,7 @@ fn event_loop(
     terminal: &mut Terminal<CrosstermBackend<impl Write>>,
     mut browser: Browser,
     load: impl Fn(&str) -> io::Result<Document>,
-    mut refresh: impl FnMut(Option<&str>) -> io::Result<Option<FileList>>,
+    mut refresh: impl FnMut(Option<&str>) -> io::Result<Option<BrowserUpdate>>,
     mut interrupted: impl FnMut() -> Option<i32>,
 ) -> io::Result<Option<i32>> {
     let mut frame = paint(terminal, &browser)?;
@@ -81,8 +81,8 @@ fn event_loop(
         if let Some(signal) = interrupted() {
             return Ok(Some(signal));
         }
-        if let Some(files) = refresh(browser.open_path())? {
-            browser.refresh(files, &load);
+        if let Some(update) = refresh(browser.open_path())? {
+            browser.apply(update, &load);
             frame = paint(terminal, &browser)?;
         }
         if !event::poll(Duration::from_millis(75))? {

@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 use ardent_format::FormatPlugin;
 use ardent_tui::FileList;
 
-use super::theme::ActiveTheme;
 use super::watch::{Batch, Changes};
 use crate::sync::{self, Run, source};
 use crate::update;
@@ -110,13 +109,19 @@ impl Revision {
 }
 
 pub(super) struct Update {
+    pub theme: Option<String>,
     pub files: FileList,
     pub failed: bool,
     pub formats: Vec<FormatPlugin>,
 }
 
+pub(super) enum ProjectUpdate {
+    Synced(Update),
+    ConfigError(String),
+}
+
 pub(super) struct Refresh {
-    updates: Receiver<io::Result<Update>>,
+    updates: Receiver<io::Result<ProjectUpdate>>,
     previews: mpsc::Sender<Option<Preview>>,
     displayed: Option<String>,
 }
@@ -138,14 +143,17 @@ impl Refresh {
     }
 
     pub(super) fn initial(&self) -> io::Result<Update> {
-        self.updates.recv().map_err(io::Error::other)?
+        match self.updates.recv().map_err(io::Error::other)?? {
+            ProjectUpdate::Synced(update) => Ok(update),
+            ProjectUpdate::ConfigError(message) => Err(io::Error::other(message)),
+        }
     }
 
     pub(super) fn ready(
         &mut self,
         path: Option<&str>,
         observed: Option<Preview>,
-    ) -> io::Result<Option<Update>> {
+    ) -> io::Result<Option<ProjectUpdate>> {
         // Successful loads supply their exact revision. Error screens can open without loading
         // a document, and returning to the picker ends monitoring of the former source.
         if self.displayed.as_deref() != path || observed.is_some() {
@@ -167,22 +175,32 @@ impl Refresh {
 
 fn watch(
     root: &Path,
-    updates: &SyncSender<io::Result<Update>>,
+    updates: &SyncSender<io::Result<ProjectUpdate>>,
     opened: Receiver<Option<Preview>>,
 ) -> io::Result<()> {
     // Register before the first sync to catch edits that happen during the scan.
     let mut changes = Changes::new(root)?;
     let mut denied: Vec<String> = Vec::new();
     let mut preview: Option<Preview> = None;
-    let mut batch = Some(Batch {
-        warnings: Vec::new(),
-        check_plugins: true,
-    });
+    let mut initial = true;
+    let mut config_invalid = false;
     let mut available = Ok(update::Report::default());
-    let user_dir = crate::xdg::config_dir();
-    let mut theme = ActiveTheme::default();
     let mut checked = Instant::now();
     loop {
+        let batch = if initial {
+            initial = false;
+            Some(Batch {
+                warnings: Vec::new(),
+                check_plugins: true,
+            })
+        } else {
+            match opened.recv_timeout(Duration::from_millis(75)) {
+                Ok(latest) => preview = opened.try_iter().last().unwrap_or(latest),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            }
+            changes.ready()?
+        };
         let check_access = checked.elapsed() >= Duration::from_secs(1);
         if check_access {
             checked = Instant::now();
@@ -195,74 +213,82 @@ fn watch(
             && denied
                 .iter()
                 .any(|path| source::open_regular(&root.join(path)).is_ok());
-        let theme_changed = check_access && theme.refresh(user_dir.as_deref());
-        if batch.is_some() || verify.is_some() || repaired || theme_changed {
-            let report = sync::run_at(root, Run::Browse { verify })
-                .map_err(|err| io::Error::other(err.to_string()))?;
-            if let Some(open) = &preview
-                && report
-                    .files
-                    .binary_search_by(|(path, _)| path.cmp(&open.path))
+        if batch.is_none() && verify.is_none() && !repaired {
+            continue;
+        }
+        // Edits made while the configuration was invalid may still need a content check.
+        let verify = if config_invalid {
+            preview.as_ref().map(|p| p.path.as_str())
+        } else {
+            verify
+        };
+        let report = match sync::run_at(root, Run::Browse { verify }) {
+            Ok(report) => report,
+            Err(error @ sync::SyncError::Config { .. }) => {
+                config_invalid = true;
+                if updates
+                    .send(Ok(ProjectUpdate::ConfigError(error.to_string())))
                     .is_err()
-            {
-                preview = None;
-            }
-            denied = report.read_denied;
-            changes.update(report.discovery)?;
-            let failed =
-                !report.errors.is_empty() || report.files.iter().any(|(_, error)| error.is_some());
-            let mut messages = report.errors;
-            messages.extend(report.warnings);
-            if theme.name != report.theme {
-                theme.name = report.theme;
-                theme.refresh(user_dir.as_deref());
-            }
-            messages.extend(theme.diagnostic.iter().cloned());
-            if let Some(batch) = batch.take() {
-                messages.extend(batch.warnings);
-                if batch.check_plugins {
-                    available = update::available(root);
+                {
+                    return Ok(());
                 }
+                continue;
             }
-            let update_notice = match &available {
-                Ok(report) => {
-                    messages.extend(
-                        report
-                            .errors
-                            .iter()
-                            .map(|e| format!("Cannot check plugin updates: {e}")),
-                    );
-                    report
-                        .names()
-                        .map(|names| format!("Plugin updates: {names}. Run ardent update"))
-                }
-                Err(error) => {
-                    messages.push(format!("Cannot check plugin updates: {error}"));
-                    None
-                }
-            };
-            let list = FileList {
-                theme: theme.colors.clone(),
-                files: report.files,
-                messages,
-                update_notice,
-            };
-            if updates
-                .send(Ok(Update {
-                    files: list,
-                    failed,
-                    formats: report.browse_formats,
-                }))
+            Err(error) => return Err(io::Error::other(error.to_string())),
+        };
+        if let Some(open) = &preview
+            && report
+                .files
+                .binary_search_by(|(path, _)| path.cmp(&open.path))
                 .is_err()
-            {
-                return Ok(());
+        {
+            preview = None;
+        }
+        denied = report.read_denied;
+        changes.update(report.discovery)?;
+        let failed =
+            !report.errors.is_empty() || report.files.iter().any(|(_, error)| error.is_some());
+        let mut messages = report.errors;
+        messages.extend(report.warnings);
+        if config_invalid || batch.as_ref().is_some_and(|b| b.check_plugins) {
+            available = update::available(root);
+        }
+        config_invalid = false;
+        if let Some(batch) = batch {
+            messages.extend(batch.warnings);
+        }
+        let update_notice = match &available {
+            Ok(report) => {
+                messages.extend(
+                    report
+                        .errors
+                        .iter()
+                        .map(|e| format!("Cannot check plugin updates: {e}")),
+                );
+                report
+                    .names()
+                    .map(|names| format!("Plugin updates: {names}. Run ardent update"))
             }
+            Err(error) => {
+                messages.push(format!("Cannot check plugin updates: {error}"));
+                None
+            }
+        };
+        let list = FileList {
+            files: report.files,
+            messages,
+            update_notice,
+        };
+        if updates
+            .send(Ok(ProjectUpdate::Synced(Update {
+                theme: report.theme,
+                files: list,
+                failed,
+                formats: report.browse_formats,
+            })))
+            .is_err()
+        {
+            return Ok(());
         }
-        match opened.recv_timeout(Duration::from_millis(75)) {
-            Ok(latest) => preview = opened.try_iter().last().unwrap_or(latest),
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return Ok(()),
-        }
-        batch = changes.ready()?;
     }
 }

@@ -49,7 +49,7 @@ mod tests {
     #[test]
     fn reads_all_categories_and_plugin_defined_kinds() -> Result<(), ReadError> {
         let theme = Theme::from_yaml(
-            "schema: 1\nsource: {keyword: '#123456', string_literal: '#234567', comment: '#345678', heading: '#456789', code: '#56789a'}\noutline: {widget: '#abCDef'}",
+            "source: {keyword: '#123456', string_literal: '#234567', comment: '#345678', heading: '#456789', code: '#56789a'}\noutline: {widget: '#abCDef'}\nschema: 1",
         )?;
         assert_eq!(theme.source.len(), 5);
         assert_eq!(
@@ -63,6 +63,7 @@ mod tests {
     #[test]
     fn rejects_unknown_schema_keys_and_malformed_colors() {
         for text in [
+            "source: {}",
             "schema: 2",
             "schema: 1\ncolors: {}",
             "schema: 1\nsource: {typo: '#123456'}",

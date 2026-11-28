@@ -217,6 +217,19 @@ fn switches_global_themes_and_recovers_while_reading() -> io::Result<()> {
     session.wait_source_color(">     Two", 6, Rgb(0x80, 0xbb, 0xff))?;
     session.wait_source_color("# Two", 0, Rgb(0xe6, 0xbb, 0x70))?;
 
+    for selector in ["theme:", "theme: [daylight]"] {
+        fs::write(&config, format!("{original}\n{selector}\n"))?;
+        session.keys(b"\t")?;
+        session.wait_for("config.yaml")?;
+        session.keys(b"\t")?;
+        session.wait_source_color(">     Two", 6, Rgb(0x80, 0xbb, 0xff))?;
+        fs::write(&config, format!("{original}\ntheme: catppuccin\n"))?;
+        session.keys(b"\t")?;
+        session.wait_screen(&["notes.md"], &["config.yaml"])?;
+        session.keys(b"\t")?;
+        session.wait_source_color("# Two", 0, Rgb(0xe6, 0xbb, 0x70))?;
+    }
+
     // Only the checkout has daylight. Keep showing the previous colors until it is installed globally.
     fs::write(&config, original)?;
     session.keys(b"\t")?;
@@ -227,6 +240,11 @@ fn switches_global_themes_and_recovers_while_reading() -> io::Result<()> {
     session.wait_source_color("# Two", 0, Rgb(0x12, 0x34, 0x56))?;
     session.wait_source_color(">     Two", 6, Idx(6))?;
 
+    let lock = File::options()
+        .write(true)
+        .open(root.join(".ardent/cache/lock"))?;
+    lock.lock()?;
+    fs::write(root.join("pending.md"), "# Pending\n")?;
     fs::write(&daylight, "schema: 1\nsource: {comment: '#GG1020'}")?;
     session.keys(b"\t")?;
     session.wait_for("#GG1020")?;
@@ -236,6 +254,7 @@ fn switches_global_themes_and_recovers_while_reading() -> io::Result<()> {
     fs::write(&replacement, "schema: 1\nsource: {heading: '#102030'}")?;
     fs::rename(replacement, &daylight)?;
     session.wait_source_color("# Two", 0, Rgb(0x10, 0x20, 0x30))?;
+    drop(lock);
     fs::remove_file(&daylight)?;
     session.keys(b"\t")?;
     session.wait_screen(&["daylight.yaml"], &["#GG1020"])?;

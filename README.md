@@ -190,8 +190,10 @@ entries use the built-in foreground.
 
 Add `theme: catppuccin` alongside `schema: 1` in your user `config.yaml` to select it everywhere. Set `theme` in
 `.ardent/config.yaml` to select a different installed theme for one project. To switch while reading, change that name
-to another theme's filename stem. The browser also picks up edits to the active theme and keeps your place. If a theme
-is missing or invalid, the explorer shows the error and the browser keeps its last usable colors.
+to another theme's filename stem. Edits to the active theme take effect even while a project sync is waiting for its
+lock. If you save an invalid selector or palette while reading, the explorer shows the error and the browser keeps your
+place. Correct the setting or theme file to clear the error. A missing theme also leaves the last usable colors on
+screen.
 
 Remove the project selector to use your user setting. Remove both selectors to restore the built-in palette. You can
 keep your installed themes in either case.

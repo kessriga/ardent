@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@codex'
 created_date: '2026-11-26 15:35'
-updated_date: '2026-11-28 09:53'
+updated_date: '2026-11-28 10:17'
 labels: []
 dependencies:
   - TASK-16
@@ -53,10 +53,18 @@ source preview and the outline, and readers may want different colors in each.
 4. Verify the guide example, live switching and defaults, run the repository gate and archive the change.
 <!-- SECTION:PLAN:END -->
 
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Review fixes: preserve the open document during selector errors and palette edits, accept Unix theme stems with colons,
+and document YAML mapping order.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Readers select a user-installed theme from project or user settings. Source and outline colors update while browsing.
-The terminal integration test uses the README example and checks selection, fallback, diagnostics and recovery. All 237
-workspace tests passed. Rust formatting, Clippy, the build and OpenSpec validation passed.
+Readers can switch user-installed themes while browsing. Invalid selector edits keep the open document and show a
+diagnostic until corrected. Palette edits repaint during a blocked project sync. Unix theme names accept colons, and the
+schema key can appear anywhere in the theme mapping. All 239 tests passed across the workspace and the additional TUI
+regression run. Rust formatting, Clippy, the build and all eight OpenSpec checks passed.
 <!-- SECTION:FINAL_SUMMARY:END -->

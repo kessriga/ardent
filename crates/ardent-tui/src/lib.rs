@@ -19,8 +19,6 @@ use tree::Tree;
 
 /// Tracked source files and project diagnostics from one sync.
 pub struct FileList {
-    /// Active foreground overrides for this browser refresh.
-    pub theme: Theme,
     /// Project-relative source paths in ascending string order, each paired with its scan error, if any.
     /// The browser uses this order to find the selected file again after a refresh.
     pub files: Vec<(String, Option<String>)>,
@@ -28,6 +26,20 @@ pub struct FileList {
     pub messages: Vec<String>,
     /// Available release plugin updates and the command to install them.
     pub update_notice: Option<String>,
+}
+
+/// Colors and any diagnostic from loading the selected palette.
+#[derive(Clone, Default)]
+pub struct BrowserTheme {
+    pub colors: Theme,
+    pub diagnostic: Option<String>,
+}
+
+/// Project sync and theme reloads can finish independently.
+pub enum BrowserUpdate {
+    Files(FileList),
+    Theme(BrowserTheme),
+    ConfigError(String),
 }
 
 impl FileList {
@@ -154,6 +166,8 @@ enum Focus {
 }
 
 struct Browser {
+    theme: BrowserTheme,
+    config_error: Option<String>,
     list: FileList,
     explorer: Explorer,
     /// The reader can move the explorer cursor while keeping another file open.
@@ -165,6 +179,8 @@ struct Browser {
 impl Browser {
     fn new(list: FileList) -> Self {
         Self {
+            theme: BrowserTheme::default(),
+            config_error: None,
             explorer: Explorer::new(&list.files),
             list,
             opened: None,
@@ -186,8 +202,37 @@ impl Browser {
         self.focus = Focus::Explorer;
     }
 
+    fn messages(&self) -> impl Iterator<Item = &str> {
+        self.config_error
+            .iter()
+            .chain(&self.theme.diagnostic)
+            .chain(&self.list.messages)
+            .map(String::as_str)
+    }
+
+    fn apply(&mut self, update: BrowserUpdate, load: &impl Fn(&str) -> io::Result<Document>) {
+        match update {
+            BrowserUpdate::Files(files) => self.refresh(files, load),
+            BrowserUpdate::Theme(theme) => {
+                if self.theme.diagnostic != theme.diagnostic {
+                    self.diagnostic_scroll = 0;
+                }
+                self.theme = theme;
+            }
+            BrowserUpdate::ConfigError(message) => {
+                if self.config_error.as_ref() != Some(&message) {
+                    self.config_error = Some(message);
+                    self.diagnostic_scroll = 0;
+                }
+            }
+        }
+    }
+
     fn refresh(&mut self, list: FileList, load: &impl Fn(&str) -> io::Result<Document>) {
-        if self.list.messages != list.messages || self.list.update_notice != list.update_notice {
+        if self.config_error.take().is_some()
+            || self.list.messages != list.messages
+            || self.list.update_notice != list.update_notice
+        {
             self.diagnostic_scroll = 0;
         }
         if self
@@ -301,17 +346,20 @@ impl Browser {
 ///
 /// The event loop passes the open source path to `refresh`, including while a scan error is
 /// displayed or the explorer has focus. A closed document passes `None`. Return `Ok(None)` promptly while idle and
-/// `Ok(Some(list))` with the complete replacement [`FileList`] after a sync.
+/// a [`BrowserUpdate`] when a sync finishes, settings fail to load, or the active palette changes.
 ///
 /// # Errors
 ///
 /// Returns an error if the terminal cannot be used or `refresh` fails.
 pub fn run(
     list: FileList,
+    theme: BrowserTheme,
     load: impl Fn(&str) -> io::Result<Document>,
-    refresh: impl FnMut(Option<&str>) -> io::Result<Option<FileList>>,
+    refresh: impl FnMut(Option<&str>) -> io::Result<Option<BrowserUpdate>>,
 ) -> io::Result<()> {
-    terminal::run(Browser::new(list), load, refresh)
+    let mut browser = Browser::new(list);
+    browser.theme = theme;
+    terminal::run(browser, load, refresh)
 }
 
 #[cfg(test)]
@@ -322,7 +370,6 @@ mod tests {
 
     fn files(error: Option<&str>) -> FileList {
         FileList {
-            theme: Theme::default(),
             files: vec![("notes.md".into(), error.map(str::to_owned))],
             messages: Vec::new(),
             update_notice: None,
@@ -351,6 +398,18 @@ mod tests {
         browser.key(KeyCode::Right, 5, false, &document);
         browser.key(KeyCode::PageDown, 5, true, &document);
         browser
+    }
+
+    #[test]
+    fn theme_and_config_updates_keep_the_scrolled_page_without_reloading() {
+        let mut browser = reading_passage();
+        let load = |_: &str| Err(io::Error::other("unexpected document reload"));
+        browser.apply(BrowserUpdate::ConfigError("invalid selector".into()), &load);
+        browser.apply(BrowserUpdate::Theme(BrowserTheme::default()), &load);
+        assert_eq!(browser.messages().collect::<Vec<_>>(), ["invalid selector"]);
+        assert!(
+            matches!(browser.screen(), Some(Screen::Outline(page)) if page.tree.selected == 1 && page.scroll == 5)
+        );
     }
 
     #[test]

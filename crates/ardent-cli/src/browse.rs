@@ -8,7 +8,7 @@ use std::process::ExitCode;
 use ardent_core::layout::{self, ARDENT_DIR};
 use ardent_core::structure::{self, Structure};
 use ardent_format::MAX_SOURCE_BYTES;
-use ardent_tui::Document;
+use ardent_tui::{BrowserUpdate, Document};
 
 use crate::sync;
 
@@ -19,18 +19,21 @@ mod watch;
 
 use crate::sync::source;
 use highlights::Highlighter;
-use refresh::{Preview, Refresh, Revision};
+use refresh::{Preview, ProjectUpdate, Refresh, Revision};
+use theme::ThemeWatcher;
 
 pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
     ardent_tui::require_terminal()?;
     let root = sync::find_root(working_dir).map_err(|err| io::Error::other(err.to_string()))?;
     let mut refresh = Refresh::start(root.clone())?;
     let initial = refresh.initial()?;
+    let (themes, palette) = ThemeWatcher::start(initial.theme)?;
     let mut failed = initial.failed;
     let highlighter = RefCell::new(Highlighter::new(initial.formats));
     let observed = Cell::new(None);
     ardent_tui::run(
         initial.files,
+        palette,
         |path| {
             load(&root, path, &mut highlighter.borrow_mut(), |preview| {
                 observed.set(Some(preview))
@@ -40,11 +43,19 @@ pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
             if open_path.is_none() {
                 highlighter.borrow_mut().clear();
             }
-            Ok(refresh.ready(open_path, observed.take())?.map(|update| {
-                failed = update.failed;
-                highlighter.borrow_mut().formats = update.formats;
-                update.files
-            }))
+            match refresh.ready(open_path, observed.take())? {
+                Some(ProjectUpdate::Synced(update)) => {
+                    failed = update.failed;
+                    highlighter.borrow_mut().formats = update.formats;
+                    themes.select(update.theme)?;
+                    Ok(Some(BrowserUpdate::Files(update.files)))
+                }
+                Some(ProjectUpdate::ConfigError(message)) => {
+                    failed = true;
+                    Ok(Some(BrowserUpdate::ConfigError(message)))
+                }
+                None => Ok(themes.ready()?.map(BrowserUpdate::Theme)),
+            }
         },
     )?;
     Ok(if failed {
