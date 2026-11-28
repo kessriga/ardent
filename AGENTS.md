@@ -46,16 +46,15 @@ stop and ask me. Do not settle a core design question inside implementation code
 
 ## Verification gate
 
-Run all of these before you report work as done:
+Choose checks from the full task diff, including uncommitted changes. This rule also applies to older Backlog tasks
+whose checklists list Cargo commands unconditionally.
 
-```sh
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-rumdl fmt --no-cache --enable MD013 <changed .md files>
-```
-
-There is no CI yet, so this gate is the contract.
+- For changes to code or its build, runtime, or test inputs, run `just check`. Inputs include Cargo manifests and
+  lockfiles, plugin packages, test fixtures, and examples that tests read.
+- For changes limited to prose or planning metadata, skip Cargo. Format changed Markdown with
+  `just fmt-md <changed .md files>`. Read edited Backlog records back through the CLI and validate changed OpenSpec
+  specs with `openspec validate --all --strict`.
+- For mixed changes, run the code checks and the applicable documentation checks.
 
 Leave the Markdown files in `crates/ardent-format/tests/markdown/` unformatted: they are snapshot input, and `rumdl`
 would change the outlines that the snapshots record.
