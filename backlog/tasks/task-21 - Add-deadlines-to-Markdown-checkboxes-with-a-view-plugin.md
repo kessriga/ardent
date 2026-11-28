@@ -1,9 +1,10 @@
 ---
 id: TASK-21
-title: Add deadlines to Markdown checkboxes with a view plugin
+title: Treat Markdown checkboxes as tasks with the markdown-task view plugin
 status: To Do
 assignee: []
 created_date: '2026-11-28 12:11'
+updated_date: '2026-11-28 12:33'
 labels: []
 dependencies:
   - TASK-20
@@ -17,18 +18,18 @@ ordinal: 21000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-A team can attach a deadline to a Markdown checkbox while keeping the task text in Markdown. Use a separate stored view
-plugin to exercise the same property display with a value that lives outside the source file. A fixture with a stored
-deadline is enough to demonstrate the plugin before the editor exists.
+The `markdown-task` view plugin treats Markdown checkboxes as tasks. Its first feature is an optional `deadline`
+property. The checkbox and its text live in Markdown. The plugin stores the deadline in the view entry anchored to that
+checkbox. A fixture with a stored deadline demonstrates the feature before the property editor exists.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An enabled deadlines view plugin shows a stored `deadline: 2026-12-01` alongside the checkbox’s `checked` row.
+- [ ] #1 With `markdown-task` enabled, the checkbox shows its stored `deadline: 2026-12-01` beside `checked`.
 - [ ] #2 Only the checkbox named by the entry’s anchor shows that deadline. Plain list items have no deadline.
-- [ ] #3 For `notes.md`, the plugin-owned deadline field lives in `.ardent/views/notes.md/deadlines.yaml`.
+- [ ] #3 For `notes.md`, `markdown-task` stores the `deadline` field in `.ardent/views/notes.md/markdown-task.yaml`.
 - [ ] #4 After a cache rebuild and reopen, the same checkbox shows its deadline and the Markdown source is unchanged.
-- [ ] #5 With the deadlines view plugin absent, the checkbox shows `checked` and omits `deadline`.
+- [ ] #5 With `markdown-task` absent, the checkbox shows `checked` and omits `deadline`.
 <!-- AC:END -->
 
 ## Definition of Done
