@@ -1,7 +1,0 @@
-schema: 1
-name: "rust"
-version: "0.1.0"
-kind: format
-component: format.wasm
-files:
-  - "*.rs"
