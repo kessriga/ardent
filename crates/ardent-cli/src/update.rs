@@ -4,9 +4,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::staging::Stage;
 use ardent_core::layout::{self, ARDENT_DIR, LOCK_FILE};
-use ardent_format::{FormatPlugin, InstalledPackages, patterns};
-use tempfile::TempDir;
+use ardent_format::{InstalledPackages, patterns};
 
 use crate::release::{self, RELEASE, ReleasePlugin};
 use crate::sync;
@@ -16,7 +16,9 @@ pub(crate) use transaction::is_journal;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
-mod windows;
+use crate::windows_access as windows;
+#[cfg(all(test, windows))]
+mod windows_tests;
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -190,8 +192,8 @@ fn replace(
 ) -> Result<()> {
     let ardent = root.join(ARDENT_DIR);
     let tmp = layout::create_dir(&ardent, "cache/tmp").map_err(|e| e.to_string())?;
-    let stage = staging_dir(&tmp).map_err(|e| e.to_string())?;
-    let result = stage_candidate(plugin, root, release, &stage.path).and_then(|candidate| {
+    let stage = Stage::new(&tmp).map_err(|e| e.to_string())?;
+    let result = stage_candidate(plugin, root, release, stage.path()).and_then(|candidate| {
         let installed = ardent.join("plugins").join(plugin.name);
         #[cfg(unix)]
         unix::preserve_access(&candidate, &installed).map_err(|e| e.to_string())?;
@@ -203,53 +205,14 @@ fn replace(
     result
 }
 
-struct Stage {
-    outer: TempDir,
-    path: PathBuf,
-    #[cfg(windows)]
-    pins: [fs::File; 2],
-}
-
 fn close_stage(stage: Stage, name: &str, warnings: &mut Vec<String>) {
-    let path = stage.outer.path().to_owned();
-    #[cfg(windows)]
-    drop(stage.pins);
-    if let Err(err) = stage.outer.close() {
+    let path = stage.outer_path().to_owned();
+    if let Err(err) = stage.close() {
         warnings.push(format!(
             "could not clean up staging files for {name} at {}: {err}",
             path.display()
         ));
     }
-}
-
-fn staging_dir(tmp: &Path) -> io::Result<Stage> {
-    let mut builder = tempfile::Builder::new();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        builder.permissions(fs::Permissions::from_mode(0o700));
-    }
-    let outer = builder.prefix(".ardent-").tempdir_in(tmp)?;
-    #[cfg(target_os = "macos")]
-    if !exacl::getfacl(outer.path(), None)?.is_empty() {
-        // On macOS an inherited allow rule can grant access beyond mode 0700.
-        exacl::setfacl(&[outer.path()], &[], None)?;
-    }
-    #[cfg(windows)]
-    let (path, pins) = {
-        let parent = windows::pin_directory(outer.path())?;
-        let path = outer.path().join("private");
-        let pin = windows::private_directory(&path)?;
-        (path, [parent, pin])
-    };
-    #[cfg(not(windows))]
-    let path = outer.path().to_owned();
-    Ok(Stage {
-        outer,
-        path,
-        #[cfg(windows)]
-        pins,
-    })
 }
 
 pub(crate) fn recover(
@@ -283,7 +246,8 @@ fn stage_candidate(
     plugin
         .install(release, &ardent, stage)
         .map_err(path_error)?;
-    let format = FormatPlugin::load(stage, plugin.name)
+    let format = InstalledPackages::for_sync(stage, None, None)
+        .and_then(|packages| packages.load_format(plugin.name))
         .map_err(|e| e.to_string())?
         .ok_or("missing staged package")?;
     patterns::compile_defaults(root, &format.default_files, &format.default_prefixes)
@@ -308,6 +272,7 @@ fn publish(candidate: &Path, installed: &Path, warnings: &mut Vec<String>) -> io
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ardent_format::FormatPlugin;
     use std::fs::TryLockError;
 
     #[test]
@@ -392,37 +357,19 @@ mod tests {
     #[test]
     fn cleanup_warning_names_the_directory_left_behind() -> io::Result<()> {
         let parent = tempfile::tempdir()?;
-        let stage = staging_dir(parent.path())?;
-        let path = stage.outer.path().to_owned();
+        let stage = Stage::new(parent.path())?;
+        let path = stage.outer_path().to_owned();
         #[cfg(unix)]
         {
             fs::rename(&path, parent.path().join("saved"))?;
             fs::write(&path, "occupied")?;
         }
         #[cfg(windows)]
-        let _open = windows::pin_directory(&stage.path)?;
+        let _open = windows::pin_directory(stage.path())?;
         let mut warnings = Vec::new();
         close_stage(stage, "markdown", &mut warnings);
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains(&path.display().to_string()));
-        Ok(())
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn candidate_staging_is_private() -> io::Result<()> {
-        use std::os::unix::fs::PermissionsExt;
-        let parent = tempfile::tempdir()?;
-        #[cfg(target_os = "macos")]
-        {
-            use exacl::{AclEntry, Flag, Perm};
-            let rule = AclEntry::allow_group("everyone", Perm::READ, Flag::DIRECTORY_INHERIT);
-            exacl::setfacl(&[parent.path()], &[rule], None)?;
-        }
-        let stage = staging_dir(parent.path())?;
-        assert_eq!(stage.path.metadata()?.permissions().mode() & 0o777, 0o700);
-        #[cfg(target_os = "macos")]
-        assert!(exacl::getfacl(&stage.path, None)?.is_empty());
         Ok(())
     }
 }

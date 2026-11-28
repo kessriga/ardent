@@ -80,7 +80,7 @@ fn rust_selection_installs_the_release_and_scans_only_rust()
     assert_eq!(config.formats.keys().collect::<Vec<_>>(), ["rust"]);
     assert_eq!(config.formats["rust"].files, None);
 
-    let sync = Command::new(env!("CARGO_BIN_EXE_ardent"))
+    let sync = common::ardent_command(env!("CARGO_BIN_EXE_ardent"))
         .arg("sync")
         .current_dir(dir)
         .output()?;
@@ -94,6 +94,56 @@ fn rust_selection_installs_the_release_and_scans_only_rust()
             .is_file()
     );
     assert!(!dir.join(".ardent/cache/files/README.md").exists());
+    Ok(())
+}
+
+#[test]
+fn explicit_project_scope_installs_a_local_copy() -> Result<(), Box<dyn std::error::Error>> {
+    let project = temp_dir()?;
+    let home = temp_dir()?;
+    let release = stage_release()?;
+    let setup = run_init(home.path(), &["--plugins", "rust"])?;
+    assert!(
+        setup.status.success(),
+        "{}",
+        String::from_utf8_lossy(&setup.stderr)
+    );
+    fs::rename(home.path().join(".ardent"), home.path().join("ardent"))?;
+    fs::write(
+        home.path().join("ardent/plugins/rust/local-notes"),
+        "user copy",
+    )?;
+    let before = snapshot(home.path())?;
+
+    let output = common::ardent_command(release.executable())
+        .args(["init", "--plugins", "rust", "--project"])
+        .env("XDG_CONFIG_HOME", home.path())
+        .current_dir(project.path())
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let ardent = project.path().join(".ardent");
+    assert_eq!(
+        snapshot(&ardent.join("plugins/rust"))?,
+        snapshot(&release.path().join("plugins/rust"))?
+    );
+    let config = Config::from_yaml(&fs::read_to_string(ardent.join("config.yaml"))?)?;
+    assert_eq!(config.formats.keys().collect::<Vec<_>>(), ["rust"]);
+    assert_eq!(snapshot(home.path())?, before);
+    Ok(())
+}
+
+#[test]
+fn project_flag_requires_a_plugin_list() -> io::Result<()> {
+    let project = temp_dir()?;
+    let output = run_init(project.path(), &["--project"])?;
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--plugins"));
+    assert!(snapshot(project.path())?.is_empty());
     Ok(())
 }
 

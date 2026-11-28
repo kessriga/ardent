@@ -59,14 +59,19 @@ struct Instance {
 }
 
 impl Runtime {
+    #[cfg(test)]
     pub fn compile(bytes: &[u8]) -> Result<Self, RuntimeError> {
+        Self::compile_using(bytes, Some(CacheConfig::new()))
+    }
+
+    pub fn compile_using(bytes: &[u8], cache: Option<CacheConfig>) -> Result<Self, RuntimeError> {
         let mut config = Config::new();
         config
             .consume_fuel(true)
             .relaxed_simd_deterministic(true)
             .cranelift_nan_canonicalization(true);
         // A read-only home can still run portable components without a compilation cache.
-        config.cache(Cache::new(CacheConfig::new()).ok());
+        config.cache(cache.and_then(|settings| Cache::new(settings).ok()));
         let engine = Engine::new(&config)?;
         let component = Component::from_binary(&engine, bytes)?;
         if !component

@@ -23,24 +23,29 @@ can address a function or a section by its place in a tree rather than by line n
 
 ## How it should work
 
-Keep the release's `plugins/` directory beside the `ardent` executable. Run `ardent init` in the project root. Use the
-arrow keys to move between Markdown and Rust, Space to toggle each format, and Enter to confirm. Press q or Ctrl-C to
-cancel. Init copies the selected packages into `.ardent/plugins/` and enables them in `.ardent/config.yaml`. It refuses
-to run where `.ardent` already exists or inside another Ardent project.
+Keep the release's `plugins/` directory beside the `ardent` executable. Run `ardent init` in the project root.
 
-In MSYS and Cygwin terminals that use pipes, enter the format names separated by commas at the prompt.
+1. Press Enter at `Install format plugins? [Y/n]` to continue, or press N to create a project with no formats enabled.
+2. Choose **For my user account** (the default) to share packages across projects, or **In this project** to keep them
+   in `.ardent/plugins/`. Use the arrow keys and Enter.
+3. Choose the formats to enable in `.ardent/config.yaml`. Every checkbox starts empty. Use the arrow keys to move, Space
+   to toggle a format, and Enter to confirm. Confirming an empty list installs nothing.
 
-In a script, pass the format names explicitly. Use `--plugins ''` to start with an empty selection.
+Press q, Escape, or Ctrl-C at any prompt to cancel. Init refuses to run where `.ardent` already exists or inside another
+Ardent project. In MSYS and Cygwin pipe terminals, enter the numbered scope, then the format names separated by commas.
+
+In scripts, `--plugins` installs the named formats in the project without prompting. Add `--project` to make that scope
+explicit. Use `--plugins ''` for none.
 
 ```sh
-ardent init --plugins markdown,rust && ardent sync
+ardent init --plugins markdown,rust --project && ardent sync
 ```
 
-The browser names installed plugins that differ from the running release. The notice clears after you update them. Run
-`ardent update` from anywhere in a project to replace installed Markdown and Rust format plugins with the copies bundled
-with the running executable. This includes disabled plugins. The command replaces the whole package, including local
-edits and extra files in a fork installed under the same name. A separately named fork keeps its files. Project settings
-and the selection of installed plugins stay as they are.
+The browser names project-installed plugins that differ from the running release. The notice clears after you update
+them. Run `ardent update` from anywhere in a project to replace installed Markdown and Rust format plugins with the
+copies bundled with the running executable. This includes disabled plugins. The command replaces the whole package,
+including local edits and extra files in a fork installed under the same name. A separately named fork keeps its files.
+Project settings and the selection of installed plugins stay as they are.
 
 In a shared project, Ardent preserves access rules for existing package files and directories. On Unix, an update that
 cannot retain an existing owner leaves that plugin in place. Run the update with an account that can preserve ownership
@@ -53,9 +58,10 @@ installed directory contains files Ardent cannot identify as the staged replacem
 prints the backup path. Move the installed directory aside, then run `ardent sync` to restore the backup. Other formats
 remain available while you resolve the conflict.
 
-When upgrading an existing project, copy any missing packages listed under `formats` in `.ardent/config.yaml` before the
-first sync. Sync prunes cached structures for files it no longer tracks. For example, if both packages are missing, set
-`ARDENT_RELEASE` to the directory that contains the release executable and run these commands from the project root.
+When upgrading an existing project, make sure each format listed in `.ardent/config.yaml` has a package in the project
+or your user configuration before the first sync. Sync prunes cached structures for files it no longer tracks. For
+example, if both packages are missing, set `ARDENT_RELEASE` to the directory that contains the release executable and
+run these commands from the project root.
 
 ```sh
 mkdir -p .ardent/plugins &&
@@ -66,6 +72,46 @@ mkdir -p .ardent/plugins &&
 Commit the installed packages with the project. Each includes a `plugin.yaml` manifest and a `format.wasm` component.
 Sync warns for each configured format whose package is missing. If a package fails verification, sync reports the
 format, keeps existing structures, scans files for healthy formats and exits with status 1.
+
+### Share format plugins and settings
+
+Choose **For my user account** during init to install missing packages under `$XDG_CONFIG_HOME/ardent/plugins/`. The
+configuration home defaults to `~/.config`. Init reuses an existing valid package, including a different version. Each
+project enables its own formats. For example, selecting Markdown writes this entry to `.ardent/config.yaml`:
+
+```yaml
+schema: 1
+formats:
+  markdown: {}
+```
+
+A package in `.ardent/plugins/markdown/` pins that project to its own copy. Removing the pin selects the user copy on
+the next sync. If the pin fails verification, sync reports the error and keeps the last good structure. To enable a
+shared package in an existing project, add its name under `formats`. `ardent update` updates project installations.
+
+Put shared settings in the optional `$XDG_CONFIG_HOME/ardent/config.yaml`. For example:
+
+```yaml
+schema: 1
+formats:
+  markdown:
+    files: ["*.md", "*.markdown"]
+exclude: ["vendor/"]
+compilation_cache: project
+```
+
+The project chooses which formats run. For each enabled format, project settings override the corresponding user keys. A
+project list replaces the whole user list. Prefixes merge by prefix name. To inherit user excludes, omit `exclude` from
+the project file. The `exclude: []` written by init explicitly clears the list.
+
+Compilation uses a shared per-user cache by default. Set `compilation_cache: project` in either config for a separate
+cache per project, or `compilation_cache: user` to share it. Both live under `$XDG_CACHE_HOME/ardent/compiled/` (default
+`~/.cache/ardent/compiled/`). Clear `shared/` to discard the shared compiled code or `projects/<project-id>/` to discard
+one project's compiled code. The project ID is the BLAKE3 digest of its canonical root path. If the cache is unavailable
+or inside the current project, Ardent compiles in memory. Ardent recompiles on demand. Installed packages, settings and
+structure files live outside these caches.
+
+### Sync a project
 
 For each tracked file, Ardent keeps:
 
@@ -112,10 +158,10 @@ a scanner-only plugin have a plain source preview and the same navigation keys.
 | Escape | Close the open document and return to the explorer. |
 | q | Quit. |
 
-When you save a tracked file in an editor, the browser runs sync in the background. You can navigate or quit while it
-waits for the project lock. If the watcher cannot read a path, the file list shows a warning and other files stay
-available. Changes to Git ignore rules also update the file list. If the project loses its `.ardent/` directory, the
-browser exits and reports the missing project file.
+When you save a tracked file, change your user configuration, or install, repair, or remove a user plugin, the browser
+runs sync in the background. You can navigate or quit while it waits for the project lock. If the watcher cannot read a
+path, the file list shows a warning and other files stay available. Changes to Git ignore rules also update the file
+list. If the project loses its `.ardent/` directory, the browser exits and reports the missing project file.
 
 After a refresh, the browser keeps the selected node if its node path still exists. It also keeps your place in the
 source preview if the selected passage is unchanged. In the explorer, `!` marks a file with a scan error. Open it to

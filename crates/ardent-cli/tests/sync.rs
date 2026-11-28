@@ -2,12 +2,14 @@
 //! `ardent-layout`).
 
 mod common;
+#[path = "sync/xdg.rs"]
+mod xdg;
 
 use std::error::Error;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::time::{Duration, SystemTime};
 
 use common::{Tree, run_init, snapshot, temp_dir};
@@ -118,10 +120,21 @@ impl Project {
     }
 
     fn ardent_in(&self, dir: &Path, command: &str) -> io::Result<Output> {
-        Command::new(env!("CARGO_BIN_EXE_ardent"))
+        common::ardent_command(env!("CARGO_BIN_EXE_ardent"))
             .arg(command)
             .current_dir(dir)
             .output()
+    }
+
+    fn install_probe(&self) -> io::Result<()> {
+        self.write(
+        ".ardent/plugins/probe/plugin.yaml",
+        "schema: 1\nname: probe\nversion: 0.1.0\nkind: format\ncomponent: format.wasm\nfiles: ['*.probe']",
+    )?;
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/components/test-scanner.wasm");
+        fs::copy(fixture, self.path(".ardent/plugins/probe/format.wasm"))?;
+        Ok(())
     }
 
     fn sync(&self) -> io::Result<Run> {
@@ -521,12 +534,7 @@ fn scan_failures_keep_stamps_and_allow_the_next_file_to_run() -> TestResult {
         ".ardent/config.yaml",
         "schema: 1\nformats: {probe: {}, markdown: {}}",
     )?;
-    project.write(
-        ".ardent/plugins/probe/plugin.yaml",
-        "schema: 1\nname: probe\nversion: 0.1.0\nkind: format\ncomponent: format.wasm\nfiles: ['*.probe']",
-    )?;
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/components/test-scanner.wasm");
-    fs::copy(fixture, project.path(".ardent/plugins/probe/format.wasm"))?;
+    project.install_probe()?;
     for name in ["a.probe", "b.probe"] {
         project.write(name, "good")?;
     }
@@ -701,7 +709,7 @@ fn sync_in_a_subdirectory_uses_the_project_root() -> TestResult {
 #[test]
 fn sync_outside_a_project_fails() -> TestResult {
     let dir = temp_dir()?;
-    let output = Command::new(env!("CARGO_BIN_EXE_ardent"))
+    let output = common::ardent_command(env!("CARGO_BIN_EXE_ardent"))
         .arg("sync")
         .current_dir(dir.path())
         .output()?;

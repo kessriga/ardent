@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf};
 use tempfile::NamedTempFile;
 
 mod shared;
-pub use shared::{create_shared_dir, open_lock};
+pub use shared::{create_shared_dir, open_lock, publish_directory};
 
 /// Name of the directory that marks a project root and holds all Ardent data.
 pub const ARDENT_DIR: &str = ".ardent";

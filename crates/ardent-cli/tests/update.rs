@@ -10,7 +10,7 @@ use std::time::SystemTime;
 use common::{run_init, snapshot, stage_release, temp_dir};
 
 fn run(binary: &Path, project: &Path, command: &str) -> io::Result<Output> {
-    Command::new(binary)
+    common::ardent_command(binary)
         .arg(command)
         .current_dir(project)
         .output()
@@ -69,6 +69,30 @@ fn updates_installed_formats_without_touching_selection_or_configuration() -> io
     let before = modification_times(&ardent)?;
     assert!(success(run(binary, root, "update")?).contains("up to date"));
     assert_eq!(modification_times(&ardent)?, before);
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn verifying_an_update_leaves_compilation_caches_untouched() -> io::Result<()> {
+    let release = stage_release()?;
+    let project = temp_dir()?;
+    let home = temp_dir()?;
+    success(run_init(project.path(), &["--plugins", "markdown"])?);
+    let ardent = project.path().join(".ardent");
+    fs::write(
+        ardent.join("config.yaml"),
+        "schema: 1\ncompilation_cache: project\nformats: {markdown: {}}\n",
+    )?;
+    fs::write(ardent.join("plugins/markdown/obsolete"), "old package")?;
+    let output = common::ardent_command(release.executable())
+        .arg("update")
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("XDG_CACHE_HOME", home.path().join("cache"))
+        .output()?;
+    assert!(success(output).contains("Updated markdown"));
+    assert!(snapshot(home.path())?.is_empty());
     Ok(())
 }
 
@@ -131,7 +155,7 @@ fn concurrent_sync_and_update_leave_a_complete_package() -> io::Result<()> {
     lock.lock()?;
     fs::write(release.path().join("plugins/markdown/notes"), "new")?;
     let start = |command| {
-        Command::new(release.executable())
+        common::ardent_command(release.executable())
             .arg(command)
             .current_dir(root)
             .stdout(Stdio::piped())

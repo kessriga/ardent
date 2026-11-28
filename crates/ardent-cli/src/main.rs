@@ -2,9 +2,13 @@ mod browse;
 mod init;
 mod project_root;
 mod release;
+mod staging;
 mod sync;
 mod tracked;
 mod update;
+#[cfg(windows)]
+mod windows_access;
+mod xdg;
 
 use std::env;
 use std::fmt;
@@ -26,9 +30,12 @@ struct Cli {
 enum Command {
     /// Make the working directory an Ardent project by creating `.ardent/` in it
     Init {
-        /// Install these comma-separated format plugins (e.g. markdown,rust). Omit to select in a terminal.
+        /// Install these comma-separated format plugins in this project (e.g. markdown,rust). Omit to select in a terminal.
         #[arg(long, value_name = "NAMES")]
         plugins: Option<String>,
+        /// Explicitly install the named plugins in .ardent/plugins/ (the default with --plugins).
+        #[arg(long, requires = "plugins")]
+        project: bool,
     },
     /// Bring the structure of each tracked source file in `.ardent/cache/` up to date
     Sync,
@@ -45,7 +52,7 @@ fn main() -> ExitCode {
         Err(err) => return fail(format_args!("cannot read the working directory: {err}")),
     };
     match command {
-        Command::Init { plugins } => init(working_dir, plugins.as_deref()),
+        Command::Init { plugins, .. } => init(working_dir, plugins.as_deref()),
         Command::Update => match update::run(&working_dir) {
             Ok(report) => {
                 let mut out = io::stdout().lock();

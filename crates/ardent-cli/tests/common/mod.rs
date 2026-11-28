@@ -65,9 +65,19 @@ pub fn stage_release() -> io::Result<Release> {
     Ok(release)
 }
 
+/// Isolate child processes from the developer's Ardent settings, packages and compilation cache.
+pub fn ardent_command(binary: impl AsRef<Path>) -> Command {
+    let home = Path::new(env!("CARGO_BIN_EXE_ardent")).with_file_name("ardent-test-home");
+    let mut command = Command::new(binary.as_ref());
+    command
+        .env("XDG_CONFIG_HOME", home.join("config"))
+        .env("XDG_CACHE_HOME", home.join("cache"));
+    command
+}
+
 pub fn run_init(project: &Path, args: &[&str]) -> io::Result<Output> {
     let release = stage_release()?;
-    Command::new(release.executable())
+    ardent_command(release.executable())
         .arg("init")
         .args(args)
         .current_dir(project)

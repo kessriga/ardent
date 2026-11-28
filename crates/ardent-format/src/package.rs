@@ -13,6 +13,7 @@ use ardent_core::structure;
 use ardent_core::yaml::{self, ReadError};
 use serde::Deserialize;
 use thiserror::Error;
+use wasmtime::CacheConfig;
 
 use crate::patterns;
 use crate::runtime::{INTERFACE, Runtime, RuntimeError};
@@ -109,6 +110,8 @@ fn check_manifest_name(path: &Path, declared: &str, directory: &str) -> Result<(
 pub struct InstalledPackages<'a> {
     ardent_dir: &'a Path,
     names: BTreeSet<OsString>,
+    user_dir: Option<&'a Path>,
+    cache: Option<CacheConfig>,
 }
 
 impl<'a> InstalledPackages<'a> {
@@ -124,7 +127,28 @@ impl<'a> InstalledPackages<'a> {
         } else {
             BTreeSet::new()
         };
-        Ok(Self { ardent_dir, names })
+        Ok(Self {
+            ardent_dir,
+            names,
+            user_dir: None,
+            cache: Some(CacheConfig::new()),
+        })
+    }
+
+    /// Resolve enabled formats against both installations, keeping verification records in the project.
+    pub fn for_sync(
+        ardent_dir: &'a Path,
+        user_dir: Option<&'a Path>,
+        cache_dir: Option<&Path>,
+    ) -> Result<Self, PluginError> {
+        let mut packages = Self::discover(ardent_dir)?;
+        packages.user_dir = user_dir;
+        packages.cache = cache_dir.map(|dir| {
+            let mut config = CacheConfig::new();
+            config.with_directory(dir);
+            config
+        });
+        Ok(packages)
     }
 
     /// Enabled formats validate their manifests during loading. Check all remaining installed manifests here.
@@ -167,8 +191,16 @@ impl<'a> InstalledPackages<'a> {
 
     /// Loads an enabled format under the project's sync lock. A missing directory gives `Ok(None)`.
     pub fn load_format(&self, name: &str) -> Result<Option<FormatPlugin>, PluginError> {
-        self.directory(name)?
-            .map(|dir| FormatPlugin::load_directory(self.ardent_dir, &dir, name))
+        let directory = match self.directory(name)? {
+            None if let Some(user_dir) = self.user_dir => {
+                Self::discover(user_dir)?.directory(name)?
+            }
+            project => project,
+        };
+        directory
+            .map(|dir| {
+                FormatPlugin::load_directory(self.ardent_dir, &dir, name, self.cache.clone())
+            })
             .transpose()
     }
 
@@ -196,11 +228,11 @@ impl<'a> InstalledPackages<'a> {
 }
 
 enum Scanner {
-    Verified(Vec<u8>),
+    Verified(Vec<u8>, Option<Box<CacheConfig>>),
     Active(Box<Runtime>),
 }
 
-/// A verified project package. The stamp and the running scanner use the same component bytes.
+/// A verified format package. The stamp and the running scanner use the same component bytes.
 pub struct FormatPlugin {
     pub name: String,
     pub version: String,
@@ -216,7 +248,12 @@ impl FormatPlugin {
         InstalledPackages::discover(ardent_dir)?.load_format(name)
     }
 
-    fn load_directory(ardent_dir: &Path, dir: &Path, name: &str) -> Result<Self, PluginError> {
+    fn load_directory(
+        ardent_dir: &Path,
+        dir: &Path,
+        name: &str,
+        cache: Option<CacheConfig>,
+    ) -> Result<Self, PluginError> {
         let path = package_file(dir, Path::new("plugin.yaml"))?;
         let (manifest, manifest_bytes) = Manifest::read(&path, name)?;
         let Manifest::Format(manifest) = manifest else {
@@ -234,9 +271,9 @@ impl FormatPlugin {
         let filename = format!("{name}.yaml");
         let record_path = cache_dir.join(&filename);
         let scanner = if record_matches(&record_path, &record)? {
-            Scanner::Verified(bytes)
+            Scanner::Verified(bytes, cache.map(Box::new))
         } else {
-            let runtime = verify_component(&bytes, &manifest, &component_path, &path)?;
+            let runtime = verify_component(&bytes, &manifest, &component_path, &path, cache)?;
             layout::write_atomic(
                 ardent_dir,
                 format!("{VERIFIED_DIR}/{filename}"),
@@ -271,7 +308,9 @@ impl FormatPlugin {
     ) -> Result<T, RuntimeError> {
         let mut runtime = match &mut self.scanner {
             Scanner::Active(runtime) => return call(runtime),
-            Scanner::Verified(bytes) => Runtime::compile(bytes)?,
+            Scanner::Verified(bytes, cache) => {
+                Runtime::compile_using(bytes, cache.as_deref().cloned())?
+            }
         };
         let result = call(&mut runtime);
         self.scanner = Scanner::Active(Box::new(runtime));
@@ -284,12 +323,13 @@ fn verify_component(
     manifest: &FormatManifest,
     component_path: &Path,
     manifest_path: &Path,
+    cache: Option<CacheConfig>,
 ) -> Result<Runtime, PluginError> {
     let component_error = |source| PluginError::Component {
         path: component_path.to_path_buf(),
         source,
     };
-    let mut runtime = Runtime::compile(bytes).map_err(component_error)?;
+    let mut runtime = Runtime::compile_using(bytes, cache).map_err(component_error)?;
     let metadata = runtime.describe().map_err(component_error)?;
     if metadata.name != manifest.name
         || metadata.version != manifest.version
@@ -633,7 +673,7 @@ mod tests {
         }
         assert!(matches!(
             load_rust(ardent.path())?.scanner,
-            Scanner::Verified(_)
+            Scanner::Verified(..)
         ));
         Ok(())
     }
@@ -717,7 +757,7 @@ mod tests {
         let first = load_rust(ardent.path())?;
         assert!(matches!(first.scanner, Scanner::Active(_)));
         let mut cached = load_rust(ardent.path())?;
-        assert!(matches!(cached.scanner, Scanner::Verified(_)));
+        assert!(matches!(cached.scanner, Scanner::Verified(..)));
 
         let component = dir.join("format.wasm");
         let original = fs::read(&component)?;
@@ -746,7 +786,7 @@ mod tests {
         ));
         assert!(matches!(
             load_rust(ardent.path())?.scanner,
-            Scanner::Verified(_)
+            Scanner::Verified(..)
         ));
 
         let record = ardent.path().join(VERIFIED_DIR).join("rust.yaml");

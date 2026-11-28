@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::yaml::{self, ReadError};
 
@@ -27,8 +27,26 @@ pub struct Config {
     #[serde(default)]
     pub views: BTreeMap<String, ViewConfig>,
     /// Gitignore-style patterns of files that Ardent never tracks.
-    #[serde(default)]
-    pub exclude: Vec<String>,
+    #[serde(default, deserialize_with = "specified")]
+    pub exclude: Option<Vec<String>>,
+    /// Where sync reuses compiled format components. An omitted setting inherits the user's choice.
+    #[serde(default, deserialize_with = "specified")]
+    pub compilation_cache: Option<CompilationCache>,
+}
+
+// An omitted key inherits, while an explicit value must have the declared type.
+fn specified<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    input: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(input).map(Some)
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CompilationCache {
+    #[default]
+    User,
+    Project,
 }
 
 /// Settings of one enabled format plugin. A key that is absent keeps the default of the plugin.
@@ -75,6 +93,21 @@ impl fmt::Display for ConfigError {
 impl Error for ConfigError {}
 
 impl Config {
+    /// Fill absent project settings for the formats the project enables.
+    pub fn inherit(&mut self, user: Self) {
+        self.exclude = self.exclude.take().or(user.exclude);
+        self.compilation_cache = self.compilation_cache.or(user.compilation_cache);
+        for (name, defaults) in user.formats {
+            if let Some(format) = self.formats.get_mut(&name) {
+                format.files = format.files.take().or(defaults.files);
+                if let Some(mut prefixes) = defaults.prefixes {
+                    prefixes.extend(format.prefixes.take().unwrap_or_default());
+                    format.prefixes = Some(prefixes);
+                }
+            }
+        }
+    }
+
     pub fn from_yaml(text: &str) -> Result<Self, ConfigError> {
         let config: Self = yaml::read(text, SCHEMA).map_err(ConfigError::Read)?;
         for name in config.formats.keys().chain(config.views.keys()) {
@@ -128,7 +161,7 @@ exclude: []
             patterns(&["*.md", "*.markdown"])
         );
         assert_eq!(config.formats["rust"].prefixes, None);
-        assert!(config.views.is_empty() && config.exclude.is_empty());
+        assert!(config.views.is_empty() && config.exclude == Some(vec![]));
         Ok(())
     }
 
@@ -144,7 +177,26 @@ exclude: []
             patterns(&["docs/**/*.md"])
         );
         assert!(config.views.contains_key("comments"));
-        assert_eq!(Some(config.exclude), patterns(&["vendor/"]));
+        assert_eq!(config.exclude, patterns(&["vendor/"]));
+        Ok(())
+    }
+
+    #[test]
+    fn inherits_settings_only_for_enabled_formats() -> Result<(), ConfigError> {
+        let user = Config::from_yaml(
+            "schema: 1\ncompilation_cache: project\nexclude: [vendor/]\nformats: {rust: {}, markdown: {files: ['*.md'], prefixes: {a: [old], b: [keep]}}}",
+        )?;
+        let mut project =
+            Config::from_yaml("schema: 1\nformats: {markdown: {prefixes: {a: [new]}}}")?;
+        project.inherit(user);
+        assert_eq!(project.compilation_cache, Some(CompilationCache::Project));
+        assert_eq!(project.exclude, patterns(&["vendor/"]));
+        assert_eq!(project.formats.len(), 1);
+        let format = &project.formats["markdown"];
+        assert_eq!(format.files, patterns(&["*.md"]));
+        let prefixes = format.prefixes.as_ref().expect("merged prefix settings");
+        assert_eq!(prefixes["a"], ["new"]);
+        assert_eq!(prefixes["b"], ["keep"]);
         Ok(())
     }
 

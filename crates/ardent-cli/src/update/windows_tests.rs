@@ -1,6 +1,6 @@
-use super::powershell;
 use crate::release::{self, RELEASE};
 use crate::update::{self, transaction};
+use crate::windows_access::powershell;
 use std::fs;
 use std::io;
 use std::path::Path;

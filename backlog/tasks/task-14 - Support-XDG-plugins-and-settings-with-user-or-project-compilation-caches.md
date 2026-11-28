@@ -1,10 +1,11 @@
 ---
 id: TASK-14
 title: Support XDG plugins and settings with user or project compilation caches
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@codex'
 created_date: '2026-11-24 13:08'
-updated_date: '2026-11-24 13:08'
+updated_date: '2026-11-27 23:27'
 labels: []
 milestone: m-3
 dependencies:
@@ -15,6 +16,9 @@ references:
     Run-format-plugins-as-WebAssembly-components.md
   - openspec/specs/sync/spec.md
   - openspec/specs/ardent-layout/spec.md
+  - openspec/changes/archive/2026-11-27-task-14-xdg-plugins
+  - openspec/changes/archive/2026-11-27-task-14-init-install-scope
+  - openspec/changes/archive/2026-11-27-task-14-init-project-flag
 priority: medium
 type: feature
 ordinal: 14000
@@ -30,19 +34,53 @@ compilation cache holds derived code and has a separate choice of scope.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Two projects can use the same enabled format plugin from the user’s XDG configuration.
-- [ ] #2 A same-named project plugin wins. Removing it selects the user plugin. The stamp reflects the selected digest.
-- [ ] #3 Project settings override matching XDG keys. Other user settings apply. User configuration is optional.
-- [ ] #4 Either installation scope can use a per-user or per-project compilation cache and produces the same outline.
-- [ ] #5 Sync may write to the selected cache. Its existing write boundary applies elsewhere.
+- [x] #1 Two projects can use the same enabled format plugin from the user’s XDG configuration.
+- [x] #2 A same-named project plugin wins. Removing it selects the user plugin. The stamp reflects the selected digest.
+- [x] #3 Project settings override matching XDG keys. Other user settings apply. User configuration is optional.
+- [x] #4 Either installation scope can use a per-user or per-project compilation cache and produces the same outline.
+- [x] #5 Sync may write to the selected cache. Its existing write boundary applies elsewhere.
 
-- [ ] #6 Clearing either compilation cache preserves installed plugins and settings.
+- [x] #6 Clearing either compilation cache preserves installed plugins and settings.
+- [x] #7 Init offers plugins, asks for user or project scope, and enables only the boxes the user checks.
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Verification gate passes: cargo fmt --check / cargo clippy --all-targets -- -D warnings / cargo test
-- [ ] #2 Changed Markdown is formatted with rumdl
-- [ ] #3 README and specs match the new behavior
-- [ ] #4 OpenSpec change archived in the same PR when the task has one
+- [x] #1 Verification gate passes: cargo fmt --check / cargo clippy --all-targets -- -D warnings / cargo test
+- [x] #2 Changed Markdown is formatted with rumdl
+- [x] #3 README and specs match the new behavior
+- [x] #4 OpenSpec change archived in the same PR when the task has one
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Specify how optional user settings, project overrides and package selection interact with init and update.
+2. Resolve settings before discovery. Verify and stamp the selected format plugin in sync and browse.
+3. Select a trusted Wasmtime cache independently of package location. Test both installation scopes against both cache
+   scopes, including clearing the cache and preserving inputs.
+4. Update the README, run the workspace gate and archive the approved change.
+
+5. Extend interactive init with the requested opt-in, scope and plugin prompts. Test both installation locations, shared
+   package reuse, cancellation and scripted compatibility.
+
+6. Expose project scope for scripted init, document the flag, and test where it writes.
+
+7. Fix the five PR review findings and verify private staging, shared package reuse, browser refresh, terminal resizing
+   and cache paths.
+
+8. Handle shared package repairs in browse, verify update candidates in memory, and install through a linked user
+   configuration root. Exercise each case through the CLI.
+<!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Projects can share settings and format plugins or pin a package locally. Interactive init defaults to per-user
+installation with all plugins unchecked. Scripts can pass `--project` with `--plugins`. Init stages packages privately
+and supports installing or reusing packages through a linked user configuration root. It checks the directories beneath
+that root before writing. Browse refreshes after shared plugin installation, removal, or repairs to the manifest or
+component. If the native package watcher fails, browse switches to polling. Update verifies replacement packages in
+memory. The macOS serial workspace check passed with 233 Rust tests and two recipe tests. Linux and Windows workspace
+targets passed compilation checks, and all eight OpenSpec specifications passed strict validation.
+<!-- SECTION:FINAL_SUMMARY:END -->

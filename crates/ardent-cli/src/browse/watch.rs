@@ -12,14 +12,14 @@ use notify::{
 
 use crate::tracked::Discovery;
 
-mod git_rules;
+mod external_rules;
 
 /// Collect filesystem notifications for the next browser sync. The watcher stays alive for the session.
 pub(super) struct Changes {
     _watcher: Box<dyn Watcher>,
     pending: Arc<Mutex<Pending>>,
     root: PathBuf,
-    rules: git_rules::Inputs,
+    rules: external_rules::Inputs,
     polling: bool,
 }
 
@@ -102,15 +102,8 @@ impl Changes {
         let config = Config::default()
             .with_follow_symlinks(false)
             .with_poll_interval(Duration::from_secs(1));
-        let (watcher, polling) =
-            match start::<RecommendedWatcher>(&root, handle.clone(), config.clone()) {
-                Ok(watcher) => (watcher, false),
-                Err(_) => (
-                    start::<PollWatcher>(&root, handle, config).map_err(io::Error::other)?,
-                    true,
-                ),
-            };
-        let rules = git_rules::Inputs::new(&root);
+        let (watcher, polling) = watch_tree(&root, handle, config).map_err(io::Error::other)?;
+        let rules = external_rules::Inputs::new(&root, crate::xdg::config_dir());
         Ok(Self {
             _watcher: watcher,
             pending,
@@ -140,12 +133,24 @@ impl Changes {
             .lock()
             .map_err(|_| io::Error::other("watcher state poisoned"))?;
         if rules_changed {
+            pending.discovery = None;
             pending.since.get_or_insert_with(Instant::now);
         }
         Ok(pending.take_ready()?.map(|warnings| Batch {
             warnings,
             check_plugins: std::mem::take(&mut pending.plugins_changed),
         }))
+    }
+}
+
+fn watch_tree(
+    root: &Path,
+    handle: impl EventHandler + Clone,
+    config: Config,
+) -> notify::Result<(Box<dyn Watcher>, bool)> {
+    match start::<RecommendedWatcher>(root, handle.clone(), config.clone()) {
+        Ok(watcher) => Ok((watcher, false)),
+        Err(_) => start::<PollWatcher>(root, handle, config).map(|watcher| (watcher, true)),
     }
 }
 

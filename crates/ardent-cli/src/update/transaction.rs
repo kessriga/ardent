@@ -2,8 +2,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::staging_dir;
 use crate::release::{self, ReleasePlugin};
+use crate::staging::Stage;
 use ardent_core::layout;
 
 const JOURNAL_PREFIX: &str = ".ardent-update-";
@@ -253,8 +253,8 @@ pub(super) fn recover(
         super::windows::repair_access(&installed, &previous).map_err(recovery_error)?;
         let retired = (|| {
             let tmp = layout::create_dir(ardent, "cache/tmp")?;
-            let stage = staging_dir(&tmp)?;
-            let moved = fs::rename(&previous, stage.path.join(PREVIOUS));
+            let stage = Stage::new(&tmp)?;
+            let moved = fs::rename(&previous, stage.path().join(PREVIOUS));
             super::close_stage(stage, plugin.name, warnings);
             moved
         })();

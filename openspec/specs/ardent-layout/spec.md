@@ -58,27 +58,39 @@ SHALL write `.ardent/.gitignore` with the single line `/cache/`, so git ignores 
 
 ### Requirement: Initial content
 
-`ardent init` SHALL write `.ardent/.gitignore` with the line `/cache/` and `.ardent/config.yaml` with schema 1, empty
-views and empty excludes. It SHALL copy each selected release package into `.ardent/plugins/<name>/` and enable exactly
-those names under `formats` with their default patterns.
+`ardent init` SHALL write `.ardent/.gitignore` with the line `/cache/` and a schema-1 `.ardent/config.yaml` with empty
+views and excludes. It SHALL enable exactly the selected names under `formats` with their default patterns. Per-project
+installation SHALL copy complete release packages into `.ardent/plugins/<name>/`. Per-user installation SHALL make each
+selected package available under the user's XDG `ardent/plugins/<name>/` directory.
 
 #### Scenario: Files after init
 
-- **WHEN** a person initializes a project with only Rust selected
-- **THEN** `.ardent/plugins/rust/` contains the Rust release manifest, component and accompanying README
-- **AND** `.ardent/plugins/` contains only `rust/`, and `formats` contains only `rust`
-- **AND** the first sync scans `src/main.rs` and skips `README.md`
+- **WHEN** a person chooses per-project and selects only Rust
+- **THEN** `.ardent/plugins/rust/` contains the release manifest, component and accompanying README
+- **AND** the project enables only Rust and its first sync scans `src/main.rs` and skips `README.md`
+
+#### Scenario: Shared installation in two projects
+
+- **WHEN** a person selects Rust per-user in two new projects and Rust is initially absent from the user installation
+- **THEN** the first init copies the complete Rust release package and the second reuses it
+- **AND** both projects enable Rust, create no project package, and can sync a Rust source file
+
+#### Scenario: Existing shared package
+
+- **WHEN** the user already has a valid Rust format package with a different version or additional files
+- **THEN** selecting Rust per-user enables the existing package and preserves all its files
 
 #### Scenario: No formats selected
 
-- **WHEN** a person confirms an empty selection or runs `ardent init --plugins ''`
-- **THEN** init creates a project with an empty `formats` mapping
-- **AND** `.ardent/` contains only `.gitignore` and `config.yaml`
+- **WHEN** a person declines additional plugins, confirms an empty checklist or runs `ardent init --plugins ''`
+- **THEN** init creates a project with an empty `formats` mapping and only `.gitignore` and `config.yaml` in `.ardent/`
+- **AND** init creates no user package directory
 
 #### Scenario: A selected package cannot be installed
 
-- **WHEN** init cannot read a file from a selected release package
-- **THEN** init exits with a failure, names the file, and leaves the directory ready for another init
+- **WHEN** init cannot install or reuse a selected package
+- **THEN** init reports the affected path or package, exits unsuccessfully and leaves the project ready for another init
+- **AND** existing shared packages stay intact and no partially copied package becomes visible
 
 ### Requirement: Init in an existing project
 
@@ -108,15 +120,22 @@ message that names the nearest such directory as the project root, and SHALL cha
 - **THEN** the command exits with a nonzero status and a message that names the project root
 - **AND** `docs/` contains no `.ardent`
 
-### Requirement: Init writes only inside .ardent/
+### Requirement: Init write locations
 
-`ardent init` SHALL create, change, or delete no file or directory outside `.ardent/`.
+`ardent init` SHALL limit writes to the new project's `.ardent/` directory unless the person selects per-user and at
+least one package. In that case init MAY also create the directories and files needed for installation under the user's
+Ardent plugin directory. It SHALL preserve user settings, existing user packages and project source files.
 
 #### Scenario: Directory with source files
 
-- **WHEN** a person runs `ardent init` in a directory that contains `README.md` and `src/main.rs`
+- **WHEN** a person initializes a project containing `README.md` and `src/main.rs` with per-project packages
 - **THEN** `.ardent/` is the only new entry in the working directory
-- **AND** `README.md` and `src/main.rs` keep their content
+- **AND** both source files and the user's configuration directory keep their contents
+
+#### Scenario: User configuration already exists
+
+- **WHEN** a person installs Rust per-user while creating a project and already has an XDG Ardent settings file
+- **THEN** the user settings file keeps its original contents and the project config enables Rust
 
 ### Requirement: Directories on demand
 
@@ -345,19 +364,37 @@ Ardent SHALL NOT read a directory that an `exclude` pattern matches.
 
 ### Requirement: Plugin locations
 
-Ardent SHALL load enabled format plugins only from `.ardent/plugins/<name>/`. The release SHALL supply Markdown and Rust
-as separate packages. The CLI SHALL embed neither plugin.
+For each enabled format, Ardent SHALL use the complete package at `.ardent/plugins/<name>/` if present. When that entry
+is absent, it SHALL look under `$XDG_CONFIG_HOME/ardent/plugins/<name>/`. Both locations SHALL use the same package
+format and verification rules. The release SHALL supply Markdown and Rust as separate packages. The CLI SHALL embed
+neither plugin.
 
 #### Scenario: Pinned Markdown plugin
 
-- **WHEN** `.ardent/plugins/markdown/plugin.yaml` and its component agree on version `0.0.9`, and a sync scans
-  `README.md`
-- **THEN** the stamp of the structure of `README.md` has `format: markdown` and `format_version: 0.0.9`
+- **WHEN** the project and user each install Markdown and the project package verifies at version `0.0.9`
+- **THEN** a sync of `README.md` writes `format: markdown`, `format_version: 0.0.9` and the project component's digest
+  into its stamp
 
 #### Scenario: New project without installed plugins
 
-- **WHEN** a new project enables Markdown and Rust in its configuration but both project packages are missing
+- **WHEN** a new project enables Markdown and Rust and neither scope supplies either package
 - **THEN** sync warns about both missing formats, scans zero files and exits with status 0
+
+#### Scenario: Two projects share one package
+
+- **WHEN** two projects enable Markdown, only the user installs it, and each project contains a `README.md`
+- **THEN** each sync writes its own structure with the user component's digest
+- **AND** neither project gains a copy of the package
+
+#### Scenario: Remove a project pin
+
+- **WHEN** the project Markdown package is removed and the user copy has the same version but different component bytes
+- **THEN** the next sync scans the Markdown file again and records the user component's digest
+
+#### Scenario: Broken project pin
+
+- **WHEN** the project Markdown package is incomplete and the user has a valid copy
+- **THEN** sync reports the project package error, retains the previous Markdown structures and exits with status 1
 
 ### Requirement: Plugin manifest
 
@@ -439,34 +476,37 @@ Ardent SHALL write each file in `.ardent/` into `.ardent/cache/tmp/` first and t
 
 ### Requirement: Select release format plugins during init
 
-In a terminal, `ardent init` SHALL offer the release format plugins and let the user select any subset in one prompt. An
-explicit comma-separated `--plugins` value SHALL bypass the prompt. Init SHALL resolve the selection before creating the
-project.
+In a terminal, `ardent init` SHALL first ask `Install format plugins? [Y/n]`. Yes SHALL lead to an installation scope
+picker followed by a plugin checklist. No SHALL skip both. Init SHALL resolve the selection before writing the project
+or shared packages. An explicit `--plugins` value SHALL use project scope and bypass all prompts.
 
 #### Scenario: Interactive selection
 
-- **WHEN** a person runs `ardent init` in a terminal and selects Markdown and Rust
-- **THEN** init installs and enables both packages
+- **WHEN** the person presses Enter at the first question
+- **THEN** the picker asks `Where should Ardent install them?` and highlights `For my user account` above
+  `In this project`
+- **AND** confirming the scope opens `Select format plugins` with every plugin unchecked
+- **AND** Space toggles the focused plugin and Enter confirms the checked items. Pressing Enter immediately selects none
 
 #### Scenario: Cancel the prompt
 
-- **WHEN** a person cancels the picker before confirming a selection
-- **THEN** init leaves the directory unchanged
+- **WHEN** the person cancels at any of the three prompts
+- **THEN** init restores the terminal and leaves the project and user plugin directories unchanged
 
 #### Scenario: Scripted selection
 
 - **WHEN** a script runs `ardent init --plugins markdown,rust` with standard input closed
-- **THEN** init installs and enables both packages without prompting
+- **THEN** the command installs and enables both packages in the project without prompting
 
 #### Scenario: Missing flag outside a terminal
 
 - **WHEN** a script runs `ardent init` without a terminal or a plugin selection
-- **THEN** init exits with a failure, names `--plugins`, and creates no project
+- **THEN** init exits with a failure, names `--plugins` and creates no project
 
 #### Scenario: Unknown name mixed with a valid name
 
 - **WHEN** a person runs `ardent init --plugins markdown,html`
-- **THEN** init exits with a failure, names `html`, lists `markdown` and `rust` as available, and creates no project
+- **THEN** init exits with a failure, names `html`, lists `markdown` and `rust` as available and creates no project
 
 ### Requirement: Update installed release format plugins
 
@@ -560,3 +600,86 @@ that plugin's previous package usable. A concurrent Ardent sync SHALL see a comp
 
 - **WHEN** a marked update backup contains an unrelated `plugin.yaml`
 - **THEN** sync, browse and update preserve that file and recover the package
+
+### Requirement: XDG homes
+
+Ardent SHALL use absolute `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` paths. When either variable is absent, empty or
+relative, Ardent SHALL use the corresponding home-directory default, `.config` or `.cache`. Reading user settings SHALL
+leave the configuration directory untouched.
+
+#### Scenario: Default configuration home
+
+- **WHEN** the XDG configuration home is unset and the user's home contains `.config/ardent/config.yaml`
+- **THEN** sync reads settings from that file
+
+### Requirement: User configuration
+
+Ardent SHALL read optional schema-1 settings from `$XDG_CONFIG_HOME/ardent/config.yaml`. For an enabled format, project
+settings SHALL override individual user keys, including named prefixes. A project list SHALL replace the corresponding
+user list, including when the project supplies an empty list. Ardent SHALL resolve inherited patterns relative to the
+project root. Absent user settings SHALL allow existing projects to sync as before.
+
+#### Scenario: Project enables only Markdown
+
+- **WHEN** user settings configure Rust and the project enables only Markdown
+- **THEN** sync applies Markdown settings and skips Rust source files
+
+#### Scenario: Override files and retain excludes
+
+- **WHEN** user settings define Markdown files and exclude `vendor/`, the project overrides only Markdown files with
+  `["docs/**/*.md"]`, and both `docs/intro.md` and `README.md` exist
+- **THEN** sync tracks `docs/intro.md`, skips `README.md` and continues excluding `vendor/`
+
+#### Scenario: Explicitly clear the user exclude list
+
+- **WHEN** the user excludes `docs/` and the project sets `exclude: []`
+- **THEN** a matching source under `docs/` can appear in the outline browser
+
+#### Scenario: No user settings
+
+- **WHEN** the user config file is absent and the project supplies settings and packages
+- **THEN** sync uses the project settings and packages and leaves the user config file absent
+
+### Requirement: Compilation cache scope
+
+Ardent SHALL accept `compilation_cache: user` or `compilation_cache: project` independently of the selected portable
+package's location. The default SHALL be `user`. Both scopes SHALL store compiled code under the user's cache home. The
+project scope SHALL isolate compiled code by project root. The scope SHALL affect only reuse of compiled code.
+
+#### Scenario: Independent installation and compilation cache scopes
+
+- **WHEN** a reader scans the same source with the same component installed in either scope, using each cache scope
+- **THEN** all four combinations produce the same outline and component digest
+
+#### Scenario: Find or clear compiled code
+
+- **WHEN** a reader runs a scan that needs to compile a component
+- **THEN** the shared cache uses `$XDG_CACHE_HOME/ardent/compiled/shared/` and the project cache uses
+  `$XDG_CACHE_HOME/ardent/compiled/projects/<project-id>/`, according to the selected scope
+- **AND** Ardent derives the project ID from the canonical project root
+
+#### Scenario: Cache unavailable or inside the checkout
+
+- **WHEN** the selected cache is unavailable or resides inside the project
+- **THEN** sync can scan the portable component in memory
+
+#### Scenario: Separate project caches
+
+- **WHEN** two projects select project scope and both compile the same user package
+- **THEN** each project populates its own compilation cache, and clearing one preserves the other's compiled code
+
+### Requirement: Explicit project scope for scripted init
+
+`ardent init` SHALL accept `--project` with `--plugins NAMES` to install the selected format plugins in the project. The
+command SHALL document the flag in its help. It SHALL require `--plugins` when `--project` is present.
+
+#### Scenario: Select a project installation in a script
+
+- **WHEN** a script runs `ardent init --plugins rust --project` with standard input closed
+- **THEN** init installs the bundled Rust package in `.ardent/plugins/rust/` and enables only Rust in the project
+- **AND** the user plugin directory keeps its prior contents, including when a shared Rust package already exists
+
+#### Scenario: Project flag without a plugin list
+
+- **WHEN** a person runs `ardent init --project`
+- **THEN** argument parsing exits with a usage error that names `--plugins` and creates no project or user packages
