@@ -896,14 +896,11 @@ fn highlights_packaged_examples_and_navigates_a_scanner_only_file() -> io::Resul
     let root = project.path();
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let packages = root.join(".ardent/plugins");
-    for name in ["markdown", "rust"] {
-        let dir = packages.join(name);
-        fs::create_dir_all(&dir)?;
-        let example = examples.join(".ardent/plugins").join(name);
-        for file in ["plugin.yaml", "format.wasm"] {
-            fs::copy(example.join(file), dir.join(file))?;
-        }
-    }
+    assert!(
+        common::run_init(root, &["--plugins", "markdown,rust"])?
+            .status
+            .success()
+    );
     fs::write(
         root.join(".ardent/config.yaml"),
         "schema: 1\nformats: {markdown: {}, rust: {}, probe: {}}\n",
