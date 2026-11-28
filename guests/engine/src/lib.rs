@@ -31,6 +31,19 @@ pub mod highlighting {
     pub use exports::ardent::format::highlighter::{Category, Guest, Span};
 }
 
+pub mod properties {
+    wit_bindgen::generate!({ path: "../../wit", world: "source-properties", pub_export_macro: true });
+    pub use exports::ardent::format::node_properties::{Group, Guest, Property};
+
+    pub fn inline(name: &str, value: &str) -> Property {
+        Property {
+            name: name.to_owned(),
+            value: value.to_owned(),
+            inline: true,
+        }
+    }
+}
+
 pub mod query {
     wit_bindgen::generate!({ path: "../../wit", world: "query-setup", pub_export_macro: true });
     pub use exports::ardent::format::query_preparation::Guest;

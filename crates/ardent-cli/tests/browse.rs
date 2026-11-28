@@ -223,25 +223,25 @@ fn switches_global_themes_and_recovers_while_reading() -> io::Result<()> {
     lock.lock()?;
     for selector in ["theme:", "theme: [daylight]"] {
         fs::write(&config, format!("{original}\n{selector}\n"))?;
-        session.keys(b"\t")?;
+        session.keys(b"\x1b[Z")?;
         session.wait_for("config.yaml")?;
         fs::write(themes.join("catppuccin.yaml"), "schema: 1\n")?;
         thread::sleep(Duration::from_millis(1500));
-        session.keys(b"\t")?;
+        session.keys(b"\x1b[Z")?;
         session.wait_source_color(">     Two", 6, Rgb(0x80, 0xbb, 0xff))?;
         fs::write(themes.join("catppuccin.yaml"), example)?;
         fs::write(&config, format!("{original}\ntheme: catppuccin\n"))?;
-        session.keys(b"\t")?;
+        session.keys(b"\x1b[Z")?;
         session.wait_screen(&["notes.md"], &["config.yaml"])?;
-        session.keys(b"\t")?;
+        session.keys(b"\x1b[Z")?;
         session.wait_source_color("# Two", 0, Rgb(0xe6, 0xbb, 0x70))?;
     }
 
     // Only the checkout has daylight. Keep showing the previous colors until it is installed globally.
     fs::write(&config, original)?;
-    session.keys(b"\t")?;
+    session.keys(b"\x1b[Z")?;
     session.wait_for("daylight.yaml")?;
-    session.keys(b"\t")?;
+    session.keys(b"\x1b[Z")?;
     session.wait_source_color("# Two", 0, Rgb(0xe6, 0xbb, 0x70))?;
     fs::write(&daylight, "schema: 1\nsource: {heading: '#123456'}")?;
     session.wait_source_color("# Two", 0, Rgb(0x12, 0x34, 0x56))?;
@@ -253,9 +253,9 @@ fn switches_global_themes_and_recovers_while_reading() -> io::Result<()> {
     session.wait_source_color("# Two", 0, Rgb(0x12, 0x34, 0x56))?;
     fs::write(root.join("pending.md"), "# Pending\n")?;
     fs::write(&daylight, "schema: 1\nsource: {comment: '#GG1020'}")?;
-    session.keys(b"\t")?;
+    session.keys(b"\x1b[Z")?;
     session.wait_for("#GG1020")?;
-    session.keys(b"\t")?;
+    session.keys(b"\x1b[Z")?;
     session.wait_source_color("# Two", 0, Rgb(0x12, 0x34, 0x56))?;
     let replacement = themes.join("replacement");
     fs::write(&replacement, "schema: 1\nsource: {heading: '#102030'}")?;
@@ -263,11 +263,11 @@ fn switches_global_themes_and_recovers_while_reading() -> io::Result<()> {
     session.wait_source_color("# Two", 0, Rgb(0x10, 0x20, 0x30))?;
     drop(lock);
     fs::remove_file(&daylight)?;
-    session.keys(b"\t")?;
+    session.keys(b"\x1b[Z")?;
     session.wait_screen(&["daylight.yaml"], &["#GG1020"])?;
     fs::remove_file(user_config)?;
     session.wait_screen(&["notes.md"], &["daylight.yaml"])?;
-    session.keys(b"\t")?;
+    session.keys(b"\x1b[Z")?;
     session.wait_source_color("# Two", 0, Idx(3))?;
     session.wait_source_color(">     Two", 6, Idx(6))?;
     session.keys(b"q")?;
@@ -579,17 +579,17 @@ fn keeps_the_directory_explorer_beside_the_open_outline() -> io::Result<()> {
     );
 
     // With focus in the explorer, move to beta.md and refresh the project without replacing the document.
-    session.keys(b"\t\x1b[B")?;
+    session.keys(b"\x1b[Z\x1b[B")?;
     fs::write(root.join("z.md"), "# New file\n")?;
     session.wait_screen(&["z.md", "# First passage"], &["# Second passage"])?;
     session.resize(&slave, 12, 32)?;
     session.wait_screen(&["Explorer", "beta.md"], &["# First passage"])?;
-    session.keys(b"\t")?;
+    session.keys(b"\x1b[Z")?;
     session.wait_screen(
         &["────", "# First passage"],
         &["Explorer", "beta.md", "Source"],
     )?;
-    session.keys(b"\t\r")?;
+    session.keys(b"\x1b[Z\r")?;
     session.wait_screen(
         &["────", "# Second passage"],
         &["# First passage", "Source"],
@@ -890,6 +890,38 @@ fn redirected_browse_rejects_the_terminal_before_creating_a_cache() -> io::Resul
 }
 
 #[test]
+fn compares_inline_properties_from_the_packaged_plugins() -> io::Result<()> {
+    let project = common::temp_dir()?;
+    let root = project.path();
+    assert!(
+        common::run_init(root, &["--plugins", "markdown,rust"])?
+            .status
+            .success()
+    );
+    fs::write(root.join("a.md"), "- [x] Done\n- [ ] Pending\n")?;
+    fs::write(root.join("b.rs"), "pub static EAST_FIELD: Gauge = Gauge;\n")?;
+    let (master, slave) = pty::open_terminal(28)?;
+    let mut session = Session::open(root, &slave, master)?;
+    session.wait_for("b.rs")?;
+    session.keys(b"\r\x1b[C\x1b[C\x1b[C\t\x1b[B\t")?;
+    session.wait_screen(
+        &["⚬ checked: true", "⚬ checked: false", "- [ ] Pending"],
+        &[],
+    )?;
+    fs::write(root.join("a.md"), "- [ ] Done\n- [ ] Pending\n")?;
+    session.wait_screen(&["⚬ checked: false"], &["⚬ checked: true"])?;
+    session.keys(b"\x1b[Z\x1b[B\r\x1b[C\t")?;
+    session.wait_screen(
+        &["static EAST_FIELD", "⚬ visibility: pub", "⚬ type: Gauge"],
+        &["⚬ checked"],
+    )?;
+    session.keys(b"q")?;
+    session.wait_restored()?;
+    assert!(session.child.wait()?.success());
+    Ok(())
+}
+
+#[test]
 fn highlights_packaged_examples_and_navigates_a_scanner_only_file() -> io::Result<()> {
     use vt100::Color::{Default, Idx};
     let project = common::temp_dir()?;
@@ -931,12 +963,12 @@ fn highlights_packaged_examples_and_navigates_a_scanner_only_file() -> io::Resul
     session.keys(b"\r")?;
     session.wait_source_color("//! Heights", 0, Idx(6))?;
     session.wait_source_color("pub mod gauge", 0, Idx(5))?;
-    session.keys(b"\t\x1b[B\r")?;
+    session.keys(b"\x1b[Z\x1b[B\r")?;
     session.wait_source_color("# North Pier shift log", 0, Idx(3))?;
     fs::write(root.join("b.md"), "Now `code` here.\n")?;
     session.wait_source_color("Now `code` here.", 4, Idx(2))?;
     session.wait_source_color("Now `code` here.", 0, Default)?;
-    session.keys(b"\t\x1b[B\r\x1b[C")?;
+    session.keys(b"\x1b[Z\x1b[B\r\x1b[C")?;
     session.wait_source_color("fn plain() {}", 0, Default)?;
     session.wait_until("select the scanner-only child", |screen| {
         screen

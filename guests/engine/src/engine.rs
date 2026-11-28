@@ -11,8 +11,10 @@ use std::ops::Range;
 use ardent_core::outline::ScannedNode;
 use tree_sitter::{
     Language, LanguageError, Node, Parser, Query, QueryCursor, QueryError, QueryMatch,
-    StreamingIterator,
+    StreamingIterator, Tree,
 };
+
+use crate::properties::{Group, Property};
 
 const NODE_CAPTURE: &str = "node";
 const LABEL_CAPTURE: &str = "label";
@@ -106,7 +108,8 @@ impl fmt::Display for ScanError {
 impl Error for ScanError {}
 
 /// A node that a match found, before nesting.
-struct Candidate {
+struct Candidate<'tree> {
+    syntax: Node<'tree>,
     kind: String,
     label: String,
     range: Range<usize>,
@@ -114,7 +117,7 @@ struct Candidate {
     level: Option<u32>,
     /// The number of ancestors of the syntax node, which orders two candidates with the same range.
     depth: usize,
-    children: Vec<Candidate>,
+    children: Vec<Candidate<'tree>>,
 }
 
 impl QueryEngine {
@@ -141,6 +144,40 @@ impl QueryEngine {
     /// # }
     /// ```
     pub fn scan(&self, source: &[u8]) -> Result<Vec<ScannedNode>, ScanError> {
+        let tree = self.parse(source)?;
+        Ok(self
+            .outline(tree.root_node(), source)
+            .into_iter()
+            .map(into_scanned)
+            .collect())
+    }
+
+    /// Read properties from the same syntax matches in the same preorder used by the scanner.
+    pub fn properties(
+        &self,
+        source: &[u8],
+        read: impl Fn(&str, Node<'_>, &[u8]) -> Vec<Property>,
+    ) -> Result<Vec<Group>, ScanError> {
+        let tree = self.parse(source)?;
+        let mut pending = self.outline(tree.root_node(), source);
+        pending.reverse();
+        let mut groups = Vec::new();
+        let mut index = 0;
+        while let Some(node) = pending.pop() {
+            let properties = read(&node.kind, node.syntax, source);
+            if !properties.is_empty() {
+                groups.push(Group {
+                    node: index,
+                    properties,
+                });
+            }
+            index += 1;
+            pending.extend(node.children.into_iter().rev());
+        }
+        Ok(groups)
+    }
+
+    fn parse(&self, source: &[u8]) -> Result<Tree, ScanError> {
         let mut parser = Parser::new();
         parser
             .set_language(&self.language)
@@ -149,12 +186,12 @@ impl QueryEngine {
         if tree.root_node().has_error() {
             return Err(syntax_error(tree.root_node(), source));
         }
-        let candidates = self.query.candidates(tree.root_node(), source);
-        let nested = nest_by_containment(candidates);
-        Ok(nest_by_level(nested, source.len())
-            .into_iter()
-            .map(into_scanned)
-            .collect())
+        Ok(tree)
+    }
+
+    fn outline<'tree>(&self, root: Node<'tree>, source: &[u8]) -> Vec<Candidate<'tree>> {
+        let candidates = self.query.candidates(root, source);
+        nest_by_level(nest_by_containment(candidates), source.len())
     }
 }
 
@@ -180,7 +217,7 @@ impl CompiledQuery {
 
     /// One candidate for each syntax node that an `@node` capture matches, from the first pattern that matches it.
     /// Matches arrive in the order they finish, so a later pattern can match the same syntax node first.
-    fn candidates(&self, root: Node<'_>, source: &[u8]) -> Vec<Candidate> {
+    fn candidates<'tree>(&self, root: Node<'tree>, source: &[u8]) -> Vec<Candidate<'tree>> {
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(&self.query, root, source);
         // The pattern index and the candidate index of each syntax node that has a candidate.
@@ -216,12 +253,12 @@ impl CompiledQuery {
         candidates
     }
 
-    fn candidate(
+    fn candidate<'tree>(
         &self,
         found: &QueryMatch<'_, '_>,
-        node: Node<'_>,
+        node: Node<'tree>,
         source: &[u8],
-    ) -> Option<Candidate> {
+    ) -> Option<Candidate<'tree>> {
         let properties = self.patterns.get(found.pattern_index)?;
         let mut label_ranges: Vec<_> = found
             .captures()
@@ -243,6 +280,7 @@ impl CompiledQuery {
                 range.start.min(annotation.start)..range.end.max(annotation.end)
             });
         Some(Candidate {
+            syntax: node,
             label: label(source, &label_ranges).unwrap_or_else(|| kind.clone()),
             kind,
             range,
@@ -324,7 +362,7 @@ fn label(source: &[u8], label_ranges: &[Range<usize>]) -> Option<String> {
 
 /// Makes each candidate a child of the nearest other candidate whose range contains it, and returns the candidates
 /// that no other contains. Of two candidates with the same range, the one with the outer syntax node is the parent.
-fn nest_by_containment(mut candidates: Vec<Candidate>) -> Vec<Candidate> {
+fn nest_by_containment(mut candidates: Vec<Candidate<'_>>) -> Vec<Candidate<'_>> {
     candidates.sort_by(|a, b| {
         a.range
             .start
@@ -354,7 +392,7 @@ fn contains(outer: &Range<usize>, inner: &Range<usize>) -> bool {
 }
 
 /// Moves the last open candidate into the children of the one below it, or into `top_level`.
-fn close(open: &mut Vec<Candidate>, top_level: &mut Vec<Candidate>) {
+fn close<'tree>(open: &mut Vec<Candidate<'tree>>, top_level: &mut Vec<Candidate<'tree>>) {
     if let Some(done) = open.pop() {
         match open.last_mut() {
             Some(parent) => parent.children.push(done),
@@ -365,7 +403,7 @@ fn close(open: &mut Vec<Candidate>, top_level: &mut Vec<Candidate>) {
 
 /// Applies "Nesting by level" to a list of siblings whose parent ends at `parent_end`, after it applied the rule to the
 /// children of each sibling.
-fn nest_by_level(siblings: Vec<Candidate>, parent_end: usize) -> Vec<Candidate> {
+fn nest_by_level(siblings: Vec<Candidate<'_>>, parent_end: usize) -> Vec<Candidate<'_>> {
     let mut result = Vec::new();
     let mut open: Vec<Candidate> = Vec::new();
     for mut sibling in siblings {
@@ -389,14 +427,18 @@ fn nest_by_level(siblings: Vec<Candidate>, parent_end: usize) -> Vec<Candidate> 
 
 /// Ends the run of the last open node with a level at `end`, and moves the node into the run below it or into
 /// `result`.
-fn close_run(open: &mut Vec<Candidate>, result: &mut Vec<Candidate>, end: usize) {
+fn close_run<'tree>(
+    open: &mut Vec<Candidate<'tree>>,
+    result: &mut Vec<Candidate<'tree>>,
+    end: usize,
+) {
     if let Some(run) = open.last_mut() {
         run.range.end = run.range.end.max(end);
     }
     close(open, result);
 }
 
-fn into_scanned(candidate: Candidate) -> ScannedNode {
+fn into_scanned(candidate: Candidate<'_>) -> ScannedNode {
     ScannedNode {
         kind: candidate.kind,
         label: candidate.label,

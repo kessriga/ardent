@@ -2,6 +2,7 @@
 
 mod source;
 
+use ardent_core::properties::Property;
 use ardent_core::theme::{Rgb, Theme};
 use ratatui::Frame;
 use ratatui::buffer::CellWidth;
@@ -61,7 +62,12 @@ fn key_hints(browser: &Browser, has_notice: bool) -> Vec<&'static str> {
     let mut keys = match browser.focus {
         Focus::Explorer => vec!["Arrows navigate", "Enter open"],
         Focus::Document => match browser.screen() {
-            Some(Screen::Outline(_)) => vec!["Arrows navigate", "[ ] siblings", "PgUp/PgDn source"],
+            Some(Screen::Outline(_)) => vec![
+                "Arrows navigate",
+                "[ ] siblings",
+                "PgUp/PgDn source",
+                "Tab properties",
+            ],
             Some(Screen::Unavailable { .. }) => vec!["PgUp/PgDn error"],
             None => Vec::new(),
         },
@@ -70,7 +76,7 @@ fn key_hints(browser: &Browser, has_notice: bool) -> Vec<&'static str> {
         keys.push("PgUp/PgDn messages");
     }
     if browser.open_path().is_some() {
-        keys.push("Tab panes");
+        keys.push("Shift+Tab panes");
         keys.push("Esc close");
     }
     keys.push("q quit");
@@ -182,35 +188,65 @@ fn outline(frame: &mut Frame<'_>, area: Rect, open: &Page, theme: &Theme) -> Pag
         Constraint::Min(0),
     ])
     .areas(area);
-    let tree = &open.tree;
-    let selected = tree
-        .visible()
-        .position(|i| i == tree.selected)
-        .unwrap_or_default();
-    let start = (selected + 1).saturating_sub(usize::from(nodes.height));
-    let visible = tree
-        .visible()
+    let rows = || {
+        open.tree.visible().flat_map(|index| {
+            std::iter::once((index, None)).chain(
+                open.visible_properties(index)
+                    .map(move |property| (index, Some(property))),
+            )
+        })
+    };
+    let selected = open.tree.selected;
+    let position = rows().take_while(|(index, _)| *index != selected).count();
+    // Keep the selected label and as many of its open properties as fit in the viewport.
+    let height = usize::from(nodes.height);
+    let block_height = 1 + open.visible_properties(selected).count();
+    let start = position.saturating_sub(height.saturating_sub(block_height));
+    let visible = rows()
         .skip(start)
-        .take(nodes.height.into())
-        .map(|i| {
-            let (depth, marker) = tree.row_prefix(i);
-            let node = &open.document.outline.nodes[i];
-            let indent = " ".repeat(depth.saturating_mul(2).min(usize::from(nodes.width) / 2));
-            Line::from(vec![
-                Span::raw(format!("{indent}{marker}")),
-                Span::styled(
-                    format!(" {}", printable(&node.label)),
-                    theme
-                        .outline
-                        .get(&node.kind)
-                        .map_or_else(|| kind_color(&node.kind), rgb),
-                ),
-            ])
-        });
-    selected_list(frame, nodes, visible, selected.saturating_sub(start));
+        .take(height)
+        .map(|(index, property)| outline_line(open, index, property, nodes.width, theme));
+    selected_list(frame, nodes, visible, position - start);
     frame.render_widget(Block::default().borders(Borders::TOP), divider);
 
     source::draw(frame, source, open, theme)
+}
+
+fn outline_line(
+    open: &Page,
+    index: usize,
+    property: Option<&Property>,
+    width: u16,
+    theme: &Theme,
+) -> Line<'static> {
+    let (depth, marker) = open.tree.row_prefix(index);
+    let width = usize::from(width);
+    // The list reserves two cells for selection. Keep room for the property bullet.
+    let max_indent = width.saturating_sub(3);
+    let node_indent = depth
+        .saturating_mul(2)
+        .min(width / 2)
+        .min(max_indent.saturating_sub(1));
+    if let Some(property) = property {
+        let indent = " ".repeat((node_indent + 2).min(max_indent));
+        return Line::raw(format!(
+            "{indent}⚬ {}: {}",
+            printable(&property.name),
+            printable(&property.value)
+        ));
+    }
+    let node = &open.document.outline.nodes[index];
+    let indent = " ".repeat(node_indent);
+    Line::from(vec![
+        Span::raw(format!("{indent}{marker}")),
+        Span::styled(
+            format!(" {}", printable(&node.label)),
+            theme
+                .outline
+                .get(&node.kind)
+                .map_or_else(|| kind_color(&node.kind), rgb),
+        ),
+    ])
 }
 
 fn rgb(&Rgb(r, g, b): &Rgb) -> Color {
@@ -392,6 +428,45 @@ mod tests {
     use ardent_core::highlight::{Category, Highlight};
 
     #[test]
+    fn properties_stay_indented_when_the_node_depth_reaches_the_width_limit() -> std::io::Result<()>
+    {
+        use crate::Document;
+        use ardent_core::outline::{Outline, ScannedNode};
+
+        let mut children = Vec::new();
+        for _ in 0..12 {
+            children = vec![ScannedNode {
+                kind: "section".into(),
+                label: "section".into(),
+                range: 0..1,
+                label_ranges: vec![],
+                children,
+            }];
+        }
+        let page = Page::new(Document {
+            outline: Outline::build("a", b"a", &children),
+            properties: Default::default(),
+            highlights: Default::default(),
+            bytes: b"a".to_vec(),
+        })?;
+        let property = Property {
+            name: "flag".into(),
+            value: "true".into(),
+            inline: true,
+        };
+        let theme = Theme::default();
+        for (width, extra_indent) in [(40, 2), (7, 1)] {
+            let branch = outline_line(&page, 10, None, width, &theme).to_string();
+            let row = outline_line(&page, 10, Some(&property), width, &theme).to_string();
+            let marker = branch.find('+').expect("collapsed branch");
+            let bullet = row.find('⚬').expect("property marker");
+            assert_eq!(bullet, marker + extra_indent);
+            assert!(2 + bullet < usize::from(width));
+        }
+        Ok(())
+    }
+
+    #[test]
     fn a_four_row_terminal_keeps_the_selection_source_paging_and_focus_keys() {
         use crate::{Document, FileList};
         use ardent_core::outline::Outline;
@@ -406,6 +481,7 @@ mod tests {
         let load = |path: &str| {
             let bytes = b"first\nsecond".to_vec();
             Ok(Document {
+                properties: Default::default(),
                 highlights: Default::default(),
                 outline: Outline::build(path, &bytes, &[]),
                 bytes,
@@ -439,6 +515,7 @@ mod tests {
         let text = format!("{first_row}Z");
         browser.enter(&|path| {
             Ok(Document {
+                properties: Default::default(),
                 highlights: Default::default(),
                 outline: Outline::build(path, text.as_bytes(), &[]),
                 bytes: text.as_bytes().to_vec(),
@@ -471,6 +548,7 @@ mod tests {
         };
         let mut open = Page::new(crate::Document {
             outline: Outline::build("a", &bytes, &[child]),
+            properties: Default::default(),
             highlights: [Highlight {
                 range: start..start + "界e\u{301}x".len(),
                 category: Category::Code,

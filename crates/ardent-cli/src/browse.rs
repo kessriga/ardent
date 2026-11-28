@@ -12,13 +12,13 @@ use ardent_tui::{BrowserUpdate, Document};
 
 use crate::sync;
 
-mod highlights;
+mod details;
 mod refresh;
 mod theme;
 mod watch;
 
 use crate::sync::source;
-use highlights::Highlighter;
+use details::DocumentPlugins;
 use refresh::{Preview, Refresh, Revision};
 use theme::ThemeWatcher;
 
@@ -30,19 +30,19 @@ pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
     let initial = refresh.initial()?;
     let mut invalid_selector = false;
     let mut failed = initial.failed;
-    let highlighter = RefCell::new(Highlighter::new(initial.formats));
+    let plugins = RefCell::new(DocumentPlugins::new(initial.formats));
     let observed = Cell::new(None);
     ardent_tui::run(
         initial.files,
         palette,
         |path| {
-            load(&root, path, &mut highlighter.borrow_mut(), |preview| {
+            load(&root, path, &mut plugins.borrow_mut(), |preview| {
                 observed.set(Some(preview))
             })
         },
         |open_path| {
             if open_path.is_none() {
-                highlighter.borrow_mut().clear();
+                plugins.borrow_mut().clear();
             }
             if let Some(update) = themes.ready()? {
                 invalid_selector = update.invalid_selector;
@@ -50,7 +50,7 @@ pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
             }
             Ok(refresh.ready(open_path, observed.take())?.map(|update| {
                 failed = update.failed;
-                highlighter.borrow_mut().formats = update.formats;
+                plugins.borrow_mut().formats = update.formats;
                 themes.recheck();
                 BrowserUpdate::Files(update.files)
             }))
@@ -68,7 +68,7 @@ pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
 fn load(
     root: &Path,
     path: &str,
-    highlighter: &mut Highlighter,
+    plugins: &mut DocumentPlugins,
     observed: impl FnOnce(Preview),
 ) -> io::Result<Document> {
     let cached = root.join(ARDENT_DIR).join(layout::structure_path(path));
@@ -107,8 +107,10 @@ fn load(
         path,
         Revision::from_source(&metadata, hash),
     ));
+    let details = plugins.details(&structure.stamp, &bytes, structure.outline.nodes.len());
     Ok(Document {
-        highlights: highlighter.spans(&structure.stamp, &bytes),
+        highlights: details.highlights,
+        properties: details.properties,
         outline: structure.outline,
         bytes,
     })
@@ -126,7 +128,7 @@ mod tests {
     use std::time::SystemTime;
 
     #[test]
-    fn refresh_reuses_highlights_only_for_matching_source_and_verified_format()
+    fn refresh_reuses_details_only_for_matching_source_and_verified_format()
     -> Result<(), Box<dyn std::error::Error>> {
         let project = tempfile::tempdir()?;
         let dir = project.path().join(ARDENT_DIR);
@@ -136,9 +138,9 @@ mod tests {
         for file in ["format.wasm", "plugin.yaml"] {
             fs::copy(release.join(file), installed.join(file))?;
         }
-        let plugin = FormatPlugin::load(&dir, "markdown")?.expect("installed Markdown package");
+        let mut plugin = FormatPlugin::load(&dir, "markdown")?.expect("installed Markdown package");
         let path = "sample.md";
-        let source = b"# Title\n";
+        let source = b"# Title\n\n- [ ] One\n";
         let stamp = Stamp {
             size: source.len() as u64,
             mtime: SystemTime::UNIX_EPOCH,
@@ -148,31 +150,55 @@ mod tests {
             format_hash: plugin.format_hash.clone(),
         };
         fs::write(project.path().join(path), source)?;
-        let mut structure = Structure::new(stamp, Outline::build(path, source, &[]));
-        let mut highlighter = Highlighter::new(vec![plugin]);
+        let mut structure = Structure::new(
+            stamp,
+            Outline::build(path, source, &plugin.scan(path, source)?),
+        );
+        let mut plugins = DocumentPlugins::new(vec![plugin]);
         let preview =
-            |structure: &Structure, highlighter: &mut Highlighter| -> io::Result<Document> {
+            |structure: &Structure, plugins: &mut DocumentPlugins| -> io::Result<Document> {
                 layout::write_atomic(
                     &dir,
                     layout::structure_path(path),
                     structure.to_yaml()?.as_bytes(),
                 )?;
-                load(project.path(), path, highlighter, |_| {})
+                load(project.path(), path, plugins, |_| {})
             };
-        let first = preview(&structure, &mut highlighter)?.highlights;
-        assert_eq!(first.len(), 1);
+        let first = preview(&structure, &mut plugins)?;
+        assert_eq!(first.highlights.len(), 1);
+        let checkbox = |document: &Document| {
+            assert_eq!(document.properties.len(), 1);
+            let (&index, properties) = document
+                .properties
+                .first_key_value()
+                .expect("checkbox properties");
+            assert_eq!(document.outline.nodes[index].kind, "item");
+            assert_eq!(
+                document.outline.nodes[index].range,
+                document.outline.nodes[index - 1].range
+            );
+            assert_eq!(properties[0].name, "checked");
+            properties[0].value.clone()
+        };
+        assert_eq!(checkbox(&first), "false");
         // An unrelated save replaces the installed formats with freshly verified handles.
-        highlighter.formats = FormatPlugin::load(&dir, "markdown")?.into_iter().collect();
-        let refreshed = preview(&structure, &mut highlighter)?.highlights;
-        assert!(Arc::ptr_eq(&first, &refreshed));
-        let formats = std::mem::take(&mut highlighter.formats);
-        assert!(preview(&structure, &mut highlighter)?.highlights.is_empty());
-        highlighter.formats = formats;
-        let changed = b"A `code`";
+        plugins.formats = FormatPlugin::load(&dir, "markdown")?.into_iter().collect();
+        let refreshed = preview(&structure, &mut plugins)?;
+        assert!(Arc::ptr_eq(&first.highlights, &refreshed.highlights));
+        assert!(Arc::ptr_eq(&first.properties, &refreshed.properties));
+        let formats = std::mem::take(&mut plugins.formats);
+        let absent = preview(&structure, &mut plugins)?;
+        assert!(absent.highlights.is_empty());
+        assert!(absent.properties.is_empty());
+        plugins.formats = formats;
+        let changed = b"A `code`\n\n- [x] One\n";
         fs::write(project.path().join(path), changed)?;
-        assert!(preview(&structure, &mut highlighter).is_err());
+        assert!(preview(&structure, &mut plugins).is_err());
         structure.stamp.hash = structure::content_hash(changed);
-        let changed_spans = preview(&structure, &mut highlighter)?.highlights;
+        structure.outline = Outline::build(path, changed, &plugins.formats[0].scan(path, changed)?);
+        let document = preview(&structure, &mut plugins)?;
+        assert_eq!(checkbox(&document), "true");
+        let changed_spans = document.highlights;
         assert_eq!(changed_spans[0].range, 2..8);
         assert_eq!(changed_spans[0].category, Category::Code);
         // An empty Wasm custom section gives the installed component a new digest.
@@ -180,12 +206,16 @@ mod tests {
         let mut rebuilt = fs::read(&component)?;
         rebuilt.extend_from_slice(&[0, 1, 0]);
         fs::write(component, &rebuilt)?;
-        highlighter.formats = FormatPlugin::load(&dir, "markdown")?.into_iter().collect();
-        let plain = preview(&structure, &mut highlighter)?;
+        plugins.formats = FormatPlugin::load(&dir, "markdown")?.into_iter().collect();
+        let plain = preview(&structure, &mut plugins)?;
         assert!(plain.highlights.is_empty());
+        assert!(plain.properties.is_empty());
         assert_eq!(plain.bytes, changed);
         structure.stamp.format_hash = structure::content_hash(&rebuilt);
-        let updated = preview(&structure, &mut highlighter)?.highlights;
+        let refreshed = preview(&structure, &mut plugins)?;
+        assert_eq!(checkbox(&refreshed), "true");
+        assert!(!Arc::ptr_eq(&document.properties, &refreshed.properties));
+        let updated = refreshed.highlights;
         assert_eq!(updated, changed_spans);
         assert!(!Arc::ptr_eq(&updated, &changed_spans));
         Ok(())
@@ -218,27 +248,27 @@ mod tests {
         let store = |s: &Structure| {
             layout::write_atomic(&dir, layout::structure_path(path), s.to_yaml()?.as_bytes())
         };
-        let mut highlighter = Highlighter::default();
+        let mut plugins = DocumentPlugins::default();
         store(&structure)?;
-        assert!(load(project.path(), path, &mut highlighter, |_| {}).is_err());
+        assert!(load(project.path(), path, &mut plugins, |_| {}).is_err());
         fs::write(project.path().join(path), source)?;
-        let document = load(project.path(), path, &mut highlighter, |_| {})?;
+        let document = load(project.path(), path, &mut plugins, |_| {})?;
         assert_eq!(
             document.bytes.get(document.outline.nodes[1].range.clone()),
             Some(b"hello".as_slice())
         );
         fs::write(project.path().join(path), "é\nworld")?;
-        assert!(load(project.path(), path, &mut highlighter, |_| {}).is_err());
+        assert!(load(project.path(), path, &mut plugins, |_| {}).is_err());
         fs::write(project.path().join(path), source)?;
         structure.outline.nodes[1].range.end += 1;
         store(&structure)?;
-        assert!(load(project.path(), path, &mut highlighter, |_| {}).is_err());
+        assert!(load(project.path(), path, &mut plugins, |_| {}).is_err());
         structure.outline = Outline::build(path, b"", &[]);
         structure.stamp.hash = structure::content_hash(b"");
         fs::write(project.path().join(path), "")?;
         store(&structure)?;
         assert_eq!(
-            load(project.path(), path, &mut highlighter, |_| {})?
+            load(project.path(), path, &mut plugins, |_| {})?
                 .outline
                 .nodes[0]
                 .range,

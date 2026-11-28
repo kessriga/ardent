@@ -92,11 +92,31 @@ expression: "outline_yaml(\"types.rs\")?"
   kind: fn
   range: 432..463
   fingerprint: 80bd995c4cec4f62
+- path: types.rs#trait Scan/fn scan/self
+  label: self
+  kind: parameter
+  range: 440..445
+  fingerprint: bbc6cff39d3a4de6
+- path: types.rs#trait Scan/fn scan/return.1
+  label: return
+  kind: return
+  range: 447..462
+  fingerprint: dddb3b09e65e0fdd
 - path: types.rs#trait Scan/fn limit
   label: fn limit
   kind: fn
   range: 469..521
   fingerprint: ff9042bf192ab572
+- path: types.rs#trait Scan/fn limit/self
+  label: self
+  kind: parameter
+  range: 478..483
+  fingerprint: bbc6cff39d3a4de6
+- path: types.rs#trait Scan/fn limit/return.1
+  label: return
+  kind: return
+  range: 485..493
+  fingerprint: c97e6f25010f9074
 - path: types.rs#impl Entry
   label: impl Entry
   kind: impl
@@ -107,6 +127,16 @@ expression: "outline_yaml(\"types.rs\")?"
   kind: fn
   range: 542..614
   fingerprint: ad339b96640ef0e5
+- path: types.rs#impl Entry/fn new/path
+  label: path
+  kind: parameter
+  range: 553..566
+  fingerprint: 76511f01dfebc634
+- path: types.rs#impl Entry/fn new/return.1
+  label: return
+  kind: return
+  range: 568..575
+  fingerprint: 984e4dd076e72e22
 - path: types.rs#impl Scan for Entry
   label: impl Scan for Entry
   kind: impl
@@ -127,6 +157,16 @@ expression: "outline_yaml(\"types.rs\")?"
   kind: fn
   range: 696..743
   fingerprint: 918a4fb3aef4fedd
+- path: types.rs#impl Scan for Entry/fn scan/self
+  label: self
+  kind: parameter
+  range: 704..709
+  fingerprint: bbc6cff39d3a4de6
+- path: types.rs#impl Scan for Entry/fn scan/return.1
+  label: return
+  kind: return
+  range: 711..717
+  fingerprint: f53e3313f1d56266
 - path: types.rs#impl From<Vec<T>> for Kind
   label: impl From<Vec<T>> for Kind
   kind: impl
@@ -137,6 +177,16 @@ expression: "outline_yaml(\"types.rs\")?"
   kind: fn
   range: 810..863
   fingerprint: f2cc7a2aaba6556d
+- path: types.rs#impl From<Vec<T>> for Kind/fn from/_
+  label: _
+  kind: parameter
+  range: 818..827
+  fingerprint: 0952aece3e418ab8
+- path: types.rs#impl From<Vec<T>> for Kind/fn from/return.1
+  label: return
+  kind: return
+  range: 829..836
+  fingerprint: 984e4dd076e72e22
 - path: types.rs#impl fmt::Display for Entry
   label: impl fmt::Display for Entry
   kind: impl
@@ -147,6 +197,21 @@ expression: "outline_yaml(\"types.rs\")?"
   kind: fn
   range: 901..1010
   fingerprint: 8c013f4ceedc8f8a
+- path: types.rs#impl fmt::Display for Entry/fn fmt/self
+  label: self
+  kind: parameter
+  range: 908..913
+  fingerprint: bbc6cff39d3a4de6
+- path: types.rs#impl fmt::Display for Entry/fn fmt/f
+  label: f
+  kind: parameter
+  range: 915..941
+  fingerprint: 91b800c8f4651e40
+- path: types.rs#impl fmt::Display for Entry/fn fmt/return.1
+  label: return
+  kind: return
+  range: 943..957
+  fingerprint: f322c259f233abcb
 - path: types.rs#impl Send for Id
   label: impl Send for Id
   kind: impl
@@ -182,3 +247,13 @@ expression: "outline_yaml(\"types.rs\")?"
   kind: fn
   range: 1127..1149
   fingerprint: 76232f2a7010a237
+- path: types.rs#extern "C"/fn abs/x
+  label: x
+  kind: parameter
+  range: 1134..1140
+  fingerprint: 683ef36bcd7187d9
+- path: types.rs#extern "C"/fn abs/return.1
+  label: return
+  kind: return
+  range: 1142..1148
+  fingerprint: d540cf4b43df854a

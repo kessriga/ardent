@@ -6,6 +6,7 @@ use ardent_format_guest::{self as guest, PluginError, QueryEngine};
 use guest::scanner::{Guest, Metadata, Node, ScanError};
 
 mod highlight;
+mod properties;
 
 struct Component;
 
@@ -32,6 +33,18 @@ impl guest::highlighting::Guest for Component {
     }
 }
 
+impl guest::properties::Guest for Component {
+    fn properties(source: Vec<u8>) -> Vec<guest::properties::Group> {
+        ENGINE.with(|engine| {
+            engine
+                .as_ref()
+                .ok()
+                .and_then(|engine| engine.properties(&source, properties::read).ok())
+                .unwrap_or_default()
+        })
+    }
+}
+
 impl Guest for Component {
     fn describe() -> Metadata {
         guest::metadata("rust", env!("CARGO_PKG_VERSION"), &["*.rs"])
@@ -48,6 +61,8 @@ guest::export!(Component with_types_in guest);
 guest::query::export!(Component with_types_in guest::query);
 #[cfg(target_arch = "wasm32")]
 guest::highlighting::export!(Component with_types_in guest::highlighting);
+#[cfg(target_arch = "wasm32")]
+guest::properties::export!(Component with_types_in guest::properties);
 
 #[cfg(test)]
 mod tests {
@@ -118,7 +133,7 @@ mod tests {
             })
             .collect();
         assert_eq!(ENGINE.len(), 188);
-        assert_eq!(rows.len(), 6, "{rows:#?}");
+        assert_eq!(rows.len(), 9, "{rows:#?}");
         for row in [
             "src/engine.rs | file | 0..188 | 174add0298423e83",
             "src/engine.rs#impl Engine | impl | 47..187 | e756306dadb3fb00",
@@ -134,6 +149,111 @@ mod tests {
         assert_eq!(
             node(&outline, "src/engine.rs#struct Engine/files").map(|n| n.kind.as_str()),
             Some("field")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn signature_children_have_their_written_ranges_and_types() -> TestResult {
+        use guest::properties::Guest as _;
+
+        let text = "trait Example { fn find<'a, 'b: 'a, T: Read + Send, const N: usize>(self: Box<Self>, key: &'a T, cb: fn(i32) -> i32) -> Option<T>; fn reset(&mut self); fn unit() -> (); }";
+        let outline = outline("a.rs", text)?;
+        let groups = Component::properties(text.as_bytes().to_vec());
+        let mut rows = Vec::new();
+        for (index, node) in outline.nodes.iter().skip(1).enumerate() {
+            let values = groups
+                .iter()
+                .find(|g| g.node as usize == index)
+                .into_iter()
+                .flat_map(|g| &g.properties)
+                .map(|p| (p.name.as_str(), p.value.as_str(), p.inline))
+                .collect::<Vec<_>>();
+            if matches!(node.kind.as_str(), "generic" | "parameter" | "return") {
+                rows.push((node.label.as_str(), &text[node.range.clone()], values));
+            }
+        }
+        assert_eq!(
+            rows,
+            [
+                ("'a", "'a", vec![]),
+                ("'b", "'b: 'a", vec![("bound", "'a", true)]),
+                ("T", "T: Read + Send", vec![("bound", "Read + Send", true)]),
+                ("N", "const N: usize", vec![("type", "usize", true)]),
+                ("self", "self: Box<Self>", vec![("type", "Box<Self>", true)]),
+                ("key", "key: &'a T", vec![("type", "&'a T", true)]),
+                (
+                    "cb",
+                    "cb: fn(i32) -> i32",
+                    vec![("type", "fn(i32) -> i32", true)]
+                ),
+                ("return", "-> Option<T>", vec![("type", "Option<T>", true)]),
+                ("self", "&mut self", vec![]),
+                ("return", "-> ()", vec![("type", "()", true)]),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn signature_previews_preserve_attributes_patterns_and_variadics() -> TestResult {
+        let text = "extern \"C\" { fn call<#[a] T>(_: u8, #[b] (a, b): (u8, u8), args: ...); }";
+        let outline = outline("a.rs", text)?;
+        let declarations: Vec<_> = outline
+            .nodes
+            .iter()
+            .filter(|node| matches!(node.kind.as_str(), "generic" | "parameter"))
+            .map(|node| (node.label.as_str(), &text[node.range.clone()]))
+            .collect();
+        assert_eq!(
+            declarations,
+            [
+                ("T", "#[a] T"),
+                ("_", "_: u8"),
+                ("(a, b)", "#[b] (a, b): (u8, u8)"),
+                ("args", "args: ..."),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn properties_on_rust_declarations() -> TestResult {
+        use guest::properties::Guest as _;
+
+        let text = "pub static EAST_FIELD: Gauge = init(); pub(crate) enum State { pub Ready, From(pub u8), At { pub addr: u16 } } struct S { count: usize } struct Pair(pub u8, bool); pub fn visible() {} type Alias = u8; const C: u8 = 1;";
+        let outline = outline("a.rs", text)?;
+        let groups = Component::properties(text.as_bytes().to_vec());
+        let rows: Vec<_> = groups
+            .iter()
+            .flat_map(|g| {
+                let node = &outline.nodes[g.node as usize + 1];
+                g.properties.iter().map(move |p| {
+                    (
+                        node.label.as_str(),
+                        p.name.as_str(),
+                        p.value.as_str(),
+                        p.inline,
+                    )
+                })
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("static EAST_FIELD", "visibility", "pub", true),
+                ("static EAST_FIELD", "type", "Gauge", true),
+                ("enum State", "visibility", "pub(crate)", true),
+                ("field", "type", "u8", true),
+                ("addr", "type", "u16", true),
+                ("count", "type", "usize", true),
+                ("field.1", "visibility", "pub", true),
+                ("field.1", "type", "u8", true),
+                ("field.2", "type", "bool", true),
+                ("fn visible", "visibility", "pub", true),
+                ("type Alias", "type", "u8", true),
+                ("const C", "type", "u8", true),
+            ]
         );
         Ok(())
     }
@@ -219,7 +339,13 @@ mod tests {
                 "src/lib.rs",
                 "pub async fn fetch<T: Send>(url: &str) -> T {\n    todo!()\n}\n"
             )?,
-            ["src/lib.rs", "src/lib.rs#fn fetch"]
+            [
+                "src/lib.rs",
+                "src/lib.rs#fn fetch",
+                "src/lib.rs#fn fetch/T",
+                "src/lib.rs#fn fetch/url",
+                "src/lib.rs#fn fetch/return.1"
+            ]
         );
         Ok(())
     }
@@ -243,7 +369,9 @@ mod tests {
             [
                 "src/engine.rs",
                 "src/engine.rs#impl From<T> for Engine",
-                "src/engine.rs#impl From<T> for Engine/fn from"
+                "src/engine.rs#impl From<T> for Engine/fn from",
+                "src/engine.rs#impl From<T> for Engine/fn from/t",
+                "src/engine.rs#impl From<T> for Engine/fn from/return.1"
             ]
         );
         Ok(())
@@ -289,6 +417,8 @@ mod tests {
                 "src/ffi.rs",
                 "src/ffi.rs#extern \"C\"",
                 "src/ffi.rs#extern \"C\"/fn abs",
+                "src/ffi.rs#extern \"C\"/fn abs/x",
+                "src/ffi.rs#extern \"C\"/fn abs/return.1",
                 "src/ffi.rs#extern"
             ]
         );
@@ -319,7 +449,9 @@ mod tests {
                 "src/scan.rs#trait Scan",
                 "src/scan.rs#trait Scan/type Output",
                 "src/scan.rs#trait Scan/const LIMIT",
-                "src/scan.rs#trait Scan/fn scan"
+                "src/scan.rs#trait Scan/fn scan",
+                "src/scan.rs#trait Scan/fn scan/self",
+                "src/scan.rs#trait Scan/fn scan/return.1"
             ]
         );
         Ok(())
@@ -335,7 +467,10 @@ mod tests {
             .iter()
             .map(|node| node.kind.as_str())
             .collect();
-        assert_eq!(kinds, ["file", "impl", "type", "const", "fn"]);
+        assert_eq!(
+            kinds,
+            ["file", "impl", "type", "const", "fn", "parameter", "return"]
+        );
         Ok(())
     }
 

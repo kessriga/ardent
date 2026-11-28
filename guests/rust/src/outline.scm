@@ -155,3 +155,54 @@
 (ordered_field_declaration_list
   type: (_) @node
   (#set! kind "field"))
+
+; A named function owns its signature. Function-pointer types and closures can also have parameter lists.
+((_ "fn" name: (_) type_parameters: (type_parameters
+  (attribute_item)+ @annotation .
+  [
+    (type_parameter name: (_) @label)
+    (const_parameter name: (_) @label)
+    (lifetime_parameter name: (_) @label)
+    (metavariable) @label
+  ] @node))
+  (#set! kind "generic"))
+
+((_ "fn" name: (_) parameters: (parameters
+  (attribute_item)+ @annotation .
+  [
+    (parameter pattern: _ @label)
+    (self_parameter (self) @label)
+    (variadic_parameter pattern: _ @label)
+    (variadic_parameter !pattern "..." @label)
+  ] @node))
+  (#set! kind "parameter"))
+
+; Older Rust signatures allow unnamed inputs consisting of just a type.
+((_ "fn" name: (_) parameters: (parameters (attribute_item)+ @annotation . [(_type) "_"] @node))
+  (#set! kind "parameter"))
+
+; Match parameters without a preceding attribute at any position in the list.
+((_ "fn" name: (_) type_parameters: (type_parameters
+  [
+    (type_parameter name: (_) @label)
+    (const_parameter name: (_) @label)
+    (lifetime_parameter name: (_) @label)
+    (metavariable) @label
+  ] @node))
+  (#set! kind "generic"))
+
+((_ "fn" name: (_) parameters: (parameters
+  [
+    (parameter pattern: _ @label)
+    (self_parameter (self) @label)
+    (variadic_parameter pattern: _ @label)
+    (variadic_parameter !pattern "..." @label)
+  ] @node))
+  (#set! kind "parameter"))
+
+; Older Rust signatures allow unnamed inputs consisting of just a type.
+((_ "fn" name: (_) parameters: (parameters [(_type) "_"] @node))
+  (#set! kind "parameter"))
+
+((_ "fn" name: (_) "->" @annotation return_type: (_) @node)
+  (#set! kind "return"))

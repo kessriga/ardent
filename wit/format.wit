@@ -67,3 +67,22 @@ world syntax-highlighting {
 world query-setup {
     export query-preparation;
 }
+
+interface node-properties {
+    record property {
+        name: string,
+        value: string,
+        inline: bool,
+    }
+
+    record group {
+        node: u32,
+        properties: list<property>,
+    }
+
+    properties: func(source: list<u8>) -> list<group>;
+}
+
+world source-properties {
+    export node-properties;
+}

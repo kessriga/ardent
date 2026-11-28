@@ -52,6 +52,12 @@ offset, plus a category: keyword, string-literal, comment, heading or code. Each
 source and end before or at the next span's start. Gaps appear as plain text. If the export is absent, the call fails or
 any span is invalid, the browser displays plain source and keeps the outline available.
 
+A plugin can export the `source-properties` world alongside its scanner. When the reader opens a document, Ardent passes
+its source bytes to `ardent:format/node-properties@0.1.0`. Each returned group identifies a node by its zero-based index
+in the scanner result, before Ardent adds the file root. Supply each node once and each property name once per node.
+Return properties in display order. Set `inline` to true for each named value the outline should show. A missing export,
+a failed call or an invalid result leaves the outline and source preview available.
+
 ## Host limits for format plugins
 
 A scanner receives source bytes and the WASI 0.2 clock, random and environment functions it needs for deterministic

@@ -9,6 +9,7 @@ use ardent_core::config::{self, ConfigError};
 use ardent_core::highlight::Highlight;
 use ardent_core::layout;
 use ardent_core::outline::ScannedNode;
+use ardent_core::properties::NodeProperties;
 use ardent_core::structure;
 use ardent_core::yaml::{self, ReadError};
 use serde::Deserialize;
@@ -300,6 +301,15 @@ impl FormatPlugin {
     /// Returns validated syntax spans, or an empty list for a scanner-only plugin.
     pub fn highlight(&mut self, source: &[u8]) -> Result<Vec<Highlight>, RuntimeError> {
         self.with_runtime(|runtime| runtime.highlight(source))
+    }
+
+    /// Gets properties for the matching outline, whose length includes the file node.
+    pub fn properties(
+        &mut self,
+        source: &[u8],
+        outline_len: usize,
+    ) -> Result<NodeProperties, RuntimeError> {
+        self.with_runtime(|runtime| runtime.properties(source, outline_len))
     }
 
     fn with_runtime<T>(
