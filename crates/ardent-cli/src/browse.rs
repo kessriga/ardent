@@ -8,28 +8,33 @@ use std::process::ExitCode;
 use ardent_core::layout::{self, ARDENT_DIR};
 use ardent_core::structure::{self, Structure};
 use ardent_format::MAX_SOURCE_BYTES;
-use ardent_tui::Document;
+use ardent_tui::{BrowserUpdate, Document};
 
 use crate::sync;
 
 mod highlights;
 mod refresh;
+mod theme;
 mod watch;
 
 use crate::sync::source;
 use highlights::Highlighter;
 use refresh::{Preview, Refresh, Revision};
+use theme::ThemeWatcher;
 
 pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
     ardent_tui::require_terminal()?;
     let root = sync::find_root(working_dir).map_err(|err| io::Error::other(err.to_string()))?;
+    let (themes, palette) = ThemeWatcher::start(&root)?;
     let mut refresh = Refresh::start(root.clone())?;
     let initial = refresh.initial()?;
+    let mut invalid_selector = false;
     let mut failed = initial.failed;
     let highlighter = RefCell::new(Highlighter::new(initial.formats));
     let observed = Cell::new(None);
     ardent_tui::run(
         initial.files,
+        palette,
         |path| {
             load(&root, path, &mut highlighter.borrow_mut(), |preview| {
                 observed.set(Some(preview))
@@ -39,14 +44,19 @@ pub(crate) fn run(working_dir: &Path) -> io::Result<ExitCode> {
             if open_path.is_none() {
                 highlighter.borrow_mut().clear();
             }
+            if let Some(update) = themes.ready()? {
+                invalid_selector = update.invalid_selector;
+                return Ok(Some(BrowserUpdate::Theme(update.palette)));
+            }
             Ok(refresh.ready(open_path, observed.take())?.map(|update| {
                 failed = update.failed;
                 highlighter.borrow_mut().formats = update.formats;
-                update.files
+                themes.recheck();
+                BrowserUpdate::Files(update.files)
             }))
         },
     )?;
-    Ok(if failed {
+    Ok(if failed || invalid_selector {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS

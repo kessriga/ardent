@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 
+use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Deserializer};
 
 use crate::yaml::{self, ReadError};
@@ -17,8 +18,8 @@ pub const FILE_NAME: &str = "config.yaml";
 const RESERVED_PLUGIN_NAME: &str = "structure";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Config {
+#[serde(deny_unknown_fields, bound(deserialize = "Selector: Deserialize<'de>"))]
+pub struct Config<Selector = String> {
     schema: u32,
     /// The enabled format plugins by name.
     #[serde(default)]
@@ -32,6 +33,9 @@ pub struct Config {
     /// Where sync reuses compiled format components. An omitted setting inherits the user's choice.
     #[serde(default, deserialize_with = "specified")]
     pub compilation_cache: Option<CompilationCache>,
+    /// Name of the user-installed palette to display in the browser.
+    #[serde(default, deserialize_with = "specified")]
+    pub theme: Option<Selector>,
 }
 
 // An omitted key inherits, while an explicit value must have the declared type.
@@ -68,6 +72,7 @@ pub struct ViewConfig {}
 #[derive(Debug)]
 pub enum ConfigError {
     Read(ReadError),
+    InvalidThemeSelector,
     /// A plugin name breaks the rule of the spec `ardent-layout`, "Plugin names".
     InvalidPluginName(String),
     /// The configuration enables a plugin with the reserved name `structure`.
@@ -78,6 +83,9 @@ impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Read(err) => err.fmt(f),
+            Self::InvalidThemeSelector => {
+                f.write_str("theme must be a filename stem expressed as a string")
+            }
             Self::InvalidPluginName(name) => write!(
                 f,
                 "{name:?} is not a valid plugin name: a name starts with a lowercase letter and contains only \
@@ -97,6 +105,7 @@ impl Config {
     pub fn inherit(&mut self, user: Self) {
         self.exclude = self.exclude.take().or(user.exclude);
         self.compilation_cache = self.compilation_cache.or(user.compilation_cache);
+        self.theme = self.theme.take().or(user.theme);
         for (name, defaults) in user.formats {
             if let Some(format) = self.formats.get_mut(&name) {
                 format.files = format.files.take().or(defaults.files);
@@ -109,6 +118,39 @@ impl Config {
     }
 
     pub fn from_yaml(text: &str) -> Result<Self, ConfigError> {
+        match Self::read(text) {
+            Err(ConfigError::Read(ReadError::Invalid(_)))
+                if Self::browse_settings(text).is_ok() =>
+            {
+                Err(ConfigError::InvalidThemeSelector)
+            }
+            result => result,
+        }
+    }
+
+    /// Read scan settings while the browser monitors and validates the selector independently.
+    pub fn browse_settings(text: &str) -> Result<Self, ConfigError> {
+        let Config {
+            schema,
+            formats,
+            views,
+            exclude,
+            compilation_cache,
+            ..
+        } = Config::<IgnoredAny>::read(text)?;
+        Ok(Self {
+            schema,
+            formats,
+            views,
+            exclude,
+            compilation_cache,
+            theme: None,
+        })
+    }
+}
+
+impl<Selector: DeserializeOwned> Config<Selector> {
+    fn read(text: &str) -> Result<Self, ConfigError> {
         let config: Self = yaml::read(text, SCHEMA).map_err(ConfigError::Read)?;
         for name in config.formats.keys().chain(config.views.keys()) {
             check_plugin_name(name)?;
@@ -149,6 +191,29 @@ exclude: []
 
     fn patterns(patterns: &[&str]) -> Option<Vec<String>> {
         Some(patterns.iter().map(|p| p.to_string()).collect())
+    }
+
+    #[test]
+    fn only_the_live_browser_can_defer_an_invalid_selector() -> Result<(), ConfigError> {
+        assert_eq!(
+            Config::from_yaml("schema: 1\ntheme: 007")?.theme.as_deref(),
+            Some("007")
+        );
+        for value in ["null", "[daylight]", "{name: daylight}"] {
+            let text = format!("{INITIAL}theme: {value}\n");
+            assert!(matches!(
+                Config::from_yaml(&text),
+                Err(ConfigError::InvalidThemeSelector)
+            ));
+            let config = Config::browse_settings(&text)?;
+            assert_eq!(config.theme, None);
+            assert!(config.formats.contains_key("markdown"));
+        }
+        assert!(matches!(
+            Config::browse_settings("schema: 2\ntheme: [daylight]"),
+            Err(ConfigError::Read(ReadError::UnknownSchema(Some(2))))
+        ));
+        Ok(())
     }
 
     #[test]

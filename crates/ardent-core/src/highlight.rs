@@ -1,8 +1,10 @@
 //! Syntax categories attached to byte ranges of a source revision.
 
+use serde::Deserialize;
 use std::ops::Range;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Category {
     Keyword,
     StringLiteral,

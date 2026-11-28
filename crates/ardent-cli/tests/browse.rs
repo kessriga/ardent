@@ -169,6 +169,135 @@ impl Drop for Session {
 }
 
 #[test]
+fn switches_global_themes_and_recovers_while_reading() -> io::Result<()> {
+    use vt100::Color::{Idx, Rgb};
+
+    let project = common::temp_dir()?;
+    let home = common::temp_dir()?;
+    let root = project.path();
+    assert!(
+        common::run_init(root, &["--plugins", "markdown"])?
+            .status
+            .success()
+    );
+    fs::write(root.join("notes.md"), "# One\n\n# Two\n")?;
+    let config = root.join(".ardent/config.yaml");
+    let original = fs::read_to_string(&config)?;
+    fs::write(&config, format!("{original}\ntheme: catppuccin\n"))?;
+    let user = home.path().join("ardent");
+    let themes = user.join("themes");
+    fs::create_dir_all(&themes)?;
+    let example = include_str!("../../../README.md")
+        .split_once("### Choose browser colors")
+        .expect("theme guide")
+        .1
+        .split_once("```yaml\n")
+        .expect("example theme")
+        .1
+        .split_once("```")
+        .expect("end of theme example")
+        .0;
+    fs::write(themes.join("catppuccin.yaml"), example)?;
+    let user_config = user.join("config.yaml");
+    fs::write(&user_config, "schema: 1\ntheme: daylight\n")?;
+    let daylight = themes.join("daylight.yaml");
+    let local = root.join(".ardent/themes");
+    fs::create_dir(&local)?;
+    fs::write(local.join("daylight.yaml"), example)?;
+
+    let (master, slave) = pty::open_terminal(24)?;
+    pty::resize_to(&slave, 24, 58)?;
+    let mut command = common::ardent_command(env!("CARGO_BIN_EXE_ardent"));
+    command.env("XDG_CONFIG_HOME", home.path());
+    let mut session = Session::open_command(command, root, &slave, master)?;
+    session.wait_for("notes.md")?;
+    session.keys(b"\r\x1b[C")?;
+    session.wait_source_color(">     One", 6, Rgb(0x80, 0xbb, 0xff))?;
+    session.keys(b"]")?;
+    session.wait_source_color(">     Two", 6, Rgb(0x80, 0xbb, 0xff))?;
+    session.wait_source_color("# Two", 0, Rgb(0xe6, 0xbb, 0x70))?;
+
+    let lock = File::options()
+        .write(true)
+        .open(root.join(".ardent/cache/lock"))?;
+    lock.lock()?;
+    for selector in ["theme:", "theme: [daylight]"] {
+        fs::write(&config, format!("{original}\n{selector}\n"))?;
+        session.keys(b"\t")?;
+        session.wait_for("config.yaml")?;
+        fs::write(themes.join("catppuccin.yaml"), "schema: 1\n")?;
+        thread::sleep(Duration::from_millis(1500));
+        session.keys(b"\t")?;
+        session.wait_source_color(">     Two", 6, Rgb(0x80, 0xbb, 0xff))?;
+        fs::write(themes.join("catppuccin.yaml"), example)?;
+        fs::write(&config, format!("{original}\ntheme: catppuccin\n"))?;
+        session.keys(b"\t")?;
+        session.wait_screen(&["notes.md"], &["config.yaml"])?;
+        session.keys(b"\t")?;
+        session.wait_source_color("# Two", 0, Rgb(0xe6, 0xbb, 0x70))?;
+    }
+
+    // Only the checkout has daylight. Keep showing the previous colors until it is installed globally.
+    fs::write(&config, original)?;
+    session.keys(b"\t")?;
+    session.wait_for("daylight.yaml")?;
+    session.keys(b"\t")?;
+    session.wait_source_color("# Two", 0, Rgb(0xe6, 0xbb, 0x70))?;
+    fs::write(&daylight, "schema: 1\nsource: {heading: '#123456'}")?;
+    session.wait_source_color("# Two", 0, Rgb(0x12, 0x34, 0x56))?;
+    session.wait_source_color(">     Two", 6, Idx(6))?;
+
+    fs::write(&user_config, "schema: 1\ntheme: catppuccin\n")?;
+    session.wait_source_color("# Two", 0, Rgb(0xe6, 0xbb, 0x70))?;
+    fs::write(&user_config, "schema: 1\ntheme: daylight\n")?;
+    session.wait_source_color("# Two", 0, Rgb(0x12, 0x34, 0x56))?;
+    fs::write(root.join("pending.md"), "# Pending\n")?;
+    fs::write(&daylight, "schema: 1\nsource: {comment: '#GG1020'}")?;
+    session.keys(b"\t")?;
+    session.wait_for("#GG1020")?;
+    session.keys(b"\t")?;
+    session.wait_source_color("# Two", 0, Rgb(0x12, 0x34, 0x56))?;
+    let replacement = themes.join("replacement");
+    fs::write(&replacement, "schema: 1\nsource: {heading: '#102030'}")?;
+    fs::rename(replacement, &daylight)?;
+    session.wait_source_color("# Two", 0, Rgb(0x10, 0x20, 0x30))?;
+    drop(lock);
+    fs::remove_file(&daylight)?;
+    session.keys(b"\t")?;
+    session.wait_screen(&["daylight.yaml"], &["#GG1020"])?;
+    fs::remove_file(user_config)?;
+    session.wait_screen(&["notes.md"], &["daylight.yaml"])?;
+    session.keys(b"\t")?;
+    session.wait_source_color("# Two", 0, Idx(3))?;
+    session.wait_source_color(">     Two", 6, Idx(6))?;
+    session.keys(b"q")?;
+    assert!(session.child.wait()?.success());
+    Ok(())
+}
+
+#[test]
+fn an_unsupported_config_schema_ends_a_live_browser() -> io::Result<()> {
+    let project = common::temp_dir()?;
+    let dir = project.path().join(".ardent");
+    fs::create_dir(&dir)?;
+    let config = dir.join("config.yaml");
+    fs::write(&config, "schema: 1\n")?;
+    let (master, slave) = pty::open_terminal(24)?;
+    pty::resize_to(&slave, 24, 58)?;
+    let mut session = Session::open(project.path(), &slave, master)?;
+    session.wait_for("Explorer")?;
+    fs::write(
+        &config,
+        "schema: 1\nformats: {html: {}}\ntheme: [daylight]\n",
+    )?;
+    session.wait_screen(&["config.yaml", "has no plugin"], &[])?;
+    fs::write(&config, "schema: 2\n")?;
+    session.wait_restored()?;
+    assert!(!session.child.wait()?.success());
+    Ok(())
+}
+
+#[test]
 fn refreshes_when_user_format_patterns_change_outside_the_project() -> io::Result<()> {
     let project = common::temp_dir()?;
     let home = common::temp_dir()?;

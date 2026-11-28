@@ -99,7 +99,11 @@ pub(crate) enum Run<'a> {
 pub(crate) fn run_at(root: &Path, mode: Run) -> Result<Report, SyncError> {
     let ardent_dir = root.join(ARDENT_DIR);
     let user_dir = crate::xdg::config_dir();
-    let config = settings::load(root, user_dir.as_deref())?;
+    let parse = match mode {
+        Run::Once => Config::from_yaml,
+        Run::Browse { .. } => Config::browse_settings,
+    };
+    let config = settings::load(root, user_dir.as_deref(), parse)?;
     let cache_dir = settings::compilation_dir(root, config.compilation_cache.unwrap_or_default());
     let (mut patterns, overrides) =
         project_patterns(root, &config).map_err(|source| SyncError::Pattern {
@@ -190,7 +194,7 @@ pub(crate) fn find_root(working_dir: &Path) -> Result<PathBuf, SyncError> {
 
 pub(super) fn validate_config(root: &Path) -> Result<(), SyncError> {
     let path = root.join(ARDENT_DIR).join(config::FILE_NAME);
-    let config = settings::read(&path)?;
+    let config = settings::read(&path, Config::from_yaml)?;
     project_patterns(root, &config).map_err(|source| SyncError::Pattern { path, source })?;
     Ok(())
 }

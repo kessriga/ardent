@@ -5,4 +5,5 @@ pub mod highlight;
 pub mod layout;
 pub mod outline;
 pub mod structure;
+pub mod theme;
 pub mod yaml;

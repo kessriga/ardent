@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use ardent_core::highlight::Highlight;
 use ardent_core::outline::Outline;
+use ardent_core::theme::Theme;
 use crossterm::event::KeyCode;
 
 mod explorer;
@@ -25,6 +26,19 @@ pub struct FileList {
     pub messages: Vec<String>,
     /// Available release plugin updates and the command to install them.
     pub update_notice: Option<String>,
+}
+
+/// Colors and any diagnostic from loading the selected palette.
+#[derive(Clone, Default)]
+pub struct BrowserTheme {
+    pub colors: Theme,
+    pub diagnostic: Option<String>,
+}
+
+/// Project sync and theme reloads can finish independently.
+pub enum BrowserUpdate {
+    Files(FileList),
+    Theme(BrowserTheme),
 }
 
 impl FileList {
@@ -151,6 +165,7 @@ enum Focus {
 }
 
 struct Browser {
+    theme: BrowserTheme,
     list: FileList,
     explorer: Explorer,
     /// The reader can move the explorer cursor while keeping another file open.
@@ -162,6 +177,7 @@ struct Browser {
 impl Browser {
     fn new(list: FileList) -> Self {
         Self {
+            theme: BrowserTheme::default(),
             explorer: Explorer::new(&list.files),
             list,
             opened: None,
@@ -181,6 +197,26 @@ impl Browser {
     fn close(&mut self) {
         self.opened = None;
         self.focus = Focus::Explorer;
+    }
+
+    fn messages(&self) -> impl Iterator<Item = &str> {
+        self.theme
+            .diagnostic
+            .iter()
+            .chain(&self.list.messages)
+            .map(String::as_str)
+    }
+
+    fn apply(&mut self, update: BrowserUpdate, load: &impl Fn(&str) -> io::Result<Document>) {
+        match update {
+            BrowserUpdate::Files(files) => self.refresh(files, load),
+            BrowserUpdate::Theme(theme) => {
+                if self.theme.diagnostic != theme.diagnostic {
+                    self.diagnostic_scroll = 0;
+                }
+                self.theme = theme;
+            }
+        }
     }
 
     fn refresh(&mut self, list: FileList, load: &impl Fn(&str) -> io::Result<Document>) {
@@ -298,17 +334,20 @@ impl Browser {
 ///
 /// The event loop passes the open source path to `refresh`, including while a scan error is
 /// displayed or the explorer has focus. A closed document passes `None`. Return `Ok(None)` promptly while idle and
-/// `Ok(Some(list))` with the complete replacement [`FileList`] after a sync.
+/// a [`BrowserUpdate`] when a sync finishes, settings fail to load, or the active palette changes.
 ///
 /// # Errors
 ///
 /// Returns an error if the terminal cannot be used or `refresh` fails.
 pub fn run(
     list: FileList,
+    theme: BrowserTheme,
     load: impl Fn(&str) -> io::Result<Document>,
-    refresh: impl FnMut(Option<&str>) -> io::Result<Option<FileList>>,
+    refresh: impl FnMut(Option<&str>) -> io::Result<Option<BrowserUpdate>>,
 ) -> io::Result<()> {
-    terminal::run(Browser::new(list), load, refresh)
+    let mut browser = Browser::new(list);
+    browser.theme = theme;
+    terminal::run(browser, load, refresh)
 }
 
 #[cfg(test)]
@@ -347,6 +386,33 @@ mod tests {
         browser.key(KeyCode::Right, 5, false, &document);
         browser.key(KeyCode::PageDown, 5, true, &document);
         browser
+    }
+
+    #[test]
+    fn theme_and_config_updates_keep_the_scrolled_page_without_reloading() {
+        let mut browser = reading_passage();
+        let load = |_: &str| Err(io::Error::other("unexpected document reload"));
+        browser.apply(
+            BrowserUpdate::Theme(BrowserTheme {
+                diagnostic: Some("invalid selector".into()),
+                ..BrowserTheme::default()
+            }),
+            &load,
+        );
+        assert!(
+            matches!(browser.screen(), Some(Screen::Outline(page)) if page.tree.selected == 1 && page.scroll == 5)
+        );
+        let mut list = files(None);
+        list.messages
+            .push("Watcher reported an unreadable directory".into());
+        browser.apply(BrowserUpdate::Files(list), &document);
+        assert_eq!(
+            browser.messages().collect::<Vec<_>>(),
+            [
+                "invalid selector",
+                "Watcher reported an unreadable directory"
+            ]
+        );
     }
 
     #[test]

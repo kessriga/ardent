@@ -173,13 +173,24 @@ fn watch(
     let mut changes = Changes::new(root)?;
     let mut denied: Vec<String> = Vec::new();
     let mut preview: Option<Preview> = None;
-    let mut batch = Some(Batch {
-        warnings: Vec::new(),
-        check_plugins: true,
-    });
+    let mut initial = true;
     let mut available = Ok(update::Report::default());
     let mut checked = Instant::now();
     loop {
+        let batch = if initial {
+            initial = false;
+            Some(Batch {
+                warnings: Vec::new(),
+                check_plugins: true,
+            })
+        } else {
+            match opened.recv_timeout(Duration::from_millis(75)) {
+                Ok(latest) => preview = opened.try_iter().last().unwrap_or(latest),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            }
+            changes.ready()?
+        };
         let check_access = checked.elapsed() >= Duration::from_secs(1);
         if check_access {
             checked = Instant::now();
@@ -192,67 +203,62 @@ fn watch(
             && denied
                 .iter()
                 .any(|path| source::open_regular(&root.join(path)).is_ok());
-        if batch.is_some() || verify.is_some() || repaired {
-            let report = sync::run_at(root, Run::Browse { verify })
-                .map_err(|err| io::Error::other(err.to_string()))?;
-            if let Some(open) = &preview
-                && report
-                    .files
-                    .binary_search_by(|(path, _)| path.cmp(&open.path))
-                    .is_err()
-            {
-                preview = None;
-            }
-            denied = report.read_denied;
-            changes.update(report.discovery)?;
-            let failed =
-                !report.errors.is_empty() || report.files.iter().any(|(_, error)| error.is_some());
-            let mut messages = report.errors;
-            messages.extend(report.warnings);
-            if let Some(batch) = batch.take() {
-                messages.extend(batch.warnings);
-                if batch.check_plugins {
-                    available = update::available(root);
-                }
-            }
-            let update_notice = match &available {
-                Ok(report) => {
-                    messages.extend(
-                        report
-                            .errors
-                            .iter()
-                            .map(|e| format!("Cannot check plugin updates: {e}")),
-                    );
-                    report
-                        .names()
-                        .map(|names| format!("Plugin updates: {names}. Run ardent update"))
-                }
-                Err(error) => {
-                    messages.push(format!("Cannot check plugin updates: {error}"));
-                    None
-                }
-            };
-            let list = FileList {
-                files: report.files,
-                messages,
-                update_notice,
-            };
-            if updates
-                .send(Ok(Update {
-                    files: list,
-                    failed,
-                    formats: report.browse_formats,
-                }))
+        if batch.is_none() && verify.is_none() && !repaired {
+            continue;
+        }
+        let report = sync::run_at(root, Run::Browse { verify })
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        if let Some(open) = &preview
+            && report
+                .files
+                .binary_search_by(|(path, _)| path.cmp(&open.path))
                 .is_err()
-            {
-                return Ok(());
+        {
+            preview = None;
+        }
+        denied = report.read_denied;
+        changes.update(report.discovery)?;
+        let failed =
+            !report.errors.is_empty() || report.files.iter().any(|(_, error)| error.is_some());
+        let mut messages = report.errors;
+        messages.extend(report.warnings);
+        if batch.as_ref().is_some_and(|b| b.check_plugins) {
+            available = update::available(root);
+        }
+        if let Some(batch) = batch {
+            messages.extend(batch.warnings);
+        }
+        let update_notice = match &available {
+            Ok(report) => {
+                messages.extend(
+                    report
+                        .errors
+                        .iter()
+                        .map(|e| format!("Cannot check plugin updates: {e}")),
+                );
+                report
+                    .names()
+                    .map(|names| format!("Plugin updates: {names}. Run ardent update"))
             }
+            Err(error) => {
+                messages.push(format!("Cannot check plugin updates: {error}"));
+                None
+            }
+        };
+        let list = FileList {
+            files: report.files,
+            messages,
+            update_notice,
+        };
+        if updates
+            .send(Ok(Update {
+                files: list,
+                failed,
+                formats: report.browse_formats,
+            }))
+            .is_err()
+        {
+            return Ok(());
         }
-        match opened.recv_timeout(Duration::from_millis(75)) {
-            Ok(latest) => preview = opened.try_iter().last().unwrap_or(latest),
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return Ok(()),
-        }
-        batch = changes.ready()?;
     }
 }
