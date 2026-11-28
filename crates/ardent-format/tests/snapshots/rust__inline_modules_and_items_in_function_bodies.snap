@@ -32,11 +32,31 @@ expression: "outline_yaml(\"modules.rs\")?"
   kind: fn
   range: 286..457
   fingerprint: 4f42649ee5473773
+- path: modules.rs#fn run/paths
+  label: paths
+  kind: parameter
+  range: 324..338
+  fingerprint: 230c10446bc91b1e
+- path: modules.rs#fn run/return.1
+  label: return
+  kind: return
+  range: 340..348
+  fingerprint: c97e6f25010f9074
 - path: modules.rs#fn run/fn count
   label: fn count
   kind: fn
   range: 355..416
   fingerprint: 2c4e15268f9b7ccb
+- path: modules.rs#fn run/fn count/paths
+  label: paths
+  kind: parameter
+  range: 364..378
+  fingerprint: 230c10446bc91b1e
+- path: modules.rs#fn run/fn count/return.1
+  label: return
+  kind: return
+  range: 380..388
+  fingerprint: c97e6f25010f9074
 - path: modules.rs#mod walk
   label: mod walk
   kind: mod
@@ -52,6 +72,11 @@ expression: "outline_yaml(\"modules.rs\")?"
   kind: fn
   range: 532..585
   fingerprint: d036df5a5422e636
+- path: modules.rs#mod walk/fn walk/root
+  label: root
+  kind: parameter
+  range: 544..554
+  fingerprint: fed88a4b687de05b
 - path: modules.rs#mod walk/mod tests
   label: mod tests
   kind: mod

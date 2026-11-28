@@ -6,6 +6,7 @@ use ardent_format_guest::{self as guest, PluginError, QueryEngine};
 use guest::scanner::{Guest, Metadata, Node, ScanError};
 
 mod highlight;
+mod properties;
 
 struct Component;
 
@@ -29,6 +30,18 @@ impl guest::highlighting::Guest for Component {
     }
 }
 
+impl guest::properties::Guest for Component {
+    fn properties(source: Vec<u8>) -> Vec<guest::properties::Group> {
+        ENGINE.with(|engine| {
+            engine
+                .as_ref()
+                .ok()
+                .and_then(|engine| engine.properties(&source, properties::read).ok())
+                .unwrap_or_default()
+        })
+    }
+}
+
 impl Guest for Component {
     fn describe() -> Metadata {
         guest::metadata(
@@ -49,6 +62,8 @@ guest::export!(Component with_types_in guest);
 guest::query::export!(Component with_types_in guest::query);
 #[cfg(target_arch = "wasm32")]
 guest::highlighting::export!(Component with_types_in guest::highlighting);
+#[cfg(target_arch = "wasm32")]
+guest::properties::export!(Component with_types_in guest::properties);
 
 #[cfg(test)]
 mod tests {
@@ -75,6 +90,38 @@ mod tests {
 
     fn node<'a>(outline: &'a Outline, path: &str) -> Option<&'a Node> {
         outline.nodes.iter().find(|node| node.path == path)
+    }
+
+    #[test]
+    fn checkbox_belongs_to_the_item_with_the_marker() -> TestResult {
+        use guest::properties::Guest as _;
+
+        let text = "- [x] done\n- [ ] pending\n- plain\n  - [X] nested\n";
+        let outline = outline("a.md", text)?;
+        let groups = Component::properties(text.as_bytes().to_vec());
+        let rows: Vec<_> = groups
+            .iter()
+            .flat_map(|g| {
+                let item = &outline.nodes[g.node as usize + 1];
+                g.properties.iter().map(move |p| {
+                    (
+                        item.path.as_str(),
+                        p.name.as_str(),
+                        p.value.as_str(),
+                        p.inline,
+                    )
+                })
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("a.md#list.1/item.1", "checked", "true", true),
+                ("a.md#list.1/item.2", "checked", "false", true),
+                ("a.md#list.1/item.3/list.1/item.1", "checked", "true", true),
+            ]
+        );
+        Ok(())
     }
 
     #[test]

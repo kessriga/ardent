@@ -25,14 +25,14 @@ expand a directory or select its first child. Left SHALL collapse an expanded di
 
 - **WHEN** a reader opens a file in a terminal at least 60 columns wide
 - **THEN** the explorer stays on the left and the document pane displays the outline and the selected node's source
-- **AND** Tab switches focus without closing the file or losing the reader's place
+- **AND** Shift+Tab switches focus without closing the file or losing the reader's place
 - **AND** moving the explorer selection or collapsing a directory leaves the open document visible
 - **AND** Escape closes the open document and focuses the explorer
 
 #### Scenario: Use a narrow terminal
 
 - **WHEN** the terminal has fewer than 60 columns
-- **THEN** the focused pane uses the available width and Tab switches between the explorer and the open document
+- **THEN** the focused pane uses the available width and Shift+Tab switches between the explorer and the open document
 - **AND** widening the terminal restores both panes with their selections intact
 
 #### Scenario: Refresh independent selections
@@ -288,3 +288,38 @@ show the diagnostic and keep the last usable palette, using built-in colors if n
 - **WHEN** the selected palette becomes invalid and the reader then saves a valid palette at the same path
 - **THEN** the browser keeps its previous colors while showing the error, then applies the corrected colors and clears
   the error
+
+### Requirement: Toggle inline properties independently
+
+With the outline focused, Tab SHALL toggle only the selected node’s inline properties. Each open node SHALL show one
+indented `⚬ name: value` row per opted-in property directly below its label, before its children, even when its branch
+is collapsed. Property rows SHALL be read-only and skipped by node navigation. The toggle SHALL preserve selection,
+source preview scroll and child expansion.
+
+#### Scenario: Compare two nodes
+
+- **WHEN** the reader opens properties on one node, moves Down to the next visible node, and presses Tab again
+- **THEN** both nodes show their own properties and the preview shows the second node
+- **AND** pressing Tab again hides only the second node’s rows
+
+#### Scenario: Inspect an expanded branch
+
+- **WHEN** the reader pages through the selected branch’s source and presses Tab
+- **THEN** its properties appear before its first child, the child stays visible and the preview stays at the same
+  passage
+- **AND** Down selects the first child
+
+#### Scenario: A node has only a range
+
+- **WHEN** the reader presses Tab on a node with a byte range and no opted-in properties
+- **THEN** the outline gains no rows and its selection stays in place
+
+#### Scenario: Return from the explorer
+
+- **WHEN** the reader presses Shift+Tab twice with properties open, in either terminal layout
+- **THEN** the reader returns to the same node, open rows, branch expansion and preview position
+
+#### Scenario: Discover the bindings
+
+- **WHEN** the reader opens the outline or consults the reader guide
+- **THEN** the key hints and guide identify Tab for properties and Shift+Tab for switching panes

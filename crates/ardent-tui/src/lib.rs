@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use ardent_core::highlight::Highlight;
 use ardent_core::outline::Outline;
+use ardent_core::properties::{NodeProperties, Property};
 use ardent_core::theme::Theme;
 use crossterm::event::KeyCode;
 
@@ -55,6 +56,8 @@ impl FileList {
 pub struct Document {
     /// Sorted, disjoint syntax spans in these source bytes. An empty list displays plain text.
     pub highlights: Arc<[Highlight]>,
+    /// Plugin properties keyed by node index in this outline.
+    pub properties: Arc<NodeProperties>,
     /// Nodes in document order, starting with the file node. Their byte ranges index [`Self::bytes`].
     pub outline: Outline,
     /// Source bytes whose content hash matches the structure stamp used to load the outline.
@@ -76,6 +79,15 @@ impl Page {
             tree,
             scroll: 0,
         })
+    }
+
+    fn visible_properties(&self, index: usize) -> impl Iterator<Item = &Property> {
+        let properties = if self.tree.properties_open(index) {
+            self.document.properties.get(&index)
+        } else {
+            None
+        };
+        properties.into_iter().flatten().filter(|p| p.inline)
     }
 
     fn restore(&mut self, previous: &Self) {
@@ -287,7 +299,7 @@ impl Browser {
     ) {
         match key {
             KeyCode::Esc => self.close(),
-            KeyCode::Tab | KeyCode::BackTab if self.opened.is_some() => {
+            KeyCode::BackTab if self.opened.is_some() => {
                 self.focus = match self.focus {
                     Focus::Explorer => Focus::Document,
                     Focus::Document => Focus::Explorer,
@@ -374,6 +386,7 @@ mod tests {
             children: vec![],
         };
         Ok(Document {
+            properties: Default::default(),
             highlights: Default::default(),
             outline: Outline::build("notes.md", text.as_bytes(), &[entry]),
             bytes: text.into_bytes(),
@@ -416,9 +429,9 @@ mod tests {
     }
 
     #[test]
-    fn tab_preserves_the_node_and_enter_opens_the_file_root() {
+    fn backtab_preserves_the_node_and_enter_opens_the_file_root() {
         let mut browser = reading_passage();
-        browser.key(KeyCode::Tab, 5, false, &document);
+        browser.key(KeyCode::BackTab, 5, false, &document);
         assert!(
             matches!(browser.screen(), Some(Screen::Outline(page)) if page.tree.selected == 1 && page.scroll == 5)
         );
@@ -426,6 +439,100 @@ mod tests {
         assert!(
             matches!(browser.screen(), Some(Screen::Outline(page)) if page.tree.selected == 0 && page.scroll == 0)
         );
+    }
+
+    #[test]
+    fn inline_rows_stay_with_their_node_through_navigation_and_refresh() {
+        use KeyCode::{BackTab, Down, Enter, PageDown, Right, Tab};
+
+        let load = |path: &str| {
+            let mut doc = document(path)?;
+            let mut child = doc.outline.nodes[1].clone();
+            child.path.push_str("/inner");
+            child.label = "inner".into();
+            doc.outline.nodes.push(child);
+            let prop = |name: &str, value: &str, inline| Property {
+                name: name.into(),
+                value: value.into(),
+                inline,
+            };
+            doc.properties = Arc::new(NodeProperties::from([
+                (
+                    1,
+                    vec![prop("flag", "outer", true), prop("range", "hidden", false)],
+                ),
+                (2, vec![prop("n\x1b", "a\nb", true)]),
+            ]));
+            Ok(doc)
+        };
+        for width in [45, 90] {
+            let mut browser = Browser::new(files(None));
+            browser.key(Enter, 3, false, &load);
+            let root = snapshot(&browser, width, 25).0;
+            browser.key(Tab, 3, false, &load);
+            assert_eq!(snapshot(&browser, width, 25).0, root);
+            browser.key(Down, 3, false, &load);
+            browser.key(PageDown, 3, true, &load);
+            browser.key(Tab, 3, false, &load);
+            let collapsed = snapshot(&browser, width, 25).0;
+            assert!(collapsed.iter().any(|r| r.contains("⚬ flag: outer")));
+            assert!(collapsed.iter().any(|r| r.ends_with("line 3")));
+            assert!(
+                !collapsed
+                    .iter()
+                    .any(|r| r.contains("inner") || r.contains("hidden"))
+            );
+            browser.key(Right, 3, false, &load);
+            browser.key(Down, 3, false, &load);
+            let short = snapshot(&browser, width, 10).0;
+            assert!(
+                short
+                    .iter()
+                    .any(|r| r.contains('>') && r.ends_with("inner")),
+                "{short:?}"
+            );
+            browser.key(Tab, 3, false, &load);
+            let rows = snapshot(&browser, width, 25).0;
+            assert!(
+                rows.windows(4).any(|r| r[0].ends_with("passage")
+                    && r[1].ends_with("⚬ flag: outer")
+                    && r[2].contains('>')
+                    && r[2].ends_with("inner")
+                    && r[3].ends_with("⚬ n�: a�b")),
+                "{rows:?}"
+            );
+            browser.key(PageDown, 3, true, &load);
+            let scrolled = snapshot(&browser, width, 25).0;
+            browser.key(BackTab, 3, false, &load);
+            assert!(browser.focus == Focus::Explorer);
+            browser.key(BackTab, 3, false, &load);
+            assert_eq!(snapshot(&browser, width, 25).0, scrolled);
+
+            browser.refresh(files(None), &|path| {
+                let mut refreshed = load(path)?;
+                let mut added = refreshed.outline.nodes[1].clone();
+                added.path = "notes.md#new".into();
+                added.label = "new".into();
+                refreshed.outline.nodes.insert(1, added);
+                refreshed.properties = Arc::new(
+                    refreshed
+                        .properties
+                        .iter()
+                        .map(|(index, props)| (index + 1, props.clone()))
+                        .collect(),
+                );
+                Ok(refreshed)
+            });
+            let rows = snapshot(&browser, width, 25).0;
+            assert!(rows.iter().any(|r| r.contains('>') && r.ends_with("inner")));
+            assert!(rows.iter().any(|r| r.ends_with("⚬ flag: outer")));
+            assert!(rows.iter().any(|r| r.ends_with("⚬ n�: a�b")));
+            assert!(rows.iter().any(|r| r.ends_with("line 3")));
+            browser.key(Tab, 3, false, &load);
+            let rows = snapshot(&browser, width, 25).0;
+            assert!(rows.iter().any(|r| r.ends_with("⚬ flag: outer")));
+            assert!(!rows.iter().any(|r| r.contains("⚬ n�")));
+        }
     }
 
     #[test]
@@ -518,6 +625,8 @@ mod tests {
             "Arrows navigate",
             "[ ] siblings",
             "PgUp/PgDn source",
+            "Tab properties",
+            "Shift+Tab panes",
             "Esc close",
             "q quit",
         ] {

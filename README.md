@@ -139,8 +139,15 @@ Run `ardent` in an interactive terminal anywhere inside the project to open the 
 `ardent browse`. Run `ardent --help` to list the commands. The browser checks its input and output before syncing. The
 explorer on the left groups tracked files by directory. Select a file and press Enter to open its outline on the right.
 A horizontal divider marks the source pane below the outline. It shows the selected node's text. Repeated sibling labels
-display as `item.1`, `item.2` or `Install.1`, `Install.2`. A lone node shows its original label. Press Tab to browse the
-explorer while keeping the file open. In terminals narrower than 60 columns, Tab switches which pane fills the screen.
+display as `item.1`, `item.2` or `Install.1`, `Install.2`. A lone node shows its original label. Press Shift+Tab to
+switch between the explorer and the open document. In terminals narrower than 60 columns, the focused pane fills the
+screen.
+
+In the outline, press Tab to show the selected node’s inline properties before its children. Press Tab again to hide
+them. You can keep several nodes’ properties open while you read. For example, a Markdown checkbox item shows
+`⚬ checked: true` or `⚬ checked: false`. Each plugin chooses which properties to show. The Rust plugin shows written
+visibility and types where they apply. Expand a function to select a generic parameter, input, or explicit return clause
+and preview that part of its signature.
 
 The outline colors labels by node kind and marks the selected row with `>`. The packaged Rust plugin highlights
 keywords, strings and comments. The Markdown plugin highlights headings, inline code and code blocks. Files opened with
@@ -148,11 +155,12 @@ a scanner-only plugin have a plain source preview and the same navigation keys.
 
 | Key | Action |
 | --- | --- |
-| Up / Down | Select the previous or next visible row. |
+| Up / Down | Select the previous or next visible entry or node. |
 | Right | Expand a directory or outline node, or select its first child if expanded. |
 | Left | Collapse a directory or outline node, or move to its parent. |
 | Enter | In the explorer, toggle a directory or open a file. |
-| Tab / Shift+Tab | Switch focus between the explorer and the open document. |
+| Tab | Show or hide the selected node’s inline properties. |
+| Shift+Tab | Switch focus between the explorer and the open document. |
 | [ / ] | Move to the previous or next sibling in the outline. |
 | Page Up / Page Down | Scroll source text, project diagnostics, or the error for an open file. |
 | Escape | Close the open document and return to the explorer. |

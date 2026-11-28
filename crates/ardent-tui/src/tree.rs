@@ -1,6 +1,6 @@
 //! Keyboard navigation over the nodes of one outline in document order.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::io;
 
 use ardent_core::outline::Outline;
@@ -12,6 +12,7 @@ struct Row {
     /// Exclusive end of the subtree in document order. A closed branch skips straight to this index.
     end: usize,
     expanded: bool,
+    properties_open: bool,
 }
 
 pub(crate) struct Tree {
@@ -48,6 +49,7 @@ impl Tree {
                 depth: ancestors.len(),
                 end: nodes.len(),
                 expanded: index == 0,
+                properties_open: false,
             });
             ancestors.push(index);
         }
@@ -60,6 +62,10 @@ impl Tree {
             let next = if row.expanded { i + 1 } else { row.end };
             (next < self.rows.len()).then_some(next)
         })
+    }
+
+    pub(crate) fn properties_open(&self, index: usize) -> bool {
+        self.rows[index].properties_open
     }
 
     pub(crate) fn row_prefix(&self, index: usize) -> (usize, char) {
@@ -79,6 +85,10 @@ impl Tree {
         let row = &self.rows[i];
         let branch = row.end > i + 1;
         let next = match key {
+            KeyCode::Tab => {
+                self.rows[i].properties_open = !row.properties_open;
+                None
+            }
             KeyCode::Right if branch && !row.expanded => {
                 self.rows[i].expanded = true;
                 None
@@ -106,16 +116,18 @@ impl Tree {
 
     /// Carry expansion and selection across a sync by node path. Row indices belong to one outline.
     pub(crate) fn restore(&mut self, outline: &Outline, old: &Tree, previous: &Outline) {
-        let expanded: HashSet<_> = old
+        let open: HashMap<_, _> = old
             .rows
             .iter()
             .zip(&previous.nodes)
-            .filter(|(row, _)| row.expanded)
-            .map(|(_, node)| &node.path)
+            .filter(|(row, _)| row.expanded || row.properties_open)
+            .map(|(row, node)| (&node.path, row))
             .collect();
         let selected = &previous.nodes[old.selected].path;
         for (index, (row, node)) in self.rows.iter_mut().zip(&outline.nodes).enumerate() {
-            row.expanded = expanded.contains(&node.path);
+            let previous = open.get(&node.path);
+            row.expanded = previous.is_some_and(|row| row.expanded);
+            row.properties_open = previous.is_some_and(|row| row.properties_open);
             if &node.path == selected {
                 self.selected = index;
             }

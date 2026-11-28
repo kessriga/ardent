@@ -10,6 +10,7 @@ use wasmtime::{Cache, CacheConfig, Config, Engine, Store, StoreLimits, StoreLimi
 mod diagnostic;
 mod highlight;
 mod nodes;
+mod properties;
 mod wasi;
 
 wasmtime::component::bindgen!({ path: "../../wit", world: "format-plugin" });
@@ -138,10 +139,7 @@ impl Runtime {
         fuel: u64,
     ) -> Result<Vec<ScannedNode>, RuntimeError> {
         let result = self.call(|i| {
-            if let Some(prepare) = i.prepare_query.take() {
-                i.store.set_fuel(CALL_FUEL)?;
-                prepare.call(&mut i.store, ())?;
-            }
+            i.prepare()?;
             i.store.set_fuel(fuel)?;
             i.bindings
                 .ardent_format_scanner()
@@ -163,6 +161,14 @@ impl Runtime {
 }
 
 impl Instance {
+    fn prepare(&mut self) -> wasmtime::Result<()> {
+        if let Some(prepare) = self.prepare_query.take() {
+            self.store.set_fuel(CALL_FUEL)?;
+            prepare.call(&mut self.store, ())?;
+        }
+        Ok(())
+    }
+
     fn new(compiled: &FormatPluginPre<StoreLimits>) -> wasmtime::Result<Self> {
         let limits = StoreLimitsBuilder::new()
             .memory_size(MEMORY_BYTES)
@@ -215,6 +221,7 @@ mod tests {
         let mut runtime = Runtime::compile(&probe_bytes()?)?;
         runtime.describe()?;
         assert!(runtime.highlight(b"file")?.is_empty());
+        assert!(runtime.properties(b"file", 2)?.is_empty());
         assert!(runtime.scan_with_fuel("file", b"file", 0).is_err());
         assert!(runtime.active.is_none());
         assert_eq!(runtime.scan("file", b"next")?.len(), 1);
